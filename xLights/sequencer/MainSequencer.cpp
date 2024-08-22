@@ -32,14 +32,14 @@
 #include <log4cpp/Category.hh>
 
 //(*IdInit(MainSequencer)
-const long MainSequencer::ID_CHOICE_VIEW_CHOICE = wxNewId();
-const long MainSequencer::ID_PANEL1 = wxNewId();
-const long MainSequencer::ID_PANEL3 = wxNewId();
-const long MainSequencer::ID_PANEL6 = wxNewId();
-const long MainSequencer::ID_PANEL2 = wxNewId();
-const long MainSequencer::ID_SCROLLBAR_EFFECTS_VERTICAL = wxNewId();
-const long MainSequencer::ID_CHECKBOX1 = wxNewId();
-const long MainSequencer::ID_SCROLLBAR_EFFECT_GRID_HORZ = wxNewId();
+const wxWindowID MainSequencer::ID_CHOICE_VIEW_CHOICE = wxNewId();
+const wxWindowID MainSequencer::ID_PANEL1 = wxNewId();
+const wxWindowID MainSequencer::ID_PANEL3 = wxNewId();
+const wxWindowID MainSequencer::ID_PANEL6 = wxNewId();
+const wxWindowID MainSequencer::ID_PANEL2 = wxNewId();
+const wxWindowID MainSequencer::ID_SCROLLBAR_EFFECTS_VERTICAL = wxNewId();
+const wxWindowID MainSequencer::ID_CHECKBOX1 = wxNewId();
+const wxWindowID MainSequencer::ID_SCROLLBAR_EFFECT_GRID_HORZ = wxNewId();
 //*)
 
 wxDEFINE_EVENT(EVT_HORIZ_SCROLL, wxCommandEvent);
@@ -231,6 +231,7 @@ MainSequencer::MainSequencer(wxWindow* parent, bool smallWaveform, wxWindowID id
     //(*Initialize(MainSequencer)
     wxFlexGridSizer* FlexGridSizer1;
     wxFlexGridSizer* FlexGridSizer2;
+    wxFlexGridSizer* FlexGridSizer3;
     wxFlexGridSizer* FlexGridSizer4;
     wxStaticText* StaticText1;
 
@@ -271,30 +272,35 @@ MainSequencer::MainSequencer(wxWindow* parent, bool smallWaveform, wxWindowID id
     CheckBox_SuspendRender = new wxCheckBox(this, ID_CHECKBOX1, _("Suspend Render"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_CHECKBOX1"));
     CheckBox_SuspendRender->SetValue(false);
     FlexGridSizer1->Add(CheckBox_SuspendRender, 1, wxALL|wxEXPAND, 0);
+    FlexGridSizer3 = new wxFlexGridSizer(0, 1, 0, 0);
+    FlexGridSizer3->AddGrowableCol(1);
+    FlexGridSizer3->AddGrowableRow(0);
     ScrollBarEffectsHorizontal = new wxScrollBar(this, ID_SCROLLBAR_EFFECT_GRID_HORZ, wxDefaultPosition, wxDefaultSize, wxSB_HORIZONTAL|wxALWAYS_SHOW_SB, wxDefaultValidator, _T("ID_SCROLLBAR_EFFECT_GRID_HORZ"));
     ScrollBarEffectsHorizontal->SetScrollbar(0, 1, 100, 1);
-    FlexGridSizer1->Add(ScrollBarEffectsHorizontal, 1, wxALL|wxEXPAND, 0);
+    FlexGridSizer3->Add(ScrollBarEffectsHorizontal, 1, wxALL|wxEXPAND, 0);
+    FlexGridSizer1->Add(FlexGridSizer3, 1, wxALL|wxEXPAND, 2);
+    FlexGridSizer1->Add(0,0,1, wxALL|wxEXPAND, 5);
     SetSizer(FlexGridSizer1);
 
-    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL,wxEVT_SCROLL_TOP|wxEVT_SCROLL_BOTTOM|wxEVT_SCROLL_LINEUP|wxEVT_SCROLL_LINEDOWN|wxEVT_SCROLL_PAGEUP|wxEVT_SCROLL_PAGEDOWN|wxEVT_SCROLL_THUMBTRACK|wxEVT_SCROLL_THUMBRELEASE|wxEVT_SCROLL_CHANGED,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
-    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL,wxEVT_SCROLL_TOP,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
-    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL,wxEVT_SCROLL_BOTTOM,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
-    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL,wxEVT_SCROLL_LINEUP,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
-    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL,wxEVT_SCROLL_LINEDOWN,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
-    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL,wxEVT_SCROLL_PAGEUP,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
-    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL,wxEVT_SCROLL_PAGEDOWN,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
-    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL,wxEVT_SCROLL_THUMBTRACK,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
-    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL,wxEVT_SCROLL_CHANGED,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
-    Connect(ID_CHECKBOX1,wxEVT_COMMAND_CHECKBOX_CLICKED,(wxObjectEventFunction)&MainSequencer::OnCheckBox_SuspendRenderClick);
-    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ,wxEVT_SCROLL_TOP|wxEVT_SCROLL_BOTTOM|wxEVT_SCROLL_LINEUP|wxEVT_SCROLL_LINEDOWN|wxEVT_SCROLL_PAGEUP|wxEVT_SCROLL_PAGEDOWN|wxEVT_SCROLL_THUMBTRACK|wxEVT_SCROLL_THUMBRELEASE|wxEVT_SCROLL_CHANGED,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectGridHorzScroll);
-    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ,wxEVT_SCROLL_TOP,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectGridHorzScroll);
-    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ,wxEVT_SCROLL_BOTTOM,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectGridHorzScroll);
-    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ,wxEVT_SCROLL_LINEUP,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsHorizontalScrollLineUp);
-    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ,wxEVT_SCROLL_LINEDOWN,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsHorizontalScrollLineDown);
-    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ,wxEVT_SCROLL_PAGEUP,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectGridHorzScroll);
-    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ,wxEVT_SCROLL_PAGEDOWN,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectGridHorzScroll);
-    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ,wxEVT_SCROLL_THUMBTRACK,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectGridHorzScroll);
-    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ,wxEVT_SCROLL_CHANGED,(wxObjectEventFunction)&MainSequencer::OnScrollBarEffectGridHorzScroll);
+    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL, wxEVT_SCROLL_TOP|wxEVT_SCROLL_BOTTOM|wxEVT_SCROLL_LINEUP|wxEVT_SCROLL_LINEDOWN|wxEVT_SCROLL_PAGEUP|wxEVT_SCROLL_PAGEDOWN|wxEVT_SCROLL_THUMBTRACK|wxEVT_SCROLL_THUMBRELEASE|wxEVT_SCROLL_CHANGED, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
+    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL, wxEVT_SCROLL_TOP, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
+    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL, wxEVT_SCROLL_BOTTOM, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
+    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL, wxEVT_SCROLL_LINEUP, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
+    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL, wxEVT_SCROLL_LINEDOWN, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
+    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL, wxEVT_SCROLL_PAGEUP, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
+    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL, wxEVT_SCROLL_PAGEDOWN, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
+    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL, wxEVT_SCROLL_THUMBTRACK, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
+    Connect(ID_SCROLLBAR_EFFECTS_VERTICAL, wxEVT_SCROLL_CHANGED, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
+    Connect(ID_CHECKBOX1, wxEVT_COMMAND_CHECKBOX_CLICKED, (wxObjectEventFunction)&MainSequencer::OnCheckBox_SuspendRenderClick);
+    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ, wxEVT_SCROLL_TOP|wxEVT_SCROLL_BOTTOM|wxEVT_SCROLL_LINEUP|wxEVT_SCROLL_LINEDOWN|wxEVT_SCROLL_PAGEUP|wxEVT_SCROLL_PAGEDOWN|wxEVT_SCROLL_THUMBTRACK|wxEVT_SCROLL_THUMBRELEASE|wxEVT_SCROLL_CHANGED, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectGridHorzScroll);
+    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ, wxEVT_SCROLL_TOP, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectGridHorzScroll);
+    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ, wxEVT_SCROLL_BOTTOM, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectGridHorzScroll);
+    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ, wxEVT_SCROLL_LINEUP, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsHorizontalScrollLineUp);
+    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ, wxEVT_SCROLL_LINEDOWN, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsHorizontalScrollLineDown);
+    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ, wxEVT_SCROLL_PAGEUP, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectGridHorzScroll);
+    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ, wxEVT_SCROLL_PAGEDOWN, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectGridHorzScroll);
+    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ, wxEVT_SCROLL_THUMBTRACK, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectGridHorzScroll);
+    Connect(ID_SCROLLBAR_EFFECT_GRID_HORZ, wxEVT_SCROLL_CHANGED, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectGridHorzScroll);
     //*)
 
 #ifdef __WXOSX__
