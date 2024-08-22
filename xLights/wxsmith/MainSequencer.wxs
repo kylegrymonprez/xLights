@@ -6,8 +6,8 @@
 		<object class="wxFlexGridSizer" variable="FlexGridSizer1" member="no">
 			<cols>3</cols>
 			<rows>3</rows>
-			<growablecols>0</growablecols>
-			<growablerows>1,2</growablerows>
+			<growablecols>0,1</growablecols>
+			<growablerows>1</growablerows>
 			<object class="sizeritem">
 				<object class="wxFlexGridSizer" variable="FlexGridSizer2" member="no">
 					<cols>1</cols>
@@ -113,7 +113,7 @@
 				<object class="wxFlexGridSizer" variable="FlexGridSizer3" member="no">
 					<cols>1</cols>
 					<rows>1</rows>
-					<growablecols>1</growablecols>
+					<growablecols>0</growablecols>
 					<growablerows>0</growablerows>
 					<object class="sizeritem">
 						<object class="wxScrollBar" name="ID_SCROLLBAR_EFFECT_GRID_HORZ" variable="ScrollBarEffectsHorizontal" member="yes">
