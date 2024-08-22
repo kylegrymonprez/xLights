@@ -237,8 +237,9 @@ MainSequencer::MainSequencer(wxWindow* parent, bool smallWaveform, wxWindowID id
 
     Create(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL|wxWANTS_CHARS, _T("wxID_ANY"));
     FlexGridSizer1 = new wxFlexGridSizer(3, 3, 0, 0);
-    FlexGridSizer1->AddGrowableCol(1);
+    FlexGridSizer1->AddGrowableCol(0);
     FlexGridSizer1->AddGrowableRow(1);
+    FlexGridSizer1->AddGrowableRow(3);
     FlexGridSizer2 = new wxFlexGridSizer(0, 1, 0, 0);
     FlexGridSizer2->AddGrowableCol(0);
     StaticText1 = new wxStaticText(this, wxID_ANY, _("View:"), wxDefaultPosition, wxDefaultSize, 0, _T("wxID_ANY"));
@@ -272,14 +273,13 @@ MainSequencer::MainSequencer(wxWindow* parent, bool smallWaveform, wxWindowID id
     CheckBox_SuspendRender = new wxCheckBox(this, ID_CHECKBOX1, _("Suspend Render"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_CHECKBOX1"));
     CheckBox_SuspendRender->SetValue(false);
     FlexGridSizer1->Add(CheckBox_SuspendRender, 1, wxALL|wxEXPAND, 0);
-    FlexGridSizer3 = new wxFlexGridSizer(0, 1, 0, 0);
+    FlexGridSizer3 = new wxFlexGridSizer(1, 1, 0, 0);
     FlexGridSizer3->AddGrowableCol(1);
     FlexGridSizer3->AddGrowableRow(0);
     ScrollBarEffectsHorizontal = new wxScrollBar(this, ID_SCROLLBAR_EFFECT_GRID_HORZ, wxDefaultPosition, wxDefaultSize, wxSB_HORIZONTAL|wxALWAYS_SHOW_SB, wxDefaultValidator, _T("ID_SCROLLBAR_EFFECT_GRID_HORZ"));
     ScrollBarEffectsHorizontal->SetScrollbar(0, 1, 100, 1);
     FlexGridSizer3->Add(ScrollBarEffectsHorizontal, 1, wxALL|wxEXPAND, 0);
     FlexGridSizer1->Add(FlexGridSizer3, 1, wxALL|wxEXPAND, 2);
-    FlexGridSizer1->Add(0,0,1, wxALL|wxEXPAND, 5);
     SetSizer(FlexGridSizer1);
 
     Connect(ID_SCROLLBAR_EFFECTS_VERTICAL, wxEVT_SCROLL_TOP|wxEVT_SCROLL_BOTTOM|wxEVT_SCROLL_LINEUP|wxEVT_SCROLL_LINEDOWN|wxEVT_SCROLL_PAGEUP|wxEVT_SCROLL_PAGEDOWN|wxEVT_SCROLL_THUMBTRACK|wxEVT_SCROLL_THUMBRELEASE|wxEVT_SCROLL_CHANGED, (wxObjectEventFunction)&MainSequencer::OnScrollBarEffectsVerticalScrollChanged);
