@@ -171,10 +171,11 @@ OtherSettingsPanel::OtherSettingsPanel(wxWindow* parent, xLightsFrame* f, wxWind
     FlexGridSizer5->Add(Choice_LinkControllerUpload, 1, wxALL|wxEXPAND, 5);
     GridBagSizer1->Add(FlexGridSizer5, wxGBPosition(7, 0), wxDefaultSpan, wxALL|wxEXPAND, 0);
     FlexGridSizer7 = new wxFlexGridSizer(0, 2, 0, 0);
-    StaticText7 = new wxStaticText(this, ID_STATICTEXT6, _("Model renaming alias behavior"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT6"));
+    StaticText7 = new wxStaticText(this, ID_STATICTEXT6, _("Model reanaming alias behavior:"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT6"));
     FlexGridSizer7->Add(StaticText7, 1, wxALL|wxEXPAND, 5);
     Choice_AliasPromptBehavior = new wxChoice(this, ID_CHOICE_ALIASPROMPT, wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, _T("ID_CHOICE_ALIASPROMPT"));
     Choice_AliasPromptBehavior->SetSelection( Choice_AliasPromptBehavior->Append(_("Always Prompt")) );
+    Choice_AliasPromptBehavior->Append(_("Ignore Defaults"));
     Choice_AliasPromptBehavior->Append(_("Always Yes"));
     Choice_AliasPromptBehavior->Append(_("Always No"));
     FlexGridSizer7->Add(Choice_AliasPromptBehavior, 1, wxALL|wxEXPAND, 5);
