@@ -42,6 +42,8 @@ class AddMediaDialog: public wxDialog
     private:
 
         //(*Handlers(AddMediaDialog)
+        void OnButton_OkClick(wxCommandEvent& event);
+        void OnButton_CancelClick(wxCommandEvent& event);
         //*)
 
         DECLARE_EVENT_TABLE()

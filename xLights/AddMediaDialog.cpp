@@ -67,3 +67,11 @@ AddMediaDialog::~AddMediaDialog()
     //*)
 }
 
+
+void AddMediaDialog::OnButton_OkClick(wxCommandEvent& event)
+{
+}
+
+void AddMediaDialog::OnButton_CancelClick(wxCommandEvent& event)
+{
+}
