@@ -99,6 +99,10 @@ const wxWindowID SeqSettingsDialog::ID_BUTTON_Move_Up = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_BUTTON_Move_Down = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_BUTTON_Reimport = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_PANEL4 = wxNewId();
+const wxWindowID SeqSettingsDialog::ID_LISTCTRL_MEDIAMAPPINGS = wxNewId();
+const wxWindowID SeqSettingsDialog::ID_BUTTON5 = wxNewId();
+const wxWindowID SeqSettingsDialog::ID_BUTTON6 = wxNewId();
+const wxWindowID SeqSettingsDialog::ID_PANEL5 = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_NOTEBOOK_Seq_Settings = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_STATICTEXT_Warning = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_STATICTEXT_Info = wxNewId();
@@ -185,6 +189,7 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
     quick_start_pressed = wxArtProvider::GetBitmapBundle("xlART_quick_start_pressed", wxART_BUTTON);
 
     //(*Initialize(SeqSettingsDialog)
+    wxBoxSizer* BoxSizer1;
     wxFlexGridSizer* FlexGridSizer10;
     wxFlexGridSizer* FlexGridSizer11;
     wxFlexGridSizer* FlexGridSizer12;
@@ -201,6 +206,8 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
     wxFlexGridSizer* FlexGridSizer7;
     wxFlexGridSizer* FlexGridSizer8;
     wxFlexGridSizer* FlexGridSizer9;
+    wxFlexGridSizer* FlexGridSizer_AltMediaContent;
+    wxFlexGridSizer* FlexGridSizer_AltMediaListContainer;
     wxFlexGridSizer* FlexGridSizer_Timing_Grid;
     wxFlexGridSizer* FlexGridSizer_Timing_Page;
     wxGridBagSizer* GridBagSizer1;
@@ -398,10 +405,29 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
     FlexGridSizer11->Add(Button_Reimport, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     FlexGridSizer9->Add(FlexGridSizer11, 1, wxALL|wxALIGN_CENTER_HORIZONTAL, 5);
     Panel_DataLayers->SetSizer(FlexGridSizer9);
+    Panel1 = new wxPanel(Notebook_Seq_Settings, ID_PANEL5, wxPoint(266,8), wxDefaultSize, wxTAB_TRAVERSAL, _T("ID_PANEL5"));
+    FlexGridSizer_AltMediaContent = new wxFlexGridSizer(2, 1, 0, 0);
+    FlexGridSizer_AltMediaContent->AddGrowableCol(0);
+    FlexGridSizer_AltMediaContent->AddGrowableRow(0);
+    FlexGridSizer_AltMediaListContainer = new wxFlexGridSizer(0, 1, 0, 0);
+    FlexGridSizer_AltMediaListContainer->AddGrowableCol(0);
+    FlexGridSizer_AltMediaListContainer->AddGrowableCol(1);
+    ListCtrl_MediaMappings = new wxListCtrl(Panel1, ID_LISTCTRL_MEDIAMAPPINGS, wxDefaultPosition, wxDefaultSize, wxLC_REPORT|wxLC_SINGLE_SEL|wxVSCROLL, wxDefaultValidator, _T("ID_LISTCTRL_MEDIAMAPPINGS"));
+    FlexGridSizer_AltMediaListContainer->Add(ListCtrl_MediaMappings, 1, wxALL|wxEXPAND, 5);
+    FlexGridSizer_AltMediaContent->Add(FlexGridSizer_AltMediaListContainer, 1, wxALL|wxEXPAND, 5);
+    BoxSizer1 = new wxBoxSizer(wxHORIZONTAL);
+    Button_AddMedia = new wxButton(Panel1, ID_BUTTON5, _("Add Media"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON5"));
+    BoxSizer1->Add(Button_AddMedia, 1, wxALL|wxALIGN_BOTTOM, 5);
+    Button_DeleteSelectedMedia = new wxButton(Panel1, ID_BUTTON6, _("Delete Selected"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON6"));
+    Button_DeleteSelectedMedia->Disable();
+    BoxSizer1->Add(Button_DeleteSelectedMedia, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
+    FlexGridSizer_AltMediaContent->Add(BoxSizer1, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
+    Panel1->SetSizer(FlexGridSizer_AltMediaContent);
     Notebook_Seq_Settings->AddPage(PanelInfo, _("Info / Media"), false);
     Notebook_Seq_Settings->AddPage(PanelMetaData, _("Meta Data"), false);
     Notebook_Seq_Settings->AddPage(PanelTimings, _("Timings"), false);
     Notebook_Seq_Settings->AddPage(Panel_DataLayers, _("Data Layers"), false);
+    Notebook_Seq_Settings->AddPage(Panel1, _("Alternate Media"), false);
     FlexGridSizer1->Add(Notebook_Seq_Settings, 1, wxTOP|wxLEFT|wxRIGHT|wxEXPAND, 5);
     StaticText_Warning = new wxStaticText(this, ID_STATICTEXT_Warning, _("Show Warning Here"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT_Warning"));
     StaticText_Warning->Hide();
@@ -461,6 +487,8 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
     Connect(ID_BUTTON_Move_Up, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_Move_UpClick);
     Connect(ID_BUTTON_Move_Down, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_Move_DownClick);
     Connect(ID_BUTTON_Reimport, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_ReimportClick);
+    Connect(ID_BUTTON5, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_AddMedia);
+    Connect(ID_BUTTON6, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_DeleteSelectedMedia);
     Connect(ID_BUTTON_CANCEL, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_CancelClick);
     Connect(ID_BUTTON_Close, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_CloseClick);
     //*)
@@ -2015,4 +2043,12 @@ void SeqSettingsDialog::OnButton_AddMilisecondsClick(wxCommandEvent& event) {
 
     } else
         wxMessageBox("Invalid Pre/Post value(s). Neither can be blank, 0 is okay.");
+}
+
+void SeqSettingsDialog::OnButton_AddMedia(wxCommandEvent& event)
+{
+}
+
+void SeqSettingsDialog::OnButton_DeleteSelectedMedia(wxCommandEvent& event)
+{
 }
