@@ -43,7 +43,6 @@ AddMediaDialog::AddMediaDialog(wxWindow* parent,wxWindowID id)
     TextCtrl_MediaFilePath->SetMaxLength(15);
     FlexGridSizer1->Add(TextCtrl_MediaFilePath, 1, wxALL|wxEXPAND, 5);
     BitmapButton_Xml_Media_File = new wxBitmapButton(this, ID_BITMAPBUTTON_Xml_Media_File, wxArtProvider::GetBitmapBundle("wxART_CDROM",wxART_BUTTON), wxDefaultPosition, wxDefaultSize, wxBU_AUTODRAW, wxDefaultValidator, _T("ID_BITMAPBUTTON_Xml_Media_File"));
-    BitmapButton_Xml_Media_File->Disable();
     FlexGridSizer1->Add(BitmapButton_Xml_Media_File, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     FlexGridSizer1->Add(-1,-1,1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     BoxSizer1 = new wxBoxSizer(wxHORIZONTAL);
@@ -56,6 +55,7 @@ AddMediaDialog::AddMediaDialog(wxWindow* parent,wxWindowID id)
     SetSizer(FlexGridSizer1);
     FlexGridSizer1->SetSizeHints(this);
 
+    Connect(ID_BITMAPBUTTON_Xml_Media_File, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&AddMediaDialog::OnBitmapButton_MediaFileClick);
     Connect(ID_BUTTON1, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&AddMediaDialog::OnButton_OkClick);
     Connect(ID_BUTTON2, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&AddMediaDialog::OnButton_CancelClick);
     //*)
@@ -73,5 +73,9 @@ void AddMediaDialog::OnButton_OkClick(wxCommandEvent& event)
 }
 
 void AddMediaDialog::OnButton_CancelClick(wxCommandEvent& event)
+{
+}
+
+void AddMediaDialog::OnBitmapButton_MediaFileClick(wxCommandEvent& event)
 {
 }

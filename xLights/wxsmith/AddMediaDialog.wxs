@@ -46,6 +46,7 @@
 			<object class="sizeritem">
 				<object class="wxBitmapButton" name="ID_BITMAPBUTTON_Xml_Media_File" variable="BitmapButton_Xml_Media_File" member="yes">
 					<bitmap code='wxArtProvider::GetBitmapBundle(&quot;wxART_CDROM&quot;,wxART_BUTTON)' />
+					<handler function="OnBitmapButton_MediaFileClick" entry="EVT_BUTTON" />
 				</object>
 				<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
 				<border>5</border>

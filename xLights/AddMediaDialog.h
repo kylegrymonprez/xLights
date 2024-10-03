@@ -44,6 +44,7 @@ class AddMediaDialog: public wxDialog
         //(*Handlers(AddMediaDialog)
         void OnButton_OkClick(wxCommandEvent& event);
         void OnButton_CancelClick(wxCommandEvent& event);
+        void OnBitmapButton_MediaFileClick(wxCommandEvent& event);
         //*)
 
         DECLARE_EVENT_TABLE()
