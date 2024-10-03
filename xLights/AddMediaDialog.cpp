@@ -24,7 +24,8 @@ BEGIN_EVENT_TABLE(AddMediaDialog,wxDialog)
     //*)
 END_EVENT_TABLE()
 
-AddMediaDialog::AddMediaDialog(wxWindow* parent,wxWindowID id)
+AddMediaDialog::AddMediaDialog(wxWindow* parent, const std::list<std::string>& media_dirs, wxWindowID id) :
+media_directories(media_dirs)
 {
     //(*Initialize(AddMediaDialog)
     wxBoxSizer* BoxSizer1;
@@ -49,7 +50,7 @@ AddMediaDialog::AddMediaDialog(wxWindow* parent,wxWindowID id)
     StaticText_FileRenameBehavior = new wxStaticText(this, ID_STATICTEXT_FNBEHAVIOR, _("Filename Behavior:"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT_FNBEHAVIOR"));
     FlexGridSizer1->Add(StaticText_FileRenameBehavior, 1, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
     ComboBox1 = new wxComboBox(this, ID_COMBOBOX1, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, _T("ID_COMBOBOX1"));
-    ComboBox1->Append(_("Sequence Name"));
+    ComboBox1->SetSelection( ComboBox1->Append(_("Sequence Name")) );
     ComboBox1->Append(_("Don\'t Rename"));
     FlexGridSizer1->Add(ComboBox1, 1, wxALL|wxEXPAND, 5);
     FlexGridSizer1->Add(-1,-1,1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
@@ -83,8 +84,44 @@ void AddMediaDialog::OnButton_OkClick(wxCommandEvent& event)
 
 void AddMediaDialog::OnButton_CancelClick(wxCommandEvent& event)
 {
+    EndDialog(wxID_CANCEL);
 }
 
 void AddMediaDialog::OnBitmapButton_MediaFileClick(wxCommandEvent& event)
 {
+    MediaChooser();
+    //ValidateWindow();
+}
+
+void AddMediaDialog::MediaChooser()
+{
+    wxFileDialog OpenDialog(this, "Choose Media file", wxEmptyString, wxEmptyString, "FPP Audio Files|*.mp3;*.ogg;*.m4p;*.mp4;*.m4a;*.aac;*.wav;*.flac;*.wma;*.au;*.mkv;*.mov|xLights Audio Files|*.mp3;*.ogg;*.m4p;*.mp4;*.avi;*.wma;*.au;*.wav;*.m4a;*.mid;*.mkv;*.mov;*.mpg;*.asf;*.flv;*.mpeg;*.wmv;*.flac", wxFD_OPEN | wxFD_FILE_MUST_EXIST, wxDefaultPosition);
+
+    std::string media_directory = media_directories.empty() ? "" : media_directories.front();
+
+    if (wxDir::Exists(media_directory))
+    {
+        OpenDialog.SetDirectory(media_directory);
+    }
+//    if (!xml_file->GetMediaFile().empty())
+//    {
+//        OpenDialog.SetFilename(wxFileName(xml_file->GetMediaFile()).GetFullName());
+//    }
+//    if (!TextCtrl_Xml_Media_File->GetValue().empty())
+//    {
+//        OpenDialog.SetPath(TextCtrl_Xml_Media_File->GetValue());
+//    }
+    if (OpenDialog.ShowModal() == wxID_OK)
+    {
+        wxString fDir = OpenDialog.GetDirectory();
+        wxString filename = OpenDialog.GetFilename();
+
+        ObtainAccessToURL(fDir.ToStdString());
+        ObtainAccessToURL(filename.ToStdString());
+
+        wxFileName name_and_path(filename);
+        name_and_path.SetPath(fDir);
+
+        TextCtrl_MediaFilePath->SetValue(name_and_path.GetFullPath());
+    }
 }

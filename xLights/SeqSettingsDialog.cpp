@@ -25,6 +25,7 @@
 #include <list>
 
 #include "SeqSettingsDialog.h"
+#include "AddMediaDialog.h"
 #include "NewTimingDialog.h"
 #include "xLightsXmlFile.h"
 #include "DataLayer.h"
@@ -1579,7 +1580,7 @@ void SeqSettingsDialog::MediaLoad(wxFileName name_and_path)
 
 void SeqSettingsDialog::MediaChooser()
 {
-	wxFileDialog OpenDialog(this, "Choose Audio file", wxEmptyString, wxEmptyString, "FPP Audio Files|*.mp3;*.ogg;*.m4p;*.mp4;*.m4a;*.aac;*.wav;*.flac;*.wma;*.au;*.mkv;*.mov|xLights Audio Files|*.mp3;*.ogg;*.m4p;*.mp4;*.avi;*.wma;*.au;*.wav;*.m4a;*.mid;*.mkv;*.mov;*.mpg;*.asf;*.flv;*.mpeg;*.wmv;*.flac", wxFD_OPEN | wxFD_FILE_MUST_EXIST, wxDefaultPosition);
+	wxFileDialog OpenDialog(this, "Choose Media file", wxEmptyString, wxEmptyString, "FPP Audio Files|*.mp3;*.ogg;*.m4p;*.mp4;*.m4a;*.aac;*.wav;*.flac;*.wma;*.au;*.mkv;*.mov|xLights Audio Files|*.mp3;*.ogg;*.m4p;*.mp4;*.avi;*.wma;*.au;*.wav;*.m4a;*.mid;*.mkv;*.mov;*.mpg;*.asf;*.flv;*.mpeg;*.wmv;*.flac", wxFD_OPEN | wxFD_FILE_MUST_EXIST, wxDefaultPosition);
 
     std::string media_directory = media_directories.empty() ? "" : media_directories.front();
 
@@ -2047,6 +2048,15 @@ void SeqSettingsDialog::OnButton_AddMilisecondsClick(wxCommandEvent& event) {
 
 void SeqSettingsDialog::OnButton_AddMedia(wxCommandEvent& event)
 {
+//    wxFileDialog dlg(this, "Load mapping", wxEmptyString, wxEmptyString, "Mapping Files (*.xjmap;*.xmap;*.xmaphint)|*.xjmap;*.xmap;*.xmaphint|All Files (*.)|*.*", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+//    if (dlg.ShowModal() == wxID_OK) {
+//        LoadMappingFile( dlg.GetPath());
+//    }
+//    
+    // populate dialog
+    AddMediaDialog dialog(this, media_directories);
+    dialog.Fit();
+    int ret_code = dialog.ShowModal();
 }
 
 void SeqSettingsDialog::OnButton_DeleteSelectedMedia(wxCommandEvent& event)

@@ -15,7 +15,7 @@ class AddMediaDialog: public wxDialog
 {
     public:
 
-        AddMediaDialog(wxWindow* parent,wxWindowID id=wxID_ANY);
+        AddMediaDialog(wxWindow* parent, const std::list<std::string>& media_dirs, wxWindowID id=wxID_ANY);
         virtual ~AddMediaDialog();
 
         //(*Declarations(AddMediaDialog)
@@ -51,6 +51,8 @@ class AddMediaDialog: public wxDialog
         void OnButton_CancelClick(wxCommandEvent& event);
         void OnBitmapButton_MediaFileClick(wxCommandEvent& event);
         //*)
+        void MediaChooser();
+        const std::list<std::string>& media_directories;
 
         DECLARE_EVENT_TABLE()
 };
