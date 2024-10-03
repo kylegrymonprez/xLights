@@ -4,6 +4,7 @@
 //(*Headers(AddMediaDialog)
 #include <wx/bmpbuttn.h>
 #include <wx/button.h>
+#include <wx/combobox.h>
 #include <wx/dialog.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
@@ -21,7 +22,9 @@ class AddMediaDialog: public wxDialog
         wxBitmapButton* BitmapButton_Xml_Media_File;
         wxButton* Button_Cancel;
         wxButton* Button_Ok;
+        wxComboBox* ComboBox1;
         wxStaticText* StaticText_FPPHostname;
+        wxStaticText* StaticText_FileRenameBehavior;
         wxStaticText* StaticText_MediaFile;
         wxTextCtrl* TextCtrl_FPPHostname;
         wxTextCtrl* TextCtrl_MediaFilePath;
@@ -35,6 +38,8 @@ class AddMediaDialog: public wxDialog
         static const wxWindowID ID_STATICTEXT_MEDIAFILE;
         static const wxWindowID ID_TEXTCTRL_MEDIA_PATH;
         static const wxWindowID ID_BITMAPBUTTON_Xml_Media_File;
+        static const wxWindowID ID_STATICTEXT_FNBEHAVIOR;
+        static const wxWindowID ID_COMBOBOX1;
         static const wxWindowID ID_BUTTON1;
         static const wxWindowID ID_BUTTON2;
         //*)
