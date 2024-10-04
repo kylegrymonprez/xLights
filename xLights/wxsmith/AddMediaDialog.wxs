@@ -38,6 +38,7 @@
 			<object class="sizeritem">
 				<object class="wxTextCtrl" name="ID_TEXTCTRL_MEDIA_PATH" variable="TextCtrl_MediaFilePath" member="yes">
 					<maxlength>15</maxlength>
+					<style>wxTE_READONLY</style>
 				</object>
 				<flag>wxALL|wxEXPAND</flag>
 				<border>5</border>
@@ -53,21 +54,18 @@
 				<option>1</option>
 			</object>
 			<object class="sizeritem">
-				<object class="wxStaticText" name="ID_STATICTEXT_FNBEHAVIOR" variable="StaticText_FileRenameBehavior" member="yes">
-					<label>Filename Behavior:</label>
+				<object class="wxStaticText" name="ID_STATICTEXT_USE_SEQ" variable="StaticText_UseSequenceMedia" member="yes">
+					<label>Use Sequence Media Name</label>
 				</object>
 				<flag>wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL</flag>
 				<border>5</border>
 				<option>1</option>
 			</object>
 			<object class="sizeritem">
-				<object class="wxComboBox" name="ID_COMBOBOX1" variable="ComboBox1" member="yes">
-					<content>
-						<item>Sequence Name</item>
-						<item>Don&apos;t Rename</item>
-					</content>
+				<object class="wxCheckBox" name="ID_CHECKBOX1" variable="CheckBox1" member="yes">
+					<checked>1</checked>
 				</object>
-				<flag>wxALL|wxEXPAND</flag>
+				<flag>wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL</flag>
 				<border>5</border>
 				<option>1</option>
 			</object>
@@ -103,7 +101,7 @@
 						<option>1</option>
 					</object>
 				</object>
-				<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
+				<flag>wxALL|wxALIGN_RIGHT|wxALIGN_CENTER_VERTICAL</flag>
 				<border>5</border>
 				<option>1</option>
 			</object>

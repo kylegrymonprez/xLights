@@ -22,13 +22,13 @@
 #include <wx/filepicker.h>
 
 //(*IdInit(SeqExportDialog)
-const long SeqExportDialog::ID_STATICTEXT1 = wxNewId();
-const long SeqExportDialog::ID_CHOICE1 = wxNewId();
-const long SeqExportDialog::ID_STATICTEXT3 = wxNewId();
-const long SeqExportDialog::ID_TEXTCTRL2 = wxNewId();
-const long SeqExportDialog::ID_BUTTON1 = wxNewId();
-const long SeqExportDialog::ID_BUTTON2 = wxNewId();
-const long SeqExportDialog::ID_BUTTON3 = wxNewId();
+const wxWindowID SeqExportDialog::ID_STATICTEXT1 = wxNewId();
+const wxWindowID SeqExportDialog::ID_CHOICE1 = wxNewId();
+const wxWindowID SeqExportDialog::ID_STATICTEXT3 = wxNewId();
+const wxWindowID SeqExportDialog::ID_TEXTCTRL2 = wxNewId();
+const wxWindowID SeqExportDialog::ID_BUTTON1 = wxNewId();
+const wxWindowID SeqExportDialog::ID_BUTTON2 = wxNewId();
+const wxWindowID SeqExportDialog::ID_BUTTON3 = wxNewId();
 //*)
 
 
@@ -47,33 +47,32 @@ SeqExportDialog::SeqExportDialog(wxWindow* parent, const std::string& model, wxW
     wxFlexGridSizer* FlexGridSizer3;
     wxFlexGridSizer* FlexGridSizer4;
 
-    Create(parent, wxID_ANY, _("Export Sequence"), wxDefaultPosition, wxDefaultSize, wxCAPTION | wxRESIZE_BORDER, _T("wxID_ANY"));
-    SetClientSize(wxSize(385, 124));
+    Create(parent, wxID_ANY, _("Export Sequence"), wxDefaultPosition, wxDefaultSize, wxCAPTION|wxRESIZE_BORDER, _T("wxID_ANY"));
+    SetClientSize(wxSize(385,124));
     FlexGridSizer1 = new wxFlexGridSizer(0, 1, 0, 0);
     FlexGridSizer1->AddGrowableCol(0);
     FlexGridSizer2 = new wxFlexGridSizer(0, 2, 0, 0);
     FlexGridSizer2->AddGrowableCol(1);
     StaticText1 = new wxStaticText(this, ID_STATICTEXT1, _("Format"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT1"));
-    FlexGridSizer2->Add(StaticText1, 1, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 5);
+    FlexGridSizer2->Add(StaticText1, 1, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
     ChoiceFormat = new wxChoice(this, ID_CHOICE1, wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, _T("ID_CHOICE1"));
-    FlexGridSizer2->Add(ChoiceFormat, 1, wxALL | wxEXPAND, 5);
+    FlexGridSizer2->Add(ChoiceFormat, 1, wxALL|wxEXPAND, 5);
     StaticText3 = new wxStaticText(this, ID_STATICTEXT3, _("File name"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT3"));
-    FlexGridSizer2->Add(StaticText3, 1, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 5);
+    FlexGridSizer2->Add(StaticText3, 1, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
     FlexGridSizer3 = new wxFlexGridSizer(0, 2, 0, 0);
     FlexGridSizer3->AddGrowableCol(0);
-    TextCtrlFilename = new wxTextCtrl(this, ID_TEXTCTRL2, wxEmptyString, wxDefaultPosition, wxSize(400, -1), 0, wxDefaultValidator, _T("ID_TEXTCTRL2"));
-    FlexGridSizer3->Add(TextCtrlFilename, 1, wxALL | wxEXPAND, 2);
-    ButtonFilePick = new wxButton(this, ID_BUTTON1, _("..."), wxDefaultPosition, wxSize(34, -1), 0, wxDefaultValidator, _T("ID_BUTTON1"));
-    FlexGridSizer3->Add(ButtonFilePick, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 2);
-    FlexGridSizer2->Add(FlexGridSizer3, 1, wxALL | wxEXPAND, 5);
-    FlexGridSizer1->Add(FlexGridSizer2, 1, wxALL | wxEXPAND, 5);
+    TextCtrlFilename = new wxTextCtrl(this, ID_TEXTCTRL2, wxEmptyString, wxDefaultPosition, wxSize(400,-1), 0, wxDefaultValidator, _T("ID_TEXTCTRL2"));
+    FlexGridSizer3->Add(TextCtrlFilename, 1, wxALL|wxEXPAND, 2);
+    ButtonFilePick = new wxButton(this, ID_BUTTON1, _T("..."), wxDefaultPosition, wxSize(34,-1), 0, wxDefaultValidator, _T("ID_BUTTON1"));
+    FlexGridSizer3->Add(ButtonFilePick, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 2);
+    FlexGridSizer2->Add(FlexGridSizer3, 1, wxALL|wxEXPAND, 5);
+    FlexGridSizer1->Add(FlexGridSizer2, 1, wxALL|wxEXPAND, 5);
     FlexGridSizer4 = new wxFlexGridSizer(0, 3, 0, 0);
     ButtonOk = new wxButton(this, ID_BUTTON2, _("Ok"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON2"));
-    FlexGridSizer4->Add(ButtonOk, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 5);
+    FlexGridSizer4->Add(ButtonOk, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     ButtonCancel = new wxButton(this, ID_BUTTON3, _("Cancel"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON3"));
-    FlexGridSizer4->Add(ButtonCancel, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 5);
-    FlexGridSizer1->Add(FlexGridSizer4, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 5);
-    SetSizer(FlexGridSizer1);
+    FlexGridSizer4->Add(ButtonCancel, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
+    FlexGridSizer1->Add(FlexGridSizer4, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     SetSizer(FlexGridSizer1);
     Layout();
 
