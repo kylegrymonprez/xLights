@@ -567,6 +567,10 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
         TreeCtrl_Data_Layers->AppendItem(branch, wxString::Format("Channel Offset: %d", layer->GetChannelOffset()));
     }
     TreeCtrl_Data_Layers->Expand(root);
+    
+    ListCtrl_MediaMappings->AppendColumn("FPP Hostname", wxLIST_FORMAT_LEFT, 150);
+    ListCtrl_MediaMappings->AppendColumn("Media File", wxLIST_FORMAT_LEFT, 400);
+    ListCtrl_MediaMappings->AppendColumn("Use Sequence Media Name", wxLIST_FORMAT_LEFT, 175);
 
     RenderModeChoice->SetStringSelection(xml_file->GetRenderMode());
 
@@ -2045,6 +2049,18 @@ void SeqSettingsDialog::OnButton_AddMilisecondsClick(wxCommandEvent& event) {
         wxMessageBox("Invalid Pre/Post value(s). Neither can be blank, 0 is okay.");
 }
 
+void SeqSettingsDialog::AddMediaItem( wxString fppHostName, wxString mediaPath, bool keepName )
+{
+    wxListItem item;
+    item.SetId(ListCtrl_MediaMappings->GetItemCount());
+    item.SetColumn(0);
+    item.SetText(fppHostName);
+    long index = ListCtrl_MediaMappings->InsertItem(item);
+
+    ListCtrl_MediaMappings->SetItem( index, 1, mediaPath);
+    ListCtrl_MediaMappings->SetItem( index, 2, keepName ? "true" : "false");
+}
+
 void SeqSettingsDialog::OnButton_AddMedia(wxCommandEvent& event)
 {
 //    wxFileDialog dlg(this, "Load mapping", wxEmptyString, wxEmptyString, "Mapping Files (*.xjmap;*.xmap;*.xmaphint)|*.xjmap;*.xmap;*.xmaphint|All Files (*.)|*.*", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
@@ -2055,7 +2071,10 @@ void SeqSettingsDialog::OnButton_AddMedia(wxCommandEvent& event)
     // populate dialog
     AddMediaDialog dialog(this, media_directories);
     dialog.Fit();
-    int ret_code = dialog.ShowModal();
+    if( dialog.ShowModal() == wxID_OK ) {
+        AddMediaItem( dialog.GetFPPHostName(), dialog.GetMediaPath(), dialog.KeepSequenceName() );
+    }
+        
 }
 
 void SeqSettingsDialog::OnButton_DeleteSelectedMedia(wxCommandEvent& event)

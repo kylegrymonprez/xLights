@@ -37,7 +37,7 @@ media_directories(media_dirs)
     StaticText_FPPHostname = new wxStaticText(this, ID_STATICTEXT_FPPHOSTNAME, _("FPP Hostname:"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT_FPPHOSTNAME"));
     FlexGridSizer1->Add(StaticText_FPPHostname, 1, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
     TextCtrl_FPPHostname = new wxTextCtrl(this, ID_TEXTCTRL_FPPHOSTNAME, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_TEXTCTRL_FPPHOSTNAME"));
-    TextCtrl_FPPHostname->SetMaxLength(15);
+    TextCtrl_FPPHostname->SetMaxLength(45);
     FlexGridSizer1->Add(TextCtrl_FPPHostname, 1, wxALL|wxEXPAND, 5);
     FlexGridSizer1->Add(10,8,1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     StaticText_MediaFile = new wxStaticText(this, ID_STATICTEXT_MEDIAFILE, _("Media File:"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT_MEDIAFILE"));
@@ -79,6 +79,7 @@ AddMediaDialog::~AddMediaDialog()
 
 void AddMediaDialog::OnButton_OkClick(wxCommandEvent& event)
 {
+    EndDialog( wxID_OK );
 }
 
 void AddMediaDialog::OnButton_CancelClick(wxCommandEvent& event)
@@ -121,6 +122,8 @@ void AddMediaDialog::MediaChooser()
         wxFileName name_and_path(filename);
         name_and_path.SetPath(fDir);
 
+        SetCursor(wxCURSOR_WAIT);
         TextCtrl_MediaFilePath->SetValue(name_and_path.GetFullPath());
+        SetCursor(wxCURSOR_DEFAULT);
     }
 }

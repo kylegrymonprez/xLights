@@ -29,6 +29,9 @@ class AddMediaDialog: public wxDialog
         wxTextCtrl* TextCtrl_FPPHostname;
         wxTextCtrl* TextCtrl_MediaFilePath;
         //*)
+        wxString GetFPPHostName() { return TextCtrl_FPPHostname->GetValue(); }
+        wxString GetMediaPath() { return TextCtrl_MediaFilePath->GetValue(); }
+        bool KeepSequenceName() { return CheckBox_UseSquenceMedia->IsChecked(); }
 
     protected:
 

@@ -346,4 +346,5 @@ class SeqSettingsDialog: public wxDialog
         void MediaLoad(wxFileName filename);
 		bool UpdateSequenceTiming();
 		void ValidateWindow();
+        void AddMediaItem( wxString fppHostName, wxString mediaPath, bool keepName );
 };
