@@ -2085,4 +2085,9 @@ void SeqSettingsDialog::OnButton_DeleteSelectedMedia(wxCommandEvent& event)
 
 void SeqSettingsDialog::OnListCtrl_MediaMappingsItemSelect(wxListEvent& event)
 {
+    long selectedRow = ListCtrl_MediaMappings->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
+    if( selectedRow != -1 )
+        Button_DeleteSelectedMedia->Enable();
+    else
+        Button_DeleteSelectedMedia->Disable();
 }
