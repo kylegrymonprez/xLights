@@ -103,27 +103,22 @@ void AddMediaDialog::MediaChooser()
     {
         OpenDialog.SetDirectory(media_directory);
     }
-//    if (!xml_file->GetMediaFile().empty())
-//    {
-//        OpenDialog.SetFilename(wxFileName(xml_file->GetMediaFile()).GetFullName());
-//    }
-//    if (!TextCtrl_Xml_Media_File->GetValue().empty())
-//    {
-//        OpenDialog.SetPath(TextCtrl_Xml_Media_File->GetValue());
-//    }
     if (OpenDialog.ShowModal() == wxID_OK)
     {
-        wxString fDir = OpenDialog.GetDirectory();
-        wxString filename = OpenDialog.GetFilename();
+        
+        // Get the full file path
+        wxString filePath = OpenDialog.GetPath();
+        
+        if (filePath.IsEmpty()) {
+            wxLogError("No file selected!");
+        }
+        
+        ObtainAccessToURL(filePath.ToStdString());
+//        ObtainAccessToURL(filename.ToStdString());
 
-        ObtainAccessToURL(fDir.ToStdString());
-        ObtainAccessToURL(filename.ToStdString());
-
-        wxFileName name_and_path(filename);
-        name_and_path.SetPath(fDir);
-
+        
         SetCursor(wxCURSOR_WAIT);
-        TextCtrl_MediaFilePath->SetValue(name_and_path.GetFullPath());
+        TextCtrl_MediaFilePath->SetValue(filePath);
         SetCursor(wxCURSOR_DEFAULT);
     }
 }
