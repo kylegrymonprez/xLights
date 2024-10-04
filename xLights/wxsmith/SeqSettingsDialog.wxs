@@ -726,6 +726,8 @@
 										<object class="sizeritem">
 											<object class="wxListCtrl" name="ID_LISTCTRL_MEDIAMAPPINGS" variable="ListCtrl_MediaMappings" member="yes">
 												<style>wxLC_REPORT|wxLC_SINGLE_SEL|wxVSCROLL</style>
+												<handler function="OnListCtrl_MediaMappingsItemSelect" entry="EVT_LIST_ITEM_SELECTED" />
+												<handler function="OnListCtrl_MediaMappingsItemSelect" entry="EVT_LIST_ITEM_DESELECTED" />
 											</object>
 											<flag>wxALL|wxEXPAND</flag>
 											<border>5</border>

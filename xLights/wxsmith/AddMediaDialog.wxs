@@ -15,7 +15,7 @@
 			</object>
 			<object class="sizeritem">
 				<object class="wxTextCtrl" name="ID_TEXTCTRL_FPPHOSTNAME" variable="TextCtrl_FPPHostname" member="yes">
-					<maxlength>15</maxlength>
+					<maxlength>45</maxlength>
 				</object>
 				<flag>wxALL|wxEXPAND</flag>
 				<border>5</border>
@@ -62,7 +62,7 @@
 				<option>1</option>
 			</object>
 			<object class="sizeritem">
-				<object class="wxCheckBox" name="ID_CHECKBOX1" variable="CheckBox1" member="yes">
+				<object class="wxCheckBox" name="ID_CHECKBOX1" variable="CheckBox_UseSquenceMedia" member="yes">
 					<checked>1</checked>
 				</object>
 				<flag>wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL</flag>

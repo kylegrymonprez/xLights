@@ -487,6 +487,8 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
     Connect(ID_BUTTON_Move_Up, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_Move_UpClick);
     Connect(ID_BUTTON_Move_Down, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_Move_DownClick);
     Connect(ID_BUTTON_Reimport, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_ReimportClick);
+    Connect(ID_LISTCTRL_MEDIAMAPPINGS, wxEVT_COMMAND_LIST_ITEM_SELECTED, (wxObjectEventFunction)&SeqSettingsDialog::OnListCtrl_MediaMappingsItemSelect);
+    Connect(ID_LISTCTRL_MEDIAMAPPINGS, wxEVT_COMMAND_LIST_ITEM_DESELECTED, (wxObjectEventFunction)&SeqSettingsDialog::OnListCtrl_MediaMappingsItemSelect);
     Connect(ID_BUTTON5, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_AddMedia);
     Connect(ID_BUTTON6, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_DeleteSelectedMedia);
     Connect(ID_BUTTON_CANCEL, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_CancelClick);
@@ -2067,7 +2069,7 @@ void SeqSettingsDialog::OnButton_AddMedia(wxCommandEvent& event)
 //    if (dlg.ShowModal() == wxID_OK) {
 //        LoadMappingFile( dlg.GetPath());
 //    }
-//    
+//
     // populate dialog
     AddMediaDialog dialog(this, media_directories);
     dialog.Fit();
@@ -2078,5 +2080,9 @@ void SeqSettingsDialog::OnButton_AddMedia(wxCommandEvent& event)
 }
 
 void SeqSettingsDialog::OnButton_DeleteSelectedMedia(wxCommandEvent& event)
+{
+}
+
+void SeqSettingsDialog::OnListCtrl_MediaMappingsItemSelect(wxListEvent& event)
 {
 }
