@@ -412,7 +412,6 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
     FlexGridSizer_AltMediaContent->AddGrowableRow(0);
     FlexGridSizer_AltMediaListContainer = new wxFlexGridSizer(0, 1, 0, 0);
     FlexGridSizer_AltMediaListContainer->AddGrowableCol(0);
-    FlexGridSizer_AltMediaListContainer->AddGrowableCol(1);
     ListCtrl_MediaMappings = new wxListCtrl(Panel1, ID_LISTCTRL_MEDIAMAPPINGS, wxDefaultPosition, wxDefaultSize, wxLC_REPORT|wxLC_SINGLE_SEL|wxVSCROLL, wxDefaultValidator, _T("ID_LISTCTRL_MEDIAMAPPINGS"));
     FlexGridSizer_AltMediaListContainer->Add(ListCtrl_MediaMappings, 1, wxALL|wxEXPAND, 5);
     FlexGridSizer_AltMediaContent->Add(FlexGridSizer_AltMediaListContainer, 1, wxALL|wxEXPAND, 5);
