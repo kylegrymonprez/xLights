@@ -24,7 +24,7 @@ BEGIN_EVENT_TABLE(AddMediaDialog,wxDialog)
     //*)
 END_EVENT_TABLE()
 
-AddMediaDialog::AddMediaDialog(wxWindow* parent, const std::list<std::string>& media_dirs, wxWindowID id) :
+AddMediaDialog::AddMediaDialog(wxWindow* parent, const std::list<std::string>& media_dirs, const wxString& fppHostname, const wxString& mediaPath, const bool renameBehavior, wxWindowID id) :
 media_directories(media_dirs)
 {
     //(*Initialize(AddMediaDialog)
@@ -68,6 +68,10 @@ media_directories(media_dirs)
     Connect(ID_BUTTON1, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&AddMediaDialog::OnButton_OkClick);
     Connect(ID_BUTTON2, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&AddMediaDialog::OnButton_CancelClick);
     //*)
+    
+    TextCtrl_FPPHostname->SetValue(fppHostname);
+    TextCtrl_MediaFilePath->SetValue(mediaPath);
+    CheckBox_UseSquenceMedia->SetValue(renameBehavior);
 }
 
 AddMediaDialog::~AddMediaDialog()
@@ -114,8 +118,6 @@ void AddMediaDialog::MediaChooser()
         }
         
         ObtainAccessToURL(filePath.ToStdString());
-//        ObtainAccessToURL(filename.ToStdString());
-
         
         SetCursor(wxCURSOR_WAIT);
         TextCtrl_MediaFilePath->SetValue(filePath);

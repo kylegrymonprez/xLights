@@ -15,7 +15,7 @@ class AddMediaDialog: public wxDialog
 {
     public:
 
-        AddMediaDialog(wxWindow* parent, const std::list<std::string>& media_dirs, wxWindowID id=wxID_ANY);
+        AddMediaDialog(wxWindow* parent, const std::list<std::string>& media_dirs, const wxString& fppHostname="", const wxString& mediaPath="", bool renameBehavior=true, wxWindowID id=wxID_ANY);
         virtual ~AddMediaDialog();
 
         //(*Declarations(AddMediaDialog)

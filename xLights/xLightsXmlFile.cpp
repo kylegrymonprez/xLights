@@ -51,7 +51,8 @@ const std::array<std::string, (int)HEADER_INFO_TYPES::NUM_TYPES> HEADER_STRINGS 
     "artist",
     "album",
     "MusicURL",
-    "comment"
+    "comment",
+    "alt-media"
 };
 
 xLightsXmlFile::xLightsXmlFile(const wxFileName& filename, uint32_t frameMS) :
@@ -816,6 +817,7 @@ void xLightsXmlFile::CreateNew()
     AddChildXmlNode(node, "album", GetHeaderInfo(HEADER_INFO_TYPES::ALBUM));
     AddChildXmlNode(node, "MusicURL", GetHeaderInfo(HEADER_INFO_TYPES::URL));
     AddChildXmlNode(node, "comment", GetHeaderInfo(HEADER_INFO_TYPES::COMMENT));
+    AddChildXmlNode(node, "alt-media", GetHeaderInfo(HEADER_INFO_TYPES::ALT_MEDIA));
     AddChildXmlNode(node, "sequenceTiming", seq_timing);
     AddChildXmlNode(node, "sequenceType", seq_type);
     AddChildXmlNode(node, "mediaFile", media_file);
@@ -1118,6 +1120,9 @@ bool xLightsXmlFile::LoadSequence(const wxString& ShowDir, bool ignore_audio, co
                     SetHeaderInfo(HEADER_INFO_TYPES::URL, UnXmlSafe(element->GetNodeContent()));
                 }
                 else if (element->GetName() == "comment") {
+                   SetHeaderInfo(HEADER_INFO_TYPES::COMMENT, UnXmlSafe(element->GetNodeContent()));
+                }
+                else if (element->GetName() == "alt-media") {
                    SetHeaderInfo(HEADER_INFO_TYPES::COMMENT, UnXmlSafe(element->GetNodeContent()));
                 }
                 else if (element->GetName() == "sequenceTiming") {

@@ -551,6 +551,7 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
     TextCtrl_Xml_Album->SetValue(xml_file->GetHeaderInfo(HEADER_INFO_TYPES::ALBUM));
     TextCtrl_Xml_Music_Url->SetValue(xml_file->GetHeaderInfo(HEADER_INFO_TYPES::URL));
     TextCtrl_Xml_Comment->SetValue(xml_file->GetHeaderInfo(HEADER_INFO_TYPES::COMMENT));
+    ProcessAltMedia(xml_file->GetHeaderInfo(HEADER_INFO_TYPES::ALT_MEDIA));
     Choice_Xml_Seq_Type->SetSelection(Choice_Xml_Seq_Type->FindString(xml_file->GetSequenceType()));
     TextCtrl_SeqTiming->SetValue(xml_file->GetSequenceTiming());
     if (xml_file->GetMedia() == nullptr) {
@@ -617,6 +618,11 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
         EndModal(wxID_OK);
     }
 }
+void SeqSettingsDialog::ProcessAltMedia(const wxString& headerValue)
+{
+    //@@ TODO
+    int i = 1;
+}
 
 void SeqSettingsDialog::OnTextCtrl_Xml_Seq_DurationLoseFocus(wxFocusEvent& event)
 {
@@ -658,11 +664,11 @@ void SeqSettingsDialog::WizardPage1()
     GridSizerWizButtons = new wxGridSizer(0, 1, 10, 0);
     BitmapButton_Wiz_Music = new FlickerFreeBitmapButton(Panel_Wizard, ID_BITMAPBUTTON_Wiz_Music, musical_seq, wxDefaultPosition, wxDefaultSize, wxNO_BORDER, wxDefaultValidator, _T("ID_BITMAPBUTTON_Wiz_Music"));
     BitmapButton_Wiz_Music->SetBitmapPressed(musical_seq_pressed);
-    GridSizerWizButtons->Add(BitmapButton_Wiz_Music, 1, wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
+    GridSizerWizButtons->Add(BitmapButton_Wiz_Music, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     BitmapButton_Wiz_Anim = new FlickerFreeBitmapButton(Panel_Wizard, ID_BITMAPBUTTON_Wiz_Anim, animation_seq, wxDefaultPosition, wxDefaultSize, wxNO_BORDER, wxDefaultValidator, _T("ID_BITMAPBUTTON_Wiz_Anim"));
     BitmapButton_Wiz_Anim->SetBitmapPressed(animation_seq_pressed);
     GridSizerWizButtons->Add(BitmapButton_Wiz_Anim, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
-    GridBagSizerWizard->Add(GridSizerWizButtons, wxGBPosition(1, 0), wxDefaultSpan, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
+    GridBagSizerWizard->Add(GridSizerWizButtons, wxGBPosition(1, 0), wxDefaultSpan, wxEXPAND|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     Panel_Wizard->SetSizer(GridBagSizerWizard);
     GridBagSizerWizard->Fit(Panel_Wizard);
     GridBagSizerWizard->SetSizeHints(Panel_Wizard);
@@ -2086,17 +2092,38 @@ void SeqSettingsDialog::OnButton_AddMedia(wxCommandEvent& event)
 
 void SeqSettingsDialog::OnButton_DeleteSelectedMedia(wxCommandEvent& event)
 {
+    long selectedRow = ListCtrl_MediaMappings->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
+    if( selectedRow != -1) {
+        ListCtrl_MediaMappings->DeleteItem(selectedRow);
+    }
 }
 
 void SeqSettingsDialog::OnListCtrl_MediaMappingsItemSelect(wxListEvent& event)
 {
     long selectedRow = ListCtrl_MediaMappings->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
-    if( selectedRow != -1 )
+    if( selectedRow != -1 ) {
         Button_DeleteSelectedMedia->Enable();
-    else
+        Button_EditSelectedMedia->Enable();
+    }
+    else {
         Button_DeleteSelectedMedia->Disable();
+        Button_EditSelectedMedia->Disable();
+    }
 }
 
 void SeqSettingsDialog::OnButton_EditSelectedMediaClick(wxCommandEvent& event)
 {
+    long selectedRow = ListCtrl_MediaMappings->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
+    if( selectedRow != -1 ) {
+        AddMediaDialog dialog(this, media_directories, ListCtrl_MediaMappings->GetItemText(selectedRow, 0),
+                              ListCtrl_MediaMappings->GetItemText(selectedRow, 1),
+                              ListCtrl_MediaMappings->GetItemText(selectedRow, 2) == "true" ? true : false);
+        
+        dialog.Fit();
+        if( dialog.ShowModal() == wxID_OK ) {
+            ListCtrl_MediaMappings->SetItem(selectedRow, 0, dialog.GetFPPHostName());
+            ListCtrl_MediaMappings->SetItem(selectedRow, 1, dialog.GetMediaPath());
+            ListCtrl_MediaMappings->SetItem(selectedRow, 2, dialog.KeepSequenceName() ? "true" : "false");
+        }
+    }
 }

@@ -6942,7 +6942,7 @@ void LayoutPanel::UnlinkSelectedModels()
         model->SetFromBase(false);
     }
 
-    xlights->GetOutputModelManager()->AddASAPWork(OutputModelManager::WORK_RGBEFFECTS_CHANGE, "LayoutPanel::LockSelectedModels");
+    xlights->GetOutputModelManager()->AddASAPWork(OutputModelManager::WORK_RGBEFFECTS_CHANGE, "LayoutPanel::UnlinkSelectedModels");
 }
 
 void LayoutPanel::LockSelectedModels(bool lock)

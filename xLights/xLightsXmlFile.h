@@ -33,7 +33,8 @@ enum class HEADER_INFO_TYPES {
     ALBUM,
     URL,
     COMMENT,
-    NUM_TYPES
+    ALT_MEDIA, // added 2024.17
+    NUM_TYPES,
 };
 
 class xLightsXmlFile : public wxFileName

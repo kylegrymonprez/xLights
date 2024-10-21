@@ -1402,6 +1402,7 @@ void TextEffect::ReplaceVaribles(wxString& msg, RenderBuffer& buffer) const
     msgReplace(msg, "${COMMENT}", buffer.GetXmlHeaderInfo(HEADER_INFO_TYPES::COMMENT));
     msgReplace(msg, "${URL}", buffer.GetXmlHeaderInfo(HEADER_INFO_TYPES::URL));
     msgReplace(msg, "${WEBSITE}", buffer.GetXmlHeaderInfo(HEADER_INFO_TYPES::WEBSITE));
+    //@@ Something here for ALTMEDIA?
 
     if (msg.Contains("${UPPER}")) {
         msg.Replace("${UPPER}", "");
