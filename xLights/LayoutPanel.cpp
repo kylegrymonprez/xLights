@@ -3673,6 +3673,7 @@ void LayoutPanel::FinalizeModel()
 
             // Models that support visitors don't use the ImportXlightsModel method
             // If there are import issues we need to try to fix them inside the XmlSerializer
+            // XmlSerializer::IsXmlSerializerFormat is not working as I expect here, the XML already has the type parameter removed
             if (!_newModel->SupportsVisitors() || !XmlSerializer::IsXmlSerializerFormat(_newModel->GetModelXml())) {
                 xlights->AddTraceMessage("LayoutPanel::FinalizeModel Do the import. " + _lastXlightsModel);
                 xlights->AddTraceMessage("LayoutPanel::FinalizeModel Model type " + _newModel->GetDisplayAs());
@@ -4435,7 +4436,9 @@ void LayoutPanel::OnPreviewMouseMove(wxMouseEvent& event)
         if (wi > 0 && ht > 0) {
             for (size_t i = 0; i < modelPreview->GetModels().size(); i++) {
                 if (modelPreview->GetModels()[i]->Selected || modelPreview->GetModels()[i]->GroupSelected) {
-                    CreateUndoPoint("SingleModel", m->name, "location");
+                    if(!m->IsLocked()) {
+                        CreateUndoPoint("SingleModel", m->name, "location");
+                    }
                     modelPreview->GetModels()[i]->AddOffset(delta_x, delta_y, 0.0);
                     modelPreview->GetModels()[i]->UpdateXmlWithScale();
                     //SetupPropGrid(modelPreview->GetModels()[i]);
