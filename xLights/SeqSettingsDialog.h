@@ -53,7 +53,6 @@ class SeqSettingsDialog: public wxDialog
 		wxButton* Button_Close;
 		wxButton* Button_DeleteSelectedMedia;
 		wxButton* Button_Download;
-		wxButton* Button_EditSelectedMedia;
 		wxButton* Button_EmailSend;
 		wxButton* Button_Layer_Delete;
 		wxButton* Button_Layer_Import;
@@ -70,10 +69,10 @@ class SeqSettingsDialog: public wxDialog
 		wxChoice* RenderModeChoice;
 		wxListCtrl* ListCtrl_MediaMappings;
 		wxNotebook* Notebook_Seq_Settings;
+		wxPanel* Panel1;
 		wxPanel* PanelInfo;
 		wxPanel* PanelMetaData;
 		wxPanel* PanelTimings;
-		wxPanel* Panel_AlternateMedia;
 		wxPanel* Panel_DataLayers;
 		wxStaticText* StaticText1;
 		wxStaticText* StaticText3;
@@ -200,8 +199,7 @@ class SeqSettingsDialog: public wxDialog
 		static const wxWindowID ID_PANEL4;
 		static const wxWindowID ID_LISTCTRL_MEDIAMAPPINGS;
 		static const wxWindowID ID_BUTTON5;
-		static const wxWindowID ID_BUTTON_EDITSELECTEDMEDIA;
-		static const wxWindowID ID_BUTTON_DELETESELECTEDMEDIA;
+		static const wxWindowID ID_BUTTON6;
 		static const wxWindowID ID_PANEL5;
 		static const wxWindowID ID_NOTEBOOK_Seq_Settings;
 		static const wxWindowID ID_STATICTEXT_Warning;
@@ -277,8 +275,6 @@ class SeqSettingsDialog: public wxDialog
 		void OnButton_AddMilisecondsClick(wxCommandEvent& event);
 		void OnButton_AddMedia(wxCommandEvent& event);
 		void OnButton_DeleteSelectedMedia(wxCommandEvent& event);
-		void OnListCtrl_MediaMappingsItemSelect(wxListEvent& event);
-		void OnButton_EditSelectedMediaClick(wxCommandEvent& event);
 		//*)
 
 		void OnButton_Xml_Rename_TimingClick(wxCommandEvent& event);
@@ -350,6 +346,5 @@ class SeqSettingsDialog: public wxDialog
         void MediaLoad(wxFileName filename);
 		bool UpdateSequenceTiming();
 		void ValidateWindow();
-        void AddMediaItem( wxString fppHostName, wxString mediaPath, bool keepName );
-        void ProcessAltMedia( const wxString& headerInfo );
+        void AddMapping(wxString hostname, wxString mediaPath, wxString renameBehavior);
 };

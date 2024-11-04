@@ -102,8 +102,7 @@ const wxWindowID SeqSettingsDialog::ID_BUTTON_Reimport = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_PANEL4 = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_LISTCTRL_MEDIAMAPPINGS = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_BUTTON5 = wxNewId();
-const wxWindowID SeqSettingsDialog::ID_BUTTON_EDITSELECTEDMEDIA = wxNewId();
-const wxWindowID SeqSettingsDialog::ID_BUTTON_DELETESELECTEDMEDIA = wxNewId();
+const wxWindowID SeqSettingsDialog::ID_BUTTON6 = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_PANEL5 = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_NOTEBOOK_Seq_Settings = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_STATICTEXT_Warning = wxNewId();
@@ -407,31 +406,29 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
     FlexGridSizer11->Add(Button_Reimport, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     FlexGridSizer9->Add(FlexGridSizer11, 1, wxALL|wxALIGN_CENTER_HORIZONTAL, 5);
     Panel_DataLayers->SetSizer(FlexGridSizer9);
-    Panel_AlternateMedia = new wxPanel(Notebook_Seq_Settings, ID_PANEL5, wxPoint(266,8), wxDefaultSize, wxTAB_TRAVERSAL, _T("ID_PANEL5"));
+    Panel1 = new wxPanel(Notebook_Seq_Settings, ID_PANEL5, wxPoint(266,8), wxDefaultSize, wxTAB_TRAVERSAL, _T("ID_PANEL5"));
     FlexGridSizer_AltMediaContent = new wxFlexGridSizer(2, 1, 0, 0);
     FlexGridSizer_AltMediaContent->AddGrowableCol(0);
     FlexGridSizer_AltMediaContent->AddGrowableRow(0);
     FlexGridSizer_AltMediaListContainer = new wxFlexGridSizer(0, 1, 0, 0);
     FlexGridSizer_AltMediaListContainer->AddGrowableCol(0);
-    ListCtrl_MediaMappings = new wxListCtrl(Panel_AlternateMedia, ID_LISTCTRL_MEDIAMAPPINGS, wxDefaultPosition, wxDefaultSize, wxLC_REPORT|wxLC_SINGLE_SEL|wxVSCROLL, wxDefaultValidator, _T("ID_LISTCTRL_MEDIAMAPPINGS"));
+    //FlexGridSizer_AltMediaListContainer->AddGrowableCol(1);
+    ListCtrl_MediaMappings = new wxListCtrl(Panel1, ID_LISTCTRL_MEDIAMAPPINGS, wxDefaultPosition, wxDefaultSize, wxLC_REPORT|wxLC_SINGLE_SEL|wxVSCROLL, wxDefaultValidator, _T("ID_LISTCTRL_MEDIAMAPPINGS"));
     FlexGridSizer_AltMediaListContainer->Add(ListCtrl_MediaMappings, 1, wxALL|wxEXPAND, 5);
     FlexGridSizer_AltMediaContent->Add(FlexGridSizer_AltMediaListContainer, 1, wxALL|wxEXPAND, 5);
     BoxSizer1 = new wxBoxSizer(wxHORIZONTAL);
-    Button_AddMedia = new wxButton(Panel_AlternateMedia, ID_BUTTON5, _("Add"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON5"));
+    Button_AddMedia = new wxButton(Panel1, ID_BUTTON5, _("Add Media"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON5"));
     BoxSizer1->Add(Button_AddMedia, 1, wxALL|wxALIGN_BOTTOM, 5);
-    Button_EditSelectedMedia = new wxButton(Panel_AlternateMedia, ID_BUTTON_EDITSELECTEDMEDIA, _("Edit"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON_EDITSELECTEDMEDIA"));
-    Button_EditSelectedMedia->Disable();
-    BoxSizer1->Add(Button_EditSelectedMedia, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
-    Button_DeleteSelectedMedia = new wxButton(Panel_AlternateMedia, ID_BUTTON_DELETESELECTEDMEDIA, _("Delete"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON_DELETESELECTEDMEDIA"));
+    Button_DeleteSelectedMedia = new wxButton(Panel1, ID_BUTTON6, _("Delete Selected"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON6"));
     Button_DeleteSelectedMedia->Disable();
     BoxSizer1->Add(Button_DeleteSelectedMedia, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     FlexGridSizer_AltMediaContent->Add(BoxSizer1, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
-    Panel_AlternateMedia->SetSizer(FlexGridSizer_AltMediaContent);
+    Panel1->SetSizer(FlexGridSizer_AltMediaContent);
     Notebook_Seq_Settings->AddPage(PanelInfo, _("Info / Media"), false);
     Notebook_Seq_Settings->AddPage(PanelMetaData, _("Meta Data"), false);
     Notebook_Seq_Settings->AddPage(PanelTimings, _("Timings"), false);
     Notebook_Seq_Settings->AddPage(Panel_DataLayers, _("Data Layers"), false);
-    Notebook_Seq_Settings->AddPage(Panel_AlternateMedia, _("Alternate Media"), false);
+    Notebook_Seq_Settings->AddPage(Panel1, _("Alternate Media"), false);
     FlexGridSizer1->Add(Notebook_Seq_Settings, 1, wxTOP|wxLEFT|wxRIGHT|wxEXPAND, 5);
     StaticText_Warning = new wxStaticText(this, ID_STATICTEXT_Warning, _("Show Warning Here"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT_Warning"));
     StaticText_Warning->Hide();
@@ -491,11 +488,8 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
     Connect(ID_BUTTON_Move_Up, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_Move_UpClick);
     Connect(ID_BUTTON_Move_Down, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_Move_DownClick);
     Connect(ID_BUTTON_Reimport, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_ReimportClick);
-    Connect(ID_LISTCTRL_MEDIAMAPPINGS, wxEVT_COMMAND_LIST_ITEM_SELECTED, (wxObjectEventFunction)&SeqSettingsDialog::OnListCtrl_MediaMappingsItemSelect);
-    Connect(ID_LISTCTRL_MEDIAMAPPINGS, wxEVT_COMMAND_LIST_ITEM_DESELECTED, (wxObjectEventFunction)&SeqSettingsDialog::OnListCtrl_MediaMappingsItemSelect);
     Connect(ID_BUTTON5, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_AddMedia);
-    Connect(ID_BUTTON_EDITSELECTEDMEDIA, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_EditSelectedMediaClick);
-    Connect(ID_BUTTON_DELETESELECTEDMEDIA, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_DeleteSelectedMedia);
+    Connect(ID_BUTTON6, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_DeleteSelectedMedia);
     Connect(ID_BUTTON_CANCEL, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_CancelClick);
     Connect(ID_BUTTON_Close, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_CloseClick);
     //*)
@@ -551,7 +545,6 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
     TextCtrl_Xml_Album->SetValue(xml_file->GetHeaderInfo(HEADER_INFO_TYPES::ALBUM));
     TextCtrl_Xml_Music_Url->SetValue(xml_file->GetHeaderInfo(HEADER_INFO_TYPES::URL));
     TextCtrl_Xml_Comment->SetValue(xml_file->GetHeaderInfo(HEADER_INFO_TYPES::COMMENT));
-    ProcessAltMedia(xml_file->GetHeaderInfo(HEADER_INFO_TYPES::ALT_MEDIA));
     Choice_Xml_Seq_Type->SetSelection(Choice_Xml_Seq_Type->FindString(xml_file->GetSequenceType()));
     TextCtrl_SeqTiming->SetValue(xml_file->GetSequenceTiming());
     if (xml_file->GetMedia() == nullptr) {
@@ -575,10 +568,6 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
         TreeCtrl_Data_Layers->AppendItem(branch, wxString::Format("Channel Offset: %d", layer->GetChannelOffset()));
     }
     TreeCtrl_Data_Layers->Expand(root);
-
-    ListCtrl_MediaMappings->AppendColumn("FPP Hostname", wxLIST_FORMAT_LEFT, 150);
-    ListCtrl_MediaMappings->AppendColumn("Media File", wxLIST_FORMAT_LEFT, 400);
-    ListCtrl_MediaMappings->AppendColumn("Use Sequence Media Name", wxLIST_FORMAT_LEFT, 175);
 
     RenderModeChoice->SetStringSelection(xml_file->GetRenderMode());
 
@@ -617,11 +606,11 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
         UpdateSequenceTiming();
         EndModal(wxID_OK);
     }
-}
-void SeqSettingsDialog::ProcessAltMedia(const wxString& headerValue)
-{
-    //@@ TODO
-    int i = 1;
+    
+    //Setup Alternate Media ListCtrl
+    ListCtrl_MediaMappings->AppendColumn("FPP Hostname", wxLIST_FORMAT_LEFT, 150);
+    ListCtrl_MediaMappings->AppendColumn("Media File Path", wxLIST_FORMAT_LEFT, 500);
+    ListCtrl_MediaMappings->AppendColumn("Rename Behavior", wxLIST_FORMAT_LEFT, 200);
 }
 
 void SeqSettingsDialog::OnTextCtrl_Xml_Seq_DurationLoseFocus(wxFocusEvent& event)
@@ -664,11 +653,11 @@ void SeqSettingsDialog::WizardPage1()
     GridSizerWizButtons = new wxGridSizer(0, 1, 10, 0);
     BitmapButton_Wiz_Music = new FlickerFreeBitmapButton(Panel_Wizard, ID_BITMAPBUTTON_Wiz_Music, musical_seq, wxDefaultPosition, wxDefaultSize, wxNO_BORDER, wxDefaultValidator, _T("ID_BITMAPBUTTON_Wiz_Music"));
     BitmapButton_Wiz_Music->SetBitmapPressed(musical_seq_pressed);
-    GridSizerWizButtons->Add(BitmapButton_Wiz_Music, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
+    GridSizerWizButtons->Add(BitmapButton_Wiz_Music, 1, wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     BitmapButton_Wiz_Anim = new FlickerFreeBitmapButton(Panel_Wizard, ID_BITMAPBUTTON_Wiz_Anim, animation_seq, wxDefaultPosition, wxDefaultSize, wxNO_BORDER, wxDefaultValidator, _T("ID_BITMAPBUTTON_Wiz_Anim"));
     BitmapButton_Wiz_Anim->SetBitmapPressed(animation_seq_pressed);
     GridSizerWizButtons->Add(BitmapButton_Wiz_Anim, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
-    GridBagSizerWizard->Add(GridSizerWizButtons, wxGBPosition(1, 0), wxDefaultSpan, wxEXPAND|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
+    GridBagSizerWizard->Add(GridSizerWizButtons, wxGBPosition(1, 0), wxDefaultSpan, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     Panel_Wizard->SetSizer(GridBagSizerWizard);
     GridBagSizerWizard->Fit(Panel_Wizard);
     GridBagSizerWizard->SetSizeHints(Panel_Wizard);
@@ -2062,16 +2051,9 @@ void SeqSettingsDialog::OnButton_AddMilisecondsClick(wxCommandEvent& event) {
         wxMessageBox("Invalid Pre/Post value(s). Neither can be blank, 0 is okay.");
 }
 
-void SeqSettingsDialog::AddMediaItem( wxString fppHostName, wxString mediaPath, bool keepName )
+void SeqSettingsDialog::AddMapping( wxString fppHost, wxString mediaPath, wxString namingBehavior)
 {
-    wxListItem item;
-    item.SetId(ListCtrl_MediaMappings->GetItemCount());
-    item.SetColumn(0);
-    item.SetText(fppHostName);
-    long index = ListCtrl_MediaMappings->InsertItem(item);
-
-    ListCtrl_MediaMappings->SetItem( index, 1, mediaPath);
-    ListCtrl_MediaMappings->SetItem( index, 2, keepName ? "true" : "false");
+    //ListCtrl_MediaMappings->InsertItem(fppHost, mediaPath, namingBehavior);
 }
 
 void SeqSettingsDialog::OnButton_AddMedia(wxCommandEvent& event)
@@ -2080,50 +2062,19 @@ void SeqSettingsDialog::OnButton_AddMedia(wxCommandEvent& event)
 //    if (dlg.ShowModal() == wxID_OK) {
 //        LoadMappingFile( dlg.GetPath());
 //    }
-//
+//    
     // populate dialog
     AddMediaDialog dialog(this, media_directories);
     dialog.Fit();
     if( dialog.ShowModal() == wxID_OK ) {
-        AddMediaItem( dialog.GetFPPHostName(), dialog.GetMediaPath(), dialog.KeepSequenceName() );
+        wxString mediaPath = dialog.GetMediaPath();
+        wxString fppHost = dialog.GetFPPHostname();
+        wxString namingBehavior = dialog.GetNamingBehavior();
+        //Populate the UI
+        AddMapping(fppHost, mediaPath, namingBehavior);
     }
-
 }
 
 void SeqSettingsDialog::OnButton_DeleteSelectedMedia(wxCommandEvent& event)
 {
-    long selectedRow = ListCtrl_MediaMappings->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
-    if( selectedRow != -1) {
-        ListCtrl_MediaMappings->DeleteItem(selectedRow);
-    }
-}
-
-void SeqSettingsDialog::OnListCtrl_MediaMappingsItemSelect(wxListEvent& event)
-{
-    long selectedRow = ListCtrl_MediaMappings->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
-    if( selectedRow != -1 ) {
-        Button_DeleteSelectedMedia->Enable();
-        Button_EditSelectedMedia->Enable();
-    }
-    else {
-        Button_DeleteSelectedMedia->Disable();
-        Button_EditSelectedMedia->Disable();
-    }
-}
-
-void SeqSettingsDialog::OnButton_EditSelectedMediaClick(wxCommandEvent& event)
-{
-    long selectedRow = ListCtrl_MediaMappings->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
-    if( selectedRow != -1 ) {
-        AddMediaDialog dialog(this, media_directories, ListCtrl_MediaMappings->GetItemText(selectedRow, 0),
-                              ListCtrl_MediaMappings->GetItemText(selectedRow, 1),
-                              ListCtrl_MediaMappings->GetItemText(selectedRow, 2) == "true" ? true : false);
-        
-        dialog.Fit();
-        if( dialog.ShowModal() == wxID_OK ) {
-            ListCtrl_MediaMappings->SetItem(selectedRow, 0, dialog.GetFPPHostName());
-            ListCtrl_MediaMappings->SetItem(selectedRow, 1, dialog.GetMediaPath());
-            ListCtrl_MediaMappings->SetItem(selectedRow, 2, dialog.KeepSequenceName() ? "true" : "false");
-        }
-    }
 }

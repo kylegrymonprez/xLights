@@ -4,7 +4,7 @@
 //(*Headers(AddMediaDialog)
 #include <wx/bmpbuttn.h>
 #include <wx/button.h>
-#include <wx/checkbox.h>
+#include <wx/combobox.h>
 #include <wx/dialog.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
@@ -15,23 +15,24 @@ class AddMediaDialog: public wxDialog
 {
     public:
 
-        AddMediaDialog(wxWindow* parent, const std::list<std::string>& media_dirs, const wxString& fppHostname="", const wxString& mediaPath="", bool renameBehavior=true, wxWindowID id=wxID_ANY);
+        AddMediaDialog(wxWindow* parent, const std::list<std::string>& media_dirs, wxWindowID id=wxID_ANY);
         virtual ~AddMediaDialog();
 
         //(*Declarations(AddMediaDialog)
         wxBitmapButton* BitmapButton_Xml_Media_File;
         wxButton* Button_Cancel;
         wxButton* Button_Ok;
-        wxCheckBox* CheckBox_UseSquenceMedia;
+        wxComboBox* ComboBox1;
         wxStaticText* StaticText_FPPHostname;
+        wxStaticText* StaticText_FileRenameBehavior;
         wxStaticText* StaticText_MediaFile;
-        wxStaticText* StaticText_UseSequenceMedia;
         wxTextCtrl* TextCtrl_FPPHostname;
         wxTextCtrl* TextCtrl_MediaFilePath;
         //*)
-        wxString GetFPPHostName() { return TextCtrl_FPPHostname->GetValue(); }
         wxString GetMediaPath() { return TextCtrl_MediaFilePath->GetValue(); }
-        bool KeepSequenceName() { return CheckBox_UseSquenceMedia->IsChecked(); }
+        wxString GetFPPHostname() { return TextCtrl_FPPHostname->GetValue(); }
+        wxString GetNamingBehavior() { return ComboBox1->GetStringSelection(); }
+        
 
     protected:
 
@@ -41,8 +42,8 @@ class AddMediaDialog: public wxDialog
         static const wxWindowID ID_STATICTEXT_MEDIAFILE;
         static const wxWindowID ID_TEXTCTRL_MEDIA_PATH;
         static const wxWindowID ID_BITMAPBUTTON_Xml_Media_File;
-        static const wxWindowID ID_STATICTEXT_USE_SEQ;
-        static const wxWindowID ID_CHECKBOX1;
+        static const wxWindowID ID_STATICTEXT_FNBEHAVIOR;
+        static const wxWindowID ID_COMBOBOX1;
         static const wxWindowID ID_BUTTON1;
         static const wxWindowID ID_BUTTON2;
         //*)
