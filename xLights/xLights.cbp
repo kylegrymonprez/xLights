@@ -1144,6 +1144,7 @@
 		<Unit filename="wxWEBPHandler/wx/imagwebp.h" />
 		<Unit filename="wx_pch.h" />
 		<Unit filename="wxsmith/AboutDialog.wxs" />
+		<Unit filename="wxsmith/AddMediaDialog.wxs"/>
 		<Unit filename="wxsmith/AdjustPanel.wxs" />
 		<Unit filename="wxsmith/AlignmentDialog.wxs" />
 		<Unit filename="wxsmith/AssistPanel.wxs" />
