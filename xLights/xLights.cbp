@@ -1144,7 +1144,7 @@
 		<Unit filename="wxWEBPHandler/wx/imagwebp.h" />
 		<Unit filename="wx_pch.h" />
 		<Unit filename="wxsmith/AboutDialog.wxs" />
-		<Unit filename="wxsmith/AddMediaDialog.wxs"/>
+		<Unit filename="wxsmith/AddMediaDialog.wxs" />
 		<Unit filename="wxsmith/AdjustPanel.wxs" />
 		<Unit filename="wxsmith/AlignmentDialog.wxs" />
 		<Unit filename="wxsmith/AssistPanel.wxs" />
@@ -1548,6 +1548,7 @@
 					<wxDialog wxs="wxsmith/AutoLabelDialog.wxs" src="AutoLabelDialog.cpp" hdr="AutoLabelDialog.h" fwddecl="0" i18n="1" name="AutoLabelDialog" language="CPP" />
 					<wxDialog wxs="wxsmith/EditAliasesDialog.wxs" src="EditAliasesDialog.cpp" hdr="EditAliasesDialog.h" fwddecl="0" i18n="1" name="EditAliasesDialog" language="CPP" />
 					<wxDialog wxs="wxsmith/EditSubmodelAliasesDialog.wxs" src="EditSubmodelAliasesDialog.cpp" hdr="EditSubmodelAliasesDialog.h" fwddecl="0" i18n="1" name="EditSubmodelAliasesDialog" language="CPP" />
+					<wxDialog wxs="wxsmith/AddMediaDialog.wxs" src="AddMediaDialog.cpp" hdr="AddMediaDialog.h" fwddecl="0" i18n="1" name="AddMediaDialog" language="CPP" />
 				</resources>
 			</wxsmith>
 			<code_completion />
