@@ -2053,16 +2053,14 @@ void SeqSettingsDialog::OnButton_AddMilisecondsClick(wxCommandEvent& event) {
 
 void SeqSettingsDialog::AddMapping( wxString fppHost, wxString mediaPath, wxString namingBehavior)
 {
-    //ListCtrl_MediaMappings->InsertItem(fppHost, mediaPath, namingBehavior);
+    long rowIndex = ListCtrl_MediaMappings->GetItemCount();
+    ListCtrl_MediaMappings->InsertItem(rowIndex, fppHost);
+    ListCtrl_MediaMappings->SetItem(rowIndex, 1, mediaPath);
+    ListCtrl_MediaMappings->SetItem(rowIndex, 2, namingBehavior);
 }
 
 void SeqSettingsDialog::OnButton_AddMedia(wxCommandEvent& event)
 {
-//    wxFileDialog dlg(this, "Load mapping", wxEmptyString, wxEmptyString, "Mapping Files (*.xjmap;*.xmap;*.xmaphint)|*.xjmap;*.xmap;*.xmaphint|All Files (*.)|*.*", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
-//    if (dlg.ShowModal() == wxID_OK) {
-//        LoadMappingFile( dlg.GetPath());
-//    }
-//    
     // populate dialog
     AddMediaDialog dialog(this, media_directories);
     dialog.Fit();
@@ -2072,8 +2070,23 @@ void SeqSettingsDialog::OnButton_AddMedia(wxCommandEvent& event)
         wxString namingBehavior = dialog.GetNamingBehavior();
         //Populate the UI
         AddMapping(fppHost, mediaPath, namingBehavior);
+        //@@@
+        //Create Alt Media Payload
+        UpdateAltMediaHeaderInfo(fppHost, mediaPath, namingBehavior);
+
     }
 }
+
+void SeqSettingsDialog::UpdateAltMediaHeaderInfo(wxString fppHost, wxString mediaPath, wxString namingBehavior)
+{
+    wxXmlNode* mediaNode = new wxXmlNode(wxXML_ELEMENT_NODE, "mediaEntry");
+    mediaNode->AddAttribute("fppHost", string_format("%s", fppHost));
+    mediaNode->AddAttribute("mediaPath", string_format("%s", mediaPath));
+    mediaNode->AddAttribute("namingBehavior", string_format("%s", namingBehavior));
+    int temp = 0;
+}
+
+
 
 void SeqSettingsDialog::OnButton_DeleteSelectedMedia(wxCommandEvent& event)
 {

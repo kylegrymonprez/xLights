@@ -171,6 +171,9 @@ FPPConnectDialog::FPPConnectDialog(wxWindow* parent, OutputManager* outputManage
     CheckListBox_Sequences->AppendColumn("Media", wxCOL_WIDTH_AUTOSIZE,
                                          wxALIGN_LEFT,
                                          wxCOL_RESIZABLE | wxCOL_SORTABLE);
+    CheckListBox_Sequences->AppendColumn("Alternate Media", wxCOL_WIDTH_AUTOSIZE,
+                                         wxALIGN_LEFT,
+                                         wxCOL_RESIZABLE | wxCOL_SORTABLE);
 
     wxConfigBase* config = wxConfigBase::Get();
     auto seqSortCol = config->ReadLong("xLightsFPPConnectSequenceSortCol", SORT_SEQ_NAME_COL);
@@ -201,9 +204,9 @@ FPPConnectDialog::FPPConnectDialog(wxWindow* parent, OutputManager* outputManage
     AddInstanceHeader("Mode", "FPP Mode.");
     AddInstanceHeader("Version", "FPP Software Version.");
     AddInstanceHeader("FSEQ Type", "FSEQ File Version. FPP 2.6 required for V2 formats.");
-    AddInstanceHeader("Media", "Enable to Upload MP3, MP4 and WAV Media Files.");
+    AddInstanceHeader("Media", "'None' - Device is not going to play any media. \n \n'Sequence'- Device will play the primary sequence media. \n \n'Alternate'- Device will play media assigned to it in the sequence's 'Alternate Media' tab");
     AddInstanceHeader("Models", "Enable to Upload Models for Display Testing.");
-    AddInstanceHeader("UDP Out", "'None'- Device is not going to send Pixel data across the network. \n \n 'All' This will send pixel data over your Show Network from FPP instance to all controllers marked as 'ACTIVE'. \n \n 'Proxied' will set UDP Out only for Controllers with a Proxy IP address set.");
+    AddInstanceHeader("Outputs", "'None'- Device is not going to send Pixel data across the network. \n \n'All' This will send pixel data over your Show Network from FPP instance to all controllers marked as 'ACTIVE'. \n \n'Proxied' will set UDP Out only for Controllers with a Proxy IP address set.");
     AddInstanceHeader("Add Proxies", "Upload Proxy IP Adresses to FPP.");
     AddInstanceHeader("Playlist","Select Playlist to Add Uploaded Sequences Too.");
     wxPanel *p3 = AddInstanceHeader("Pixel Hat/Cape", "Display Hat or Hat Attached to FPP Device, If Found.");
@@ -441,9 +444,22 @@ void FPPConnectDialog::PopulateFPPInstanceList(wxProgressDialog *prgs) {
             if (prgs) {
                 prgs->Pulse("Probing information from " + l);
             }
-            wxCheckBox *CheckBox1 = new wxCheckBox(FPPInstanceList, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, MEDIA_COL + rowStr);
-            CheckBox1->SetValue(inst->mode != "remote");
-            FPPInstanceSizer->Add(CheckBox1, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 1);
+            //@@ Change the Checkbox to a dropdown
+            wxChoice* Choice_MediaPush = new wxChoice(FPPInstanceList, wxID_ANY, wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, MODELS_COL + rowStr);
+            wxFont mediafont = Choice_MediaPush->GetFont();
+            mediafont.SetPointSize(mediafont.GetPointSize() - 2);
+            Choice_MediaPush->SetFont(mediafont);
+
+            Choice_MediaPush->Append(_("None"));
+            Choice_MediaPush->Append(_("Sequence"));
+            Choice_MediaPush->Append(_("Alternate"));
+            Choice_MediaPush->SetSelection(inst->mode != "remote" ? 1 : 0);
+            FPPInstanceSizer->Add(Choice_MediaPush, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 1);
+            
+//            wxCheckBox *CheckBox1 = new wxCheckBox(FPPInstanceList, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, MEDIA_COL + rowStr);
+//            CheckBox1->SetValue(inst->mode != "remote");
+//            FPPInstanceSizer->Add(CheckBox1, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 1);
+            
             wxChoice* Choice1 = new wxChoice(FPPInstanceList, wxID_ANY, wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, MODELS_COL + rowStr);
             wxFont font = Choice1->GetFont();
             font.SetPointSize(font.GetPointSize() - 2);
@@ -480,10 +496,20 @@ void FPPConnectDialog::PopulateFPPInstanceList(wxProgressDialog *prgs) {
             ComboBox1->SetFont(font);
             FPPInstanceSizer->Add(ComboBox1, 1, wxALL|wxEXPAND, 0);
         } else if (inst->fppType == FPP_TYPE::FALCONV4V5) {
+            //@@ Why is this here??
             // this probably needs to be moved as this is not really a zlib thing but only the falcons end up here today so I am going to put it here for now
-            wxCheckBox *CheckBox1 = new wxCheckBox(FPPInstanceList, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, MEDIA_COL + rowStr);
-            CheckBox1->SetValue(inst->mode != "remote");
-            FPPInstanceSizer->Add(CheckBox1, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 1);
+//            wxCheckBox *CheckBox1 = new wxCheckBox(FPPInstanceList, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, MEDIA_COL + rowStr);
+//            CheckBox1->SetValue(inst->mode != "remote");
+            wxChoice* Choice_MediaPush = new wxChoice(FPPInstanceList, wxID_ANY, wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, MODELS_COL + rowStr);
+            wxFont mediafont = Choice_MediaPush->GetFont();
+            mediafont.SetPointSize(mediafont.GetPointSize() - 2);
+            Choice_MediaPush->SetFont(mediafont);
+
+            Choice_MediaPush->Append(_("None"));
+            Choice_MediaPush->Append(_("Sequence"));
+            Choice_MediaPush->Append(_("Alternate"));
+            Choice_MediaPush->SetSelection(inst->mode != "remote" ? 1 : 0);
+            FPPInstanceSizer->Add(Choice_MediaPush, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 1);
 
             FPPInstanceSizer->Add(0, 0, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 1);
             FPPInstanceSizer->Add(0, 0, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 1);
@@ -621,10 +647,14 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
             parser->append(&buf[0], read);
             SP_XmlPullEvent * event = parser->getNext();
             int done = 0;
+            bool mediaDone = false;
+            bool altMediaDone = false;
             int count = 0;
             bool isSequence = false;
             bool isMedia = false;
+            bool isAltMedia = false;
             std::string mediaName;
+            std::string alternateMediaNames;
 
             while (!done) {
                 if (!event) {
@@ -647,8 +677,14 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
                                     isSequence = true;
                                 } else if (NodeName == "mediaFile") {
                                     isMedia = true;
-                                } else {
+                                    isAltMedia = false;
+                                } else if ( NodeName == "alt-media") {
+                                    isAltMedia = true;
                                     isMedia = false;
+                                }
+                                else {
+                                    isMedia = false;
+                                    isAltMedia = false;
                                 }
                                 if (count == 100) {
                                     //media file will be very early in the file, dont waste time;
@@ -660,7 +696,13 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
                             if (isMedia) {
                                 SP_XmlCDataEvent * stagEvent = (SP_XmlCDataEvent*)event;
                                 mediaName = FromUTF8(stagEvent->getText());
-                                done = true;
+                                mediaDone = true;
+                                done = mediaDone && altMediaDone;
+                            } else if (isAltMedia) {
+                                SP_XmlCDataEvent * stagEvent = (SP_XmlCDataEvent*)event;
+                                alternateMediaNames = FromUTF8(stagEvent->getText());
+                                altMediaDone = true;
+                                done = mediaDone && altMediaDone;
                             }
                             break;
                     }
@@ -728,6 +770,10 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
                     if (mediaName != "") {
                         CheckListBox_Sequences->SetItemText(item, 2, mediaName);
                     }
+                    
+//                    if ( alternateMediaNames ) {
+//                        int temp = 0;
+//                    }
                 }
             }
         }
@@ -808,6 +854,7 @@ void FPPConnectDialog::LoadSequences()
                     if (header.code[0] == 'm' && header.code[1] == 'f') {
                         wxString mediaName = (const char*)(&header.data[0]);
                         mediaName = FixFile("", mediaName);
+                        ///@@ Altername media names here??
                         if (FileExists(mediaName)) {
                             CheckListBox_Sequences->SetItemText(item, 2, mediaName);
                         }

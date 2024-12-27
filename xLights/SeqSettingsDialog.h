@@ -347,4 +347,5 @@ class SeqSettingsDialog: public wxDialog
 		bool UpdateSequenceTiming();
 		void ValidateWindow();
         void AddMapping(wxString hostname, wxString mediaPath, wxString renameBehavior);
+        void UpdateAltMediaHeaderInfo(wxString hostname, wxString mediaPath, wxString renameBehavior);
 };
