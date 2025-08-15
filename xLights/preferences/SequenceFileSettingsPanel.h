@@ -65,25 +65,25 @@ class SequenceFileSettingsPanel: public wxPanel
 	protected:
 
 		//(*Identifiers(SequenceFileSettingsPanel)
-		static const long ID_CHECKBOX1;
-		static const long ID_CHECKBOX3;
-		static const long ID_CHECKBOX2;
-		static const long ID_STATICTEXT1;
-		static const long ID_CHOICE4;
-		static const long ID_CHOICE1;
-		static const long ID_CHOICE2;
-		static const long ID_CHOICE3;
-		static const long ID_CHECKBOX6;
-		static const long ID_DIRPICKERCTRL3;
-		static const long ID_STATICTEXT3;
-		static const long ID_CHOICE5;
-		static const long ID_CHECKBOX5;
-		static const long ID_DIRPICKERCTRL2;
-		static const long ID_LISTBOX_MEDIA;
-		static const long ID_BUTTON_ADDMEDIA;
-		static const long ID_BUTTON_REMOVE_MEDIA;
-		static const long ID_STATICTEXT2;
-		static const long ID_CHOICE_VIEW_DEFAULT;
+		static const wxWindowID ID_CHECKBOX1;
+		static const wxWindowID ID_CHECKBOX3;
+		static const wxWindowID ID_CHECKBOX2;
+		static const wxWindowID ID_STATICTEXT1;
+		static const wxWindowID ID_CHOICE4;
+		static const wxWindowID ID_CHOICE1;
+		static const wxWindowID ID_CHOICE2;
+		static const wxWindowID ID_CHOICE3;
+		static const wxWindowID ID_CHECKBOX6;
+		static const wxWindowID ID_DIRPICKERCTRL3;
+		static const wxWindowID ID_STATICTEXT3;
+		static const wxWindowID ID_CHOICE5;
+		static const wxWindowID ID_CHECKBOX5;
+		static const wxWindowID ID_DIRPICKERCTRL2;
+		static const wxWindowID ID_LISTBOX_MEDIA;
+		static const wxWindowID ID_BUTTON_ADDMEDIA;
+		static const wxWindowID ID_BUTTON_REMOVE_MEDIA;
+		static const wxWindowID ID_STATICTEXT2;
+		static const wxWindowID ID_CHOICE_VIEW_DEFAULT;
 		//*)
 
 	private:

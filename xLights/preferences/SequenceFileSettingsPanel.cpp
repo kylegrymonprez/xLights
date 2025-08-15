@@ -27,25 +27,25 @@
 #include "../xLightsMain.h"
 
 //(*IdInit(SequenceFileSettingsPanel)
-const long SequenceFileSettingsPanel::ID_CHECKBOX1 = wxNewId();
-const long SequenceFileSettingsPanel::ID_CHECKBOX3 = wxNewId();
-const long SequenceFileSettingsPanel::ID_CHECKBOX2 = wxNewId();
-const long SequenceFileSettingsPanel::ID_STATICTEXT1 = wxNewId();
-const long SequenceFileSettingsPanel::ID_CHOICE4 = wxNewId();
-const long SequenceFileSettingsPanel::ID_CHOICE1 = wxNewId();
-const long SequenceFileSettingsPanel::ID_CHOICE2 = wxNewId();
-const long SequenceFileSettingsPanel::ID_CHOICE3 = wxNewId();
-const long SequenceFileSettingsPanel::ID_CHECKBOX6 = wxNewId();
-const long SequenceFileSettingsPanel::ID_DIRPICKERCTRL3 = wxNewId();
-const long SequenceFileSettingsPanel::ID_STATICTEXT3 = wxNewId();
-const long SequenceFileSettingsPanel::ID_CHOICE5 = wxNewId();
-const long SequenceFileSettingsPanel::ID_CHECKBOX5 = wxNewId();
-const long SequenceFileSettingsPanel::ID_DIRPICKERCTRL2 = wxNewId();
-const long SequenceFileSettingsPanel::ID_LISTBOX_MEDIA = wxNewId();
-const long SequenceFileSettingsPanel::ID_BUTTON_ADDMEDIA = wxNewId();
-const long SequenceFileSettingsPanel::ID_BUTTON_REMOVE_MEDIA = wxNewId();
-const long SequenceFileSettingsPanel::ID_STATICTEXT2 = wxNewId();
-const long SequenceFileSettingsPanel::ID_CHOICE_VIEW_DEFAULT = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_CHECKBOX1 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_CHECKBOX3 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_CHECKBOX2 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_STATICTEXT1 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_CHOICE4 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_CHOICE1 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_CHOICE2 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_CHOICE3 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_CHECKBOX6 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_DIRPICKERCTRL3 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_STATICTEXT3 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_CHOICE5 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_CHECKBOX5 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_DIRPICKERCTRL2 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_LISTBOX_MEDIA = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_BUTTON_ADDMEDIA = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_BUTTON_REMOVE_MEDIA = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_STATICTEXT2 = wxNewId();
+const wxWindowID SequenceFileSettingsPanel::ID_CHOICE_VIEW_DEFAULT = wxNewId();
 //*)
 
 BEGIN_EVENT_TABLE(SequenceFileSettingsPanel,wxPanel)
@@ -166,25 +166,23 @@ SequenceFileSettingsPanel::SequenceFileSettingsPanel(wxWindow* parent,xLightsFra
 	ViewDefaultChoice->SetToolTip(_("This option is used to select which models will populate the master view when a new sequence is created."));
 	GridBagSizer1->Add(ViewDefaultChoice, wxGBPosition(3, 1), wxDefaultSpan, wxALL|wxEXPAND, 5);
 	SetSizer(GridBagSizer1);
-	GridBagSizer1->Fit(this);
-	GridBagSizer1->SetSizeHints(this);
 
-	Connect(ID_CHECKBOX1,wxEVT_COMMAND_CHECKBOX_CLICKED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnRenderOnSaveCheckBoxClick);
-	Connect(ID_CHECKBOX3,wxEVT_COMMAND_CHECKBOX_CLICKED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnCheckBox_LowDefinitionRenderClick);
-	Connect(ID_CHECKBOX2,wxEVT_COMMAND_CHECKBOX_CLICKED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnFSEQSaveCheckBoxClick);
-	Connect(ID_CHOICE4,wxEVT_COMMAND_CHOICE_SELECTED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnModelBlendDefaultChoiceSelect);
-	Connect(ID_CHOICE1,wxEVT_COMMAND_CHOICE_SELECTED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnRenderCacheChoiceSelect);
-	Connect(ID_CHOICE2,wxEVT_COMMAND_CHOICE_SELECTED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnAutoSaveIntervalChoiceSelect);
-	Connect(ID_CHOICE3,wxEVT_COMMAND_CHOICE_SELECTED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnFSEQVersionChoiceSelect);
-	Connect(ID_CHECKBOX6,wxEVT_COMMAND_CHECKBOX_CLICKED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnCheckBox_RenderCacheClick);
-	Connect(ID_DIRPICKERCTRL3,wxEVT_COMMAND_DIRPICKER_CHANGED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnDirPickerCtrl_RenderCacheDirChanged);
-	Connect(ID_CHOICE5,wxEVT_COMMAND_CHOICE_SELECTED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnChoice_MaximumRenderCacheSelect);
-	Connect(ID_CHECKBOX5,wxEVT_COMMAND_CHECKBOX_CLICKED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnCheckBox_FSEQClick);
-	Connect(ID_DIRPICKERCTRL2,wxEVT_COMMAND_DIRPICKER_CHANGED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnDirPickerCtrl_FSEQDirChanged);
-	Connect(ID_LISTBOX_MEDIA,wxEVT_COMMAND_LISTBOX_SELECTED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnMediaDirectoryListSelect);
-	Connect(ID_BUTTON_ADDMEDIA,wxEVT_COMMAND_BUTTON_CLICKED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnAddMediaButtonClick);
-	Connect(ID_BUTTON_REMOVE_MEDIA,wxEVT_COMMAND_BUTTON_CLICKED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnRemoveMediaButtonClick);
-	Connect(ID_CHOICE_VIEW_DEFAULT,wxEVT_COMMAND_CHOICE_SELECTED,(wxObjectEventFunction)&SequenceFileSettingsPanel::OnViewDefaultChoiceSelect);
+	Connect(ID_CHECKBOX1, wxEVT_COMMAND_CHECKBOX_CLICKED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnRenderOnSaveCheckBoxClick);
+	Connect(ID_CHECKBOX3, wxEVT_COMMAND_CHECKBOX_CLICKED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnCheckBox_LowDefinitionRenderClick);
+	Connect(ID_CHECKBOX2, wxEVT_COMMAND_CHECKBOX_CLICKED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnFSEQSaveCheckBoxClick);
+	Connect(ID_CHOICE4, wxEVT_COMMAND_CHOICE_SELECTED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnModelBlendDefaultChoiceSelect);
+	Connect(ID_CHOICE1, wxEVT_COMMAND_CHOICE_SELECTED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnRenderCacheChoiceSelect);
+	Connect(ID_CHOICE2, wxEVT_COMMAND_CHOICE_SELECTED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnAutoSaveIntervalChoiceSelect);
+	Connect(ID_CHOICE3, wxEVT_COMMAND_CHOICE_SELECTED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnFSEQVersionChoiceSelect);
+	Connect(ID_CHECKBOX6, wxEVT_COMMAND_CHECKBOX_CLICKED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnCheckBox_RenderCacheClick);
+	Connect(ID_DIRPICKERCTRL3, wxEVT_COMMAND_DIRPICKER_CHANGED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnDirPickerCtrl_RenderCacheDirChanged);
+	Connect(ID_CHOICE5, wxEVT_COMMAND_CHOICE_SELECTED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnChoice_MaximumRenderCacheSelect);
+	Connect(ID_CHECKBOX5, wxEVT_COMMAND_CHECKBOX_CLICKED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnCheckBox_FSEQClick);
+	Connect(ID_DIRPICKERCTRL2, wxEVT_COMMAND_DIRPICKER_CHANGED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnDirPickerCtrl_FSEQDirChanged);
+	Connect(ID_LISTBOX_MEDIA, wxEVT_COMMAND_LISTBOX_SELECTED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnMediaDirectoryListSelect);
+	Connect(ID_BUTTON_ADDMEDIA, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnAddMediaButtonClick);
+	Connect(ID_BUTTON_REMOVE_MEDIA, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnRemoveMediaButtonClick);
+	Connect(ID_CHOICE_VIEW_DEFAULT, wxEVT_COMMAND_CHOICE_SELECTED, (wxObjectEventFunction)&SequenceFileSettingsPanel::OnViewDefaultChoiceSelect);
 	//*)
 
 	GridBagSizer1->Fit(this);
