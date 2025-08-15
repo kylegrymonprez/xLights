@@ -748,16 +748,6 @@
 											<option>1</option>
 										</object>
 										<object class="sizeritem">
-											<object class="wxButton" name="ID_BUTTON_EDITSELECTEDMEDIA" variable="Button_EditSelectedMedia" member="yes">
-												<label>Edit</label>
-												<enabled>0</enabled>
-												<handler function="OnButton_EditSelectedMediaClick" entry="EVT_BUTTON" />
-											</object>
-											<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
-											<border>5</border>
-											<option>1</option>
-										</object>
-										<object class="sizeritem">
 											<object class="wxButton" name="ID_BUTTON_DELETESELECTEDMEDIA" variable="Button_DeleteSelectedMedia" member="yes">
 												<label>Delete</label>
 												<enabled>0</enabled>

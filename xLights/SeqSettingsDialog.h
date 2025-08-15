@@ -53,7 +53,6 @@ class SeqSettingsDialog: public wxDialog
 		wxButton* Button_Close;
 		wxButton* Button_DeleteSelectedMedia;
 		wxButton* Button_Download;
-		wxButton* Button_EditSelectedMedia;
 		wxButton* Button_EmailSend;
 		wxButton* Button_Layer_Delete;
 		wxButton* Button_Layer_Import;
@@ -200,7 +199,6 @@ class SeqSettingsDialog: public wxDialog
 		static const wxWindowID ID_PANEL4;
 		static const wxWindowID ID_LISTCTRL_MEDIAMAPPINGS;
 		static const wxWindowID ID_BUTTON_ADDMEDIA;
-		static const wxWindowID ID_BUTTON_EDITSELECTEDMEDIA;
 		static const wxWindowID ID_BUTTON_DELETESELECTEDMEDIA;
 		static const wxWindowID ID_PANEL5;
 		static const wxWindowID ID_NOTEBOOK_Seq_Settings;

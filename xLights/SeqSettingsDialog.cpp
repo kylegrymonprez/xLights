@@ -101,7 +101,6 @@ const wxWindowID SeqSettingsDialog::ID_BUTTON_Reimport = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_PANEL4 = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_LISTCTRL_MEDIAMAPPINGS = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_BUTTON_ADDMEDIA = wxNewId();
-const wxWindowID SeqSettingsDialog::ID_BUTTON_EDITSELECTEDMEDIA = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_BUTTON_DELETESELECTEDMEDIA = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_PANEL5 = wxNewId();
 const wxWindowID SeqSettingsDialog::ID_NOTEBOOK_Seq_Settings = wxNewId();
@@ -418,9 +417,6 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
     BoxSizer_MediaManagementButtons = new wxBoxSizer(wxHORIZONTAL);
     Button_AddMedia = new wxButton(Panel_AlternateMedia, ID_BUTTON_ADDMEDIA, _("Add"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON_ADDMEDIA"));
     BoxSizer_MediaManagementButtons->Add(Button_AddMedia, 1, wxALL|wxALIGN_BOTTOM, 5);
-    Button_EditSelectedMedia = new wxButton(Panel_AlternateMedia, ID_BUTTON_EDITSELECTEDMEDIA, _("Edit"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON_EDITSELECTEDMEDIA"));
-    Button_EditSelectedMedia->Disable();
-    BoxSizer_MediaManagementButtons->Add(Button_EditSelectedMedia, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     Button_DeleteSelectedMedia = new wxButton(Panel_AlternateMedia, ID_BUTTON_DELETESELECTEDMEDIA, _("Delete"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON_DELETESELECTEDMEDIA"));
     Button_DeleteSelectedMedia->Disable();
     BoxSizer_MediaManagementButtons->Add(Button_DeleteSelectedMedia, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
@@ -491,7 +487,6 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
     Connect(ID_BUTTON_Move_Down, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_Move_DownClick);
     Connect(ID_BUTTON_Reimport, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_ReimportClick);
     Connect(ID_BUTTON_ADDMEDIA, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_AddMediaClick);
-    Connect(ID_BUTTON_EDITSELECTEDMEDIA, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_EditSelectedMediaClick);
     Connect(ID_BUTTON_DELETESELECTEDMEDIA, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_DeleteSelectedMediaClick);
     Connect(ID_BUTTON_CANCEL, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_CancelClick);
     Connect(ID_BUTTON_Close, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_CloseClick);
