@@ -722,10 +722,12 @@
 								<object class="sizeritem">
 									<object class="wxFlexGridSizer" variable="FlexGridSizer_AltMediaListContainer" member="no">
 										<cols>1</cols>
+										<rows>1</rows>
 										<growablecols>0</growablecols>
+										<growablerows>0</growablerows>
 										<object class="sizeritem">
-											<object class="wxListCtrl" name="ID_LISTCTRL_MEDIAMAPPINGS" variable="ListCtrl_MediaMappings" member="yes">
-												<style>wxLC_REPORT|wxLC_SINGLE_SEL|wxVSCROLL</style>
+											<object class="wxListBox" name="ID_LISTBOX_AlternateMedia" variable="ListBox_AlternateMedia" member="yes">
+												<default>-1</default>
 											</object>
 											<flag>wxALL|wxEXPAND</flag>
 											<border>5</border>

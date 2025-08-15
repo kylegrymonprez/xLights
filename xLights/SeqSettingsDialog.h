@@ -21,7 +21,7 @@
 #include <wx/choice.h>
 #include <wx/dialog.h>
 #include <wx/gbsizer.h>
-#include <wx/listctrl.h>
+#include <wx/listbox.h>
 #include <wx/notebook.h>
 #include <wx/panel.h>
 #include <wx/sizer.h>
@@ -72,7 +72,7 @@ class SeqSettingsDialog: public wxDialog
 		wxCheckBox* CheckBox_Overwrite_Tags;
 		wxChoice* Choice_Xml_Seq_Type;
 		wxChoice* RenderModeChoice;
-		wxListCtrl* ListCtrl_MediaMappings;
+		wxListBox* ListBox_AlternateMedia;
 		wxNotebook* Notebook_Seq_Settings;
 		wxPanel* PanelInfo;
 		wxPanel* PanelMetaData;
@@ -202,7 +202,7 @@ class SeqSettingsDialog: public wxDialog
 		static const wxWindowID ID_BUTTON_Move_Down;
 		static const wxWindowID ID_BUTTON_Reimport;
 		static const wxWindowID ID_PANEL4;
-		static const wxWindowID ID_LISTCTRL_MEDIAMAPPINGS;
+		static const wxWindowID ID_LISTBOX_AlternateMedia;
 		static const wxWindowID ID_BUTTON_ADDMEDIA;
 		static const wxWindowID ID_BUTTON_DELETESELECTEDMEDIA;
 		static const wxWindowID ID_PANEL5;
