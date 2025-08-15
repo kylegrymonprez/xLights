@@ -21,6 +21,7 @@
 #include <wx/choice.h>
 #include <wx/dialog.h>
 #include <wx/gbsizer.h>
+#include <wx/listctrl.h>
 #include <wx/notebook.h>
 #include <wx/panel.h>
 #include <wx/sizer.h>
@@ -46,10 +47,13 @@ class SeqSettingsDialog: public wxDialog
 		//(*Declarations(SeqSettingsDialog)
 		wxBitmapButton* BitmapButton_ModifyTiming;
 		wxBitmapButton* BitmapButton_Xml_Media_File;
+		wxButton* Button_AddMedia;
 		wxButton* Button_AddMilliseconds;
 		wxButton* Button_Cancel;
 		wxButton* Button_Close;
+		wxButton* Button_DeleteSelectedMedia;
 		wxButton* Button_Download;
+		wxButton* Button_EditSelectedMedia;
 		wxButton* Button_EmailSend;
 		wxButton* Button_Layer_Delete;
 		wxButton* Button_Layer_Import;
@@ -64,10 +68,12 @@ class SeqSettingsDialog: public wxDialog
 		wxCheckBox* CheckBox_Overwrite_Tags;
 		wxChoice* Choice_Xml_Seq_Type;
 		wxChoice* RenderModeChoice;
+		wxListCtrl* ListCtrl_MediaMappings;
 		wxNotebook* Notebook_Seq_Settings;
 		wxPanel* PanelInfo;
 		wxPanel* PanelMetaData;
 		wxPanel* PanelTimings;
+		wxPanel* Panel_AlternateMedia;
 		wxPanel* Panel_DataLayers;
 		wxStaticText* StaticText1;
 		wxStaticText* StaticText3;
@@ -192,6 +198,11 @@ class SeqSettingsDialog: public wxDialog
 		static const wxWindowID ID_BUTTON_Move_Down;
 		static const wxWindowID ID_BUTTON_Reimport;
 		static const wxWindowID ID_PANEL4;
+		static const wxWindowID ID_LISTCTRL_MEDIAMAPPINGS;
+		static const wxWindowID ID_BUTTON_ADDMEDIA;
+		static const wxWindowID ID_BUTTON_EDITSELECTEDMEDIA;
+		static const wxWindowID ID_BUTTON_DELETESELECTEDMEDIA;
+		static const wxWindowID ID_PANEL5;
 		static const wxWindowID ID_NOTEBOOK_Seq_Settings;
 		static const wxWindowID ID_STATICTEXT_Warning;
 		static const wxWindowID ID_STATICTEXT_Info;
@@ -263,7 +274,10 @@ class SeqSettingsDialog: public wxDialog
 		void OnButton_EmailSendClick(wxCommandEvent& event);
 		void OnButton_WebsiteOpenClick(wxCommandEvent& event);
 		void OnButton_MusicOpenClick(wxCommandEvent& event);
-        void OnButton_AddMillisecondsClick(wxCommandEvent& event);
+		void OnButton_AddMillisecondsClick(wxCommandEvent& event);
+		void OnButton_AddMediaClick(wxCommandEvent& event);
+		void OnButton_EditSelectedMediaClick(wxCommandEvent& event);
+		void OnButton_DeleteSelectedMediaClick(wxCommandEvent& event);
 		//*)
 
 		void OnButton_Xml_Rename_TimingClick(wxCommandEvent& event);

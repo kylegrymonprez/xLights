@@ -711,6 +711,71 @@
 						</object>
 						<label>Data Layers</label>
 					</object>
+					<object class="notebookpage">
+						<object class="wxPanel" name="ID_PANEL5" variable="Panel_AlternateMedia" member="yes">
+							<pos>266,8</pos>
+							<object class="wxFlexGridSizer" variable="FlexGridSizer_AltMediaContent" member="no">
+								<cols>1</cols>
+								<rows>2</rows>
+								<growablecols>0</growablecols>
+								<growablerows>0</growablerows>
+								<object class="sizeritem">
+									<object class="wxFlexGridSizer" variable="FlexGridSizer_AltMediaListContainer" member="no">
+										<cols>1</cols>
+										<growablecols>0</growablecols>
+										<object class="sizeritem">
+											<object class="wxListCtrl" name="ID_LISTCTRL_MEDIAMAPPINGS" variable="ListCtrl_MediaMappings" member="yes">
+												<style>wxLC_REPORT|wxLC_SINGLE_SEL|wxVSCROLL</style>
+											</object>
+											<flag>wxALL|wxEXPAND</flag>
+											<border>5</border>
+											<option>1</option>
+										</object>
+									</object>
+									<flag>wxALL|wxEXPAND</flag>
+									<border>5</border>
+									<option>1</option>
+								</object>
+								<object class="sizeritem">
+									<object class="wxBoxSizer" variable="BoxSizer_MediaManagementButtons" member="no">
+										<object class="sizeritem">
+											<object class="wxButton" name="ID_BUTTON_ADDMEDIA" variable="Button_AddMedia" member="yes">
+												<label>Add</label>
+												<handler function="OnButton_AddMediaClick" entry="EVT_BUTTON" />
+											</object>
+											<flag>wxALL|wxALIGN_BOTTOM</flag>
+											<border>5</border>
+											<option>1</option>
+										</object>
+										<object class="sizeritem">
+											<object class="wxButton" name="ID_BUTTON_EDITSELECTEDMEDIA" variable="Button_EditSelectedMedia" member="yes">
+												<label>Edit</label>
+												<enabled>0</enabled>
+												<handler function="OnButton_EditSelectedMediaClick" entry="EVT_BUTTON" />
+											</object>
+											<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
+											<border>5</border>
+											<option>1</option>
+										</object>
+										<object class="sizeritem">
+											<object class="wxButton" name="ID_BUTTON_DELETESELECTEDMEDIA" variable="Button_DeleteSelectedMedia" member="yes">
+												<label>Delete</label>
+												<enabled>0</enabled>
+												<handler function="OnButton_DeleteSelectedMediaClick" entry="EVT_BUTTON" />
+											</object>
+											<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
+											<border>5</border>
+											<option>1</option>
+										</object>
+									</object>
+									<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
+									<border>5</border>
+									<option>1</option>
+								</object>
+							</object>
+						</object>
+						<label>Alternate Media</label>
+					</object>
 				</object>
 				<flag>wxTOP|wxLEFT|wxRIGHT|wxEXPAND</flag>
 				<border>5</border>
