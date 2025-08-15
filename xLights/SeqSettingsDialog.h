@@ -37,7 +37,12 @@ class ConvertLogDialog;
 class SeqSettingsDialog: public wxDialog
 {
     ConvertLogDialog* _plog;
-	public:
+    inline static const wxString CHOOSER_PROMPT_AUDIO = "Choose Audio file";
+    inline static const wxString CHOOSER_PROMPT_MEDIA = "Choose Media file";
+    inline static const wxString CHOOSER_FILES_XLIGHTS = "FPP Audio Files|*.mp3;*.ogg;*.m4p;*.mp4;*.m4a;*.aac;*.wav;*.flac;*.wma;*.au;*.mkv;*.mov|xLights Audio Files|*.mp3;*.ogg;*.m4p;*.mp4;*.avi;*.wma;*.au;*.wav;*.m4a;*.mid;*.mkv;*.mov;*.mpg;*.asf;*.flv;*.mpeg;*.wmv;*.flac";
+    inline static const wxString CHOOSER_FILES_FPP = "FPP Audio Files|*.mp3;*.ogg;*.m4p;*.mp4;*.m4a;*.aac;*.wav;*.flac;*.wma;*.au;*.mkv;*.mov";
+	
+    public:
 
 		SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_handle_, const std::list<std::string>& media_dirs, const wxString& warning, const wxString& defaultView, bool wizard_active_ = false, const std::string& media = "", uint32_t durationMS = 0);
 		virtual ~SeqSettingsDialog();
@@ -336,7 +341,7 @@ class SeqSettingsDialog: public wxDialog
 		std::vector<std::string> ParseTags(const wxString& tagString);
         void AddTimingCell(const wxString& name);
         void UpdateDataLayer();
-        void MediaChooser();
+        void MediaChooser( wxString promptString, wxString fileFilter, bool isAlternate = false );
         void RemoveWizard();
         void WizardPage1();
         void WizardPage2();
