@@ -343,7 +343,7 @@ bool xLightsXmlFile::AddAlternateMedia(const wxString& ShowDir, const wxString& 
         if (e->GetName() == "head") {
             for (wxXmlNode* element = e->GetChildren(); element != nullptr; element = element->GetNext()) {
                 if (element->GetName() == "alternateMedia") {
-                    wxXmlNode* child = AddChildXmlNode(element, "mediaFile");
+                    wxXmlNode* child = AddChildXmlNode(element, "altMediaFile");
                     SetNodeContent(child, media_file);
                     alternateMedia.push_back(media_file);
                 }
@@ -1237,7 +1237,7 @@ bool xLightsXmlFile::LoadSequence(const wxString& ShowDir, bool ignore_audio, co
                 else if (element->GetName() == "alternateMedia") {
                     alternateMedia.Clear();
                     for (wxXmlNode* e = element->GetChildren(); e != nullptr; e = e->GetNext()) {
-                        if (e->GetName() == "mediaFile")
+                        if (e->GetName() == "altMediaFile")
                             alternateMedia.push_back(e->GetNodeContent());
                     }
                 }

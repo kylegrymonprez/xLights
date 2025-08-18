@@ -185,6 +185,10 @@ FPPConnectDialog::FPPConnectDialog(wxWindow* parent, OutputManager* outputManage
     CheckListBox_Sequences->AppendColumn("Media", wxCOL_WIDTH_AUTOSIZE,
                                          wxALIGN_LEFT,
                                          wxCOL_RESIZABLE | wxCOL_SORTABLE);
+//    ///@@@ Alternate media
+//    CheckListBox_Sequences->AppendColumn("Alternate Media", wxCOL_WIDTH_AUTOSIZE,
+//                                         wxALIGN_LEFT,
+//                                         wxCOL_RESIZABLE | wxCOL_SORTABLE);
 
     wxConfigBase* config = wxConfigBase::Get();
     auto seqSortCol = config->ReadLong("xLightsFPPConnectSequenceSortCol", SORT_SEQ_NAME_COL);
@@ -858,6 +862,7 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
             int count = 0;
             bool isSequence = false;
             bool isMedia = false;
+            bool hasAlternateMedia = false;
             std::string mediaName;
 
             while (!done) {
@@ -881,6 +886,8 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
                                     isSequence = true;
                                 } else if (NodeName == "mediaFile") {
                                     isMedia = true;
+                                } else if (NodeName == "altMediaFile") {
+                                    hasAlternateMedia = true;
                                 } else {
                                     isMedia = false;
                                 }
@@ -940,7 +947,7 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
                     }
                 }
             }
-            logger_base.debug("XML:  %s   IsSeq:  %d    FSEQ:  %s   Media:  %s", (const char*)file.c_str(), isSequence, (const char*)fseqName.c_str(), (const char*)mediaName.c_str());
+            logger_base.debug("XML:  %s   IsSeq:  %d    FSEQ:  %s   Media:  %s HasAltMedia: %s", (const char*)file.c_str(), isSequence, (const char*)fseqName.c_str(), (const char*)mediaName.c_str(), hasAlternateMedia ? "true" : "false");
             if (isSequence) {
 
                 // where you have show folders within show folders and sequences with the same name
@@ -962,6 +969,11 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
                     if (mediaName != "") {
                         CheckListBox_Sequences->SetItemText(item, 2, mediaName);
                     }
+                    
+                    //@@@
+//                    if( hasAlternateMedia ) {
+//                        CheckListBox_Sequences->SetItemText(item, 3, "⋯"); // U+22EF
+//                    }
                 }
             }
         }
@@ -1006,6 +1018,7 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
 
 void FPPConnectDialog::LoadSequences()
 {
+    static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
     CheckListBox_Sequences->DeleteAllItems();
     xLightsFrame* frame = static_cast<xLightsFrame*>(GetParent());
     wxString fseqDir = frame->GetFseqDirectory();
@@ -1033,18 +1046,21 @@ void FPPConnectDialog::LoadSequences()
             }
             item = CheckListBox_Sequences->GetNextItem(item);
         }
+        //@@@ FPP Connect sequence populate
         if (!found && FileExists(v)) {
             wxTreeListItem item = CheckListBox_Sequences->AppendItem(CheckListBox_Sequences->GetRootItem(), v);
             DisplayDateModified(v, item);
             FSEQFile *file = FSEQFile::openFSEQFile(v.ToStdString());
             if (file != nullptr) {
                 for (auto& header : file->getVariableHeaders()) {
+                    logger_base.debug("header: %s %s", header.code[0], header.code[1]);
                     if (header.code[0] == 'm' && header.code[1] == 'f') {
                         wxString mediaName = (const char*)(&header.data[0]);
                         mediaName = FixFile("", mediaName);
                         if (FileExists(mediaName)) {
                             CheckListBox_Sequences->SetItemText(item, 2, mediaName);
                         }
+                        
                     }
                 }
             }
@@ -1083,6 +1099,7 @@ void FPPConnectDialog::LoadSequences()
         }
     }
 
+    CheckListBox_Sequences->SetColumnWidth(3, wxCOL_WIDTH_AUTOSIZE);
     CheckListBox_Sequences->SetColumnWidth(2, wxCOL_WIDTH_AUTOSIZE);
     CheckListBox_Sequences->SetColumnWidth(1, wxCOL_WIDTH_AUTOSIZE);
     CheckListBox_Sequences->SetColumnWidth(0, wxCOL_WIDTH_AUTOSIZE);
