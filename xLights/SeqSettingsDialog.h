@@ -351,6 +351,7 @@ class SeqSettingsDialog: public wxDialog
         bool ImportDataLayer(const wxString& filetypes, ConvertLogDialog* plog);
         void SetHash();
         void MediaLoad(wxFileName filename);
+        void AddAlternateMedia(wxFileName filename);
 		bool UpdateSequenceTiming();
 		void ValidateWindow();
 };

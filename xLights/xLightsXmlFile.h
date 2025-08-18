@@ -103,6 +103,9 @@ public:
     }
     void SetMediaFile(const wxString& ShowDir, const wxString& filename, bool overwrite_tags);
     void ClearMediaFile();
+    
+    bool AddAlternateMedia( const wxString& ShowDir, const wxString& filename);
+    void RemoveAlternateMedia( const wxString& ShowDir, const wxString& filename);
 
     const wxString& GetHeaderInfo(HEADER_INFO_TYPES node_type) const;
     void SetHeaderInfo(HEADER_INFO_TYPES node_type, const wxString& node_value);
@@ -133,6 +136,7 @@ public:
         return timing_list;
     }
     wxArrayString GetTimingList(const SequenceElements& seq_elements);
+    wxArrayString GetAlternateMedia();
     void ProcessAudacityTimingFiles(const wxString& dir, const wxArrayString& filenames, xLightsFrame* xLightsParent);
     void ProcessLorTiming(const wxString& dir, const wxArrayString& filenames, xLightsFrame* xLightsParent);
     void ProcessXTiming(const wxString& dir, const wxArrayString& filenames, xLightsFrame* xLightsParent);
@@ -213,6 +217,7 @@ private:
     bool sequence_loaded = false; // flag to indicate the sequencer has been loaded with this xml data
     DataLayerSet mDataLayers;
     AudioManager* audio = nullptr;
+    wxArrayString alternateMedia;
 
     void CreateNew();
     bool LoadSequence(const wxString& ShowDir, bool ignore_audio, const wxFileName &realFilename);

@@ -569,6 +569,8 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
     TreeCtrl_Data_Layers->Expand(root);
 
     RenderModeChoice->SetStringSelection(xml_file->GetRenderMode());
+    
+    ListBox_AlternateMedia->Set(xml_file->GetAlternateMedia());
 
     if (!defaultView.IsEmpty()) {
         if (xLightsParent->GetViewsManager()->GetViewIndex(defaultView) != -1) {
@@ -1612,6 +1614,12 @@ void SeqSettingsDialog::MediaLoad(wxFileName name_and_path)
     ValidateWindow();
 }
 
+void SeqSettingsDialog::AddAlternateMedia(wxFileName name_and_path)
+{
+    if( xml_file->AddAlternateMedia(xLightsParent->GetShowDirectory(), name_and_path.GetFullPath()) )
+        ListBox_AlternateMedia->Append(name_and_path.GetFullPath());
+}
+
 void SeqSettingsDialog::MediaChooser( const wxString promptString, const wxString filesFilter, bool isAlternate )
 {
 	wxFileDialog OpenDialog(this, promptString, wxEmptyString, wxEmptyString, filesFilter, wxFD_OPEN | wxFD_FILE_MUST_EXIST, wxDefaultPosition);
@@ -1627,30 +1635,34 @@ void SeqSettingsDialog::MediaChooser( const wxString promptString, const wxStrin
 		OpenDialog.SetFilename(wxFileName(xml_file->GetMediaFile()).GetFullName());
 	}
     
+    if (!TextCtrl_Xml_Media_File->GetValue().empty())
+    {
+        OpenDialog.SetPath(TextCtrl_Xml_Media_File->GetValue());
+    }
+    
     //this is the main audi for the sequence to use and needs to update all the correct
     //main sequence UI and metadata
-    if( !isAlternate ) {
-        if (!TextCtrl_Xml_Media_File->GetValue().empty())
-        {
-            OpenDialog.SetPath(TextCtrl_Xml_Media_File->GetValue());
-        }
-        if (OpenDialog.ShowModal() == wxID_OK)
-        {
-            wxString fDir = OpenDialog.GetDirectory();
-            wxString filename = OpenDialog.GetFilename();
+        
+    if (OpenDialog.ShowModal() == wxID_OK)
+    {
+        wxString fDir = OpenDialog.GetDirectory();
+        wxString filename = OpenDialog.GetFilename();
+        
+        ObtainAccessToURL(fDir.ToStdString());
+        ObtainAccessToURL(filename.ToStdString());
+        
+        wxFileName name_and_path(filename);
+        name_and_path.SetPath(fDir);
             
-            ObtainAccessToURL(fDir.ToStdString());
-            ObtainAccessToURL(filename.ToStdString());
-            
-            wxFileName name_and_path(filename);
-            name_and_path.SetPath(fDir);
-            
-            SetCursor(wxCURSOR_WAIT);
+        SetCursor(wxCURSOR_WAIT);
+        
+        if( !isAlternate ) {
             MediaLoad(name_and_path);
-            SetCursor(wxCURSOR_DEFAULT);
+        } else {
+            //This is for alternate media. This needs to update the alternate media UI and metadata
+            AddAlternateMedia(name_and_path);
         }
-    } else {
-        //This is for alternate media. This needs to update the alternate media UI and metadata
+        SetCursor(wxCURSOR_DEFAULT);
     }
     
 }
