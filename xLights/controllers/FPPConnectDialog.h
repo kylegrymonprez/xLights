@@ -37,6 +37,7 @@ class FPPConnectDialog: public wxDialog
 
 		//(*Declarations(FPPConnectDialog)
 		wxButton* AddFPPButton;
+		wxButton* Button_ManageAltMedia;
 		wxButton* Button_Upload;
 		wxButton* ReDiscover;
 		wxCheckBox* KeepWinOpen;
@@ -68,6 +69,7 @@ class FPPConnectDialog: public wxDialog
 		static const wxWindowID ID_SPLITTERWINDOW1;
 		static const wxWindowID ID_BUTTON1;
 		static const wxWindowID ID_BUTTON2;
+		static const wxWindowID ID_BUTTON_ManageAltMedia;
 		static const wxWindowID ID_CHECKBOX1;
 		static const wxWindowID ID_BUTTON_Upload;
 		//*)
@@ -85,19 +87,20 @@ class FPPConnectDialog: public wxDialog
 		void OnClose(wxCloseEvent& event);
 		void SequenceListPopup(wxTreeListEvent& event);
 		void OnAddFPPButtonClick(wxCommandEvent& event);
-        void OnFPPReDiscoverClick(wxCommandEvent& event);
+		void OnFPPReDiscoverClick(wxCommandEvent& event);
 		void OnChoiceFolderSelect(wxCommandEvent& event);
 		void OnChoiceFilterSelect(wxCommandEvent& event);
 		void HostSortMenu(wxContextMenuEvent& event);
-        void IPSortMenu(wxContextMenuEvent& event);
+		void IPSortMenu(wxContextMenuEvent& event);
 		void OnHostSortClick(wxCommandEvent& event);
-        void OnIPSortClick(wxCommandEvent& event);
+		void OnIPSortClick(wxCommandEvent& event);
 		void UploadPopupMenu(wxContextMenuEvent& event);
 		void OnUploadPopupClick(wxCommandEvent& event);
 		void CapePopupMenu(wxContextMenuEvent& event);
 		void OnCapePopupClick(wxCommandEvent& event);
-        void MediaPopupMenu(wxContextMenuEvent& event);
-        void OnMediaPopupClick(wxCommandEvent& event);
+		void MediaPopupMenu(wxContextMenuEvent& event);
+		void OnMediaPopupClick(wxCommandEvent& event);
+		void OnButton_ManageAltMediaClick(wxCommandEvent& event);
 		//*)
 
         void LoadSequencesFromFolder(wxString dir) const;

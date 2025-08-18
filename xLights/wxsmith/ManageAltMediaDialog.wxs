@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<wxsmith>
+	<object class="wxDialog" name="ManageAltMediaDialog">
+		<pos_arg>1</pos_arg>
+		<size_arg>1</size_arg>
+		<object class="wxFlexGridSizer" variable="FlexGridSizer1" member="no">
+			<cols>1</cols>
+			<rows>3</rows>
+			<growablerows>1</growablerows>
+			<object class="sizeritem">
+				<object class="wxFlexGridSizer" variable="FlexGridSizer2" member="no">
+					<cols>2</cols>
+					<growablecols>1</growablecols>
+					<object class="sizeritem">
+						<object class="wxStaticText" name="ID_STATICTEXT_Sequence" variable="StaticText_Sequence" member="yes">
+							<label>Sequence</label>
+						</object>
+						<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
+						<border>5</border>
+						<option>1</option>
+					</object>
+					<object class="sizeritem">
+						<object class="wxComboBox" name="ID_COMBOBOX_SelectSequence" variable="ComboBox_SelectSequence" member="yes" />
+						<flag>wxALL|wxEXPAND</flag>
+						<border>5</border>
+						<option>1</option>
+					</object>
+				</object>
+				<flag>wxALL|wxEXPAND</flag>
+				<border>5</border>
+				<option>1</option>
+			</object>
+			<object class="sizeritem">
+				<object class="wxPanel" name="ID_PANEL_MappingContent" variable="Panel_MappingContent" member="yes">
+					<minsize>150,200</minsize>
+				</object>
+				<flag>wxALL|wxEXPAND</flag>
+				<border>5</border>
+				<option>1</option>
+			</object>
+			<object class="sizeritem">
+				<object class="wxFlexGridSizer" variable="FlexGridSizer3" member="no">
+					<cols>2</cols>
+					<growablecols>1</growablecols>
+					<object class="sizeritem">
+						<object class="wxFlexGridSizer" variable="FlexGridSizer4" member="no">
+							<cols>3</cols>
+							<object class="sizeritem">
+								<object class="wxButton" name="ID_BUTTON_AddMapping" variable="Button_AddMapping" member="yes">
+									<label>Add</label>
+								</object>
+								<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
+								<border>5</border>
+								<option>1</option>
+							</object>
+							<object class="sizeritem">
+								<object class="wxButton" name="ID_BUTTON_RemoveMapping" variable="Button_DeleteMapping" member="yes">
+									<label>Delete</label>
+								</object>
+								<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
+								<border>5</border>
+								<option>1</option>
+							</object>
+						</object>
+						<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
+						<border>5</border>
+						<option>1</option>
+					</object>
+					<object class="sizeritem">
+						<object class="wxButton" name="ID_BUTTON_OK" variable="Button_OK" member="yes">
+							<label>OK</label>
+						</object>
+						<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
+						<border>5</border>
+						<option>1</option>
+					</object>
+				</object>
+				<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
+				<border>5</border>
+				<option>1</option>
+			</object>
+		</object>
+	</object>
+</wxsmith>
