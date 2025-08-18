@@ -169,6 +169,7 @@ FPPConnectDialog::FPPConnectDialog(wxWindow* parent, OutputManager* outputManage
 	Connect(ID_CHOICE_FOLDER, wxEVT_COMMAND_CHOICE_SELECTED, (wxObjectEventFunction)&FPPConnectDialog::OnChoiceFolderSelect);
 	Connect(ID_BUTTON1, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPConnectDialog::OnAddFPPButtonClick);
 	Connect(ID_BUTTON2, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPConnectDialog::OnAddFPPButtonClick);
+	Connect(ID_BUTTON_ManageAltMedia, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPConnectDialog::OnButton_ManageAltMediaClick);
 	Connect(ID_BUTTON_Upload, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPConnectDialog::OnButton_UploadClick);
 	Connect(wxID_ANY, wxEVT_CLOSE_WINDOW, (wxObjectEventFunction)&FPPConnectDialog::OnClose);
 	//*)
@@ -972,7 +973,7 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
                     if (mediaName != "") {
                         CheckListBox_Sequences->SetItemText(item, 2, mediaName);
                     }
-                    
+
                     //@@@
 //                    if( hasAlternateMedia ) {
 //                        CheckListBox_Sequences->SetItemText(item, 3, "⋯"); // U+22EF
@@ -1063,7 +1064,7 @@ void FPPConnectDialog::LoadSequences()
                         if (FileExists(mediaName)) {
                             CheckListBox_Sequences->SetItemText(item, 2, mediaName);
                         }
-                        
+
                     }
                 }
             }
