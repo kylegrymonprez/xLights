@@ -907,7 +907,7 @@ void SeqSettingsDialog::OnChoice_Xml_Seq_TypeSelect(wxCommandEvent& event)
 
 void SeqSettingsDialog::OnBitmapButton_Xml_Media_FileClick(wxCommandEvent& event)
 {
-    MediaChooser();
+    MediaChooser(CHOOSER_PROMPT_AUDIO, CHOOSER_FILES_XLIGHTS);
     ValidateWindow();
 }
 
@@ -1613,9 +1613,9 @@ void SeqSettingsDialog::MediaLoad(wxFileName name_and_path)
     ValidateWindow();
 }
 
-void SeqSettingsDialog::MediaChooser()
+void SeqSettingsDialog::MediaChooser( const wxString promptString, const wxString filesFilter, bool isAlternate )
 {
-	wxFileDialog OpenDialog(this, "Choose Audio file", wxEmptyString, wxEmptyString, "FPP Audio Files|*.mp3;*.ogg;*.m4p;*.mp4;*.m4a;*.aac;*.wav;*.flac;*.wma;*.au;*.mkv;*.mov|xLights Audio Files|*.mp3;*.ogg;*.m4p;*.mp4;*.avi;*.wma;*.au;*.wav;*.m4a;*.mid;*.mkv;*.mov;*.mpg;*.asf;*.flv;*.mpeg;*.wmv;*.flac", wxFD_OPEN | wxFD_FILE_MUST_EXIST, wxDefaultPosition);
+	wxFileDialog OpenDialog(this, promptString, wxEmptyString, wxEmptyString, filesFilter, wxFD_OPEN | wxFD_FILE_MUST_EXIST, wxDefaultPosition);
 
     std::string media_directory = media_directories.empty() ? "" : media_directories.front();
 
@@ -1627,25 +1627,33 @@ void SeqSettingsDialog::MediaChooser()
 	{
 		OpenDialog.SetFilename(wxFileName(xml_file->GetMediaFile()).GetFullName());
 	}
-	if (!TextCtrl_Xml_Media_File->GetValue().empty())
-	{
-		OpenDialog.SetPath(TextCtrl_Xml_Media_File->GetValue());
-	}
-    if (OpenDialog.ShowModal() == wxID_OK)
-    {
-        wxString fDir = OpenDialog.GetDirectory();
-        wxString filename = OpenDialog.GetFilename();
-
-        ObtainAccessToURL(fDir.ToStdString());
-        ObtainAccessToURL(filename.ToStdString());
-
-        wxFileName name_and_path(filename);
-        name_and_path.SetPath(fDir);
-
-        SetCursor(wxCURSOR_WAIT);
-        MediaLoad(name_and_path);
-        SetCursor(wxCURSOR_DEFAULT);
+    
+    //this is the main audi for the sequence to use and needs to update all the correct
+    //main sequence UI and metadata
+    if( !isAlternate ) {
+        if (!TextCtrl_Xml_Media_File->GetValue().empty())
+        {
+            OpenDialog.SetPath(TextCtrl_Xml_Media_File->GetValue());
+        }
+        if (OpenDialog.ShowModal() == wxID_OK)
+        {
+            wxString fDir = OpenDialog.GetDirectory();
+            wxString filename = OpenDialog.GetFilename();
+            
+            ObtainAccessToURL(fDir.ToStdString());
+            ObtainAccessToURL(filename.ToStdString());
+            
+            wxFileName name_and_path(filename);
+            name_and_path.SetPath(fDir);
+            
+            SetCursor(wxCURSOR_WAIT);
+            MediaLoad(name_and_path);
+            SetCursor(wxCURSOR_DEFAULT);
+        }
+    } else {
+        //This is for alternate media. This needs to update the alternate media UI and metadata
     }
+    
 }
 
 void SeqSettingsDialog::OnBitmapButton_Wiz_MusicClick(wxCommandEvent& event)
@@ -1656,7 +1664,7 @@ void SeqSettingsDialog::OnBitmapButton_Wiz_MusicClick(wxCommandEvent& event)
     BitmapButton_Wiz_Music->Hide();
     BitmapButton_Wiz_Anim->Hide();
     CheckBox_Overwrite_Tags->SetValue(true);
-    MediaChooser();
+    MediaChooser(CHOOSER_PROMPT_AUDIO, CHOOSER_FILES_XLIGHTS);
     WizardPage2();
     ValidateWindow();
 }
@@ -2132,6 +2140,8 @@ void SeqSettingsDialog::OnButton_AddMillisecondsClick(wxCommandEvent& event) {
 
 void SeqSettingsDialog::OnButton_AddMediaClick(wxCommandEvent& event)
 {
+    MediaChooser(CHOOSER_PROMPT_MEDIA, CHOOSER_FILES_FPP, true);
+    ValidateWindow();
 }
 
 void SeqSettingsDialog::OnButton_EditSelectedMediaClick(wxCommandEvent& event)
