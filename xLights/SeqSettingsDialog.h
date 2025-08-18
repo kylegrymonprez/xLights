@@ -276,6 +276,7 @@ class SeqSettingsDialog: public wxDialog
 		void OnButton_AddMediaClick(wxCommandEvent& event);
 		void OnButton_EditSelectedMediaClick(wxCommandEvent& event);
 		void OnButton_DeleteSelectedMediaClick(wxCommandEvent& event);
+		void OnListBox_AlternateMediaSelect(wxCommandEvent& event);
 		//*)
 
 		void OnButton_Xml_Rename_TimingClick(wxCommandEvent& event);

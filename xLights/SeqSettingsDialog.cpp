@@ -487,6 +487,7 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, xLightsXmlFile* file_to_h
     Connect(ID_BUTTON_Move_Up, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_Move_UpClick);
     Connect(ID_BUTTON_Move_Down, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_Move_DownClick);
     Connect(ID_BUTTON_Reimport, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_ReimportClick);
+    Connect(ID_LISTBOX_AlternateMedia, wxEVT_COMMAND_LISTBOX_SELECTED, (wxObjectEventFunction)&SeqSettingsDialog::OnListBox_AlternateMediaSelect);
     Connect(ID_BUTTON_ADDMEDIA, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_AddMediaClick);
     Connect(ID_BUTTON_DELETESELECTEDMEDIA, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_DeleteSelectedMediaClick);
     Connect(ID_BUTTON_CANCEL, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&SeqSettingsDialog::OnButton_CancelClick);
@@ -2138,5 +2139,9 @@ void SeqSettingsDialog::OnButton_EditSelectedMediaClick(wxCommandEvent& event)
 }
 
 void SeqSettingsDialog::OnButton_DeleteSelectedMediaClick(wxCommandEvent& event)
+{
+}
+
+void SeqSettingsDialog::OnListBox_AlternateMediaSelect(wxCommandEvent& event)
 {
 }
