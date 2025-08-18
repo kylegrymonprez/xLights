@@ -50,6 +50,7 @@ const wxWindowID FPPConnectDialog::ID_PANEL1 = wxNewId();
 const wxWindowID FPPConnectDialog::ID_SPLITTERWINDOW1 = wxNewId();
 const wxWindowID FPPConnectDialog::ID_BUTTON1 = wxNewId();
 const wxWindowID FPPConnectDialog::ID_BUTTON2 = wxNewId();
+const wxWindowID FPPConnectDialog::ID_BUTTON_ManageAltMedia = wxNewId();
 const wxWindowID FPPConnectDialog::ID_CHECKBOX1 = wxNewId();
 const wxWindowID FPPConnectDialog::ID_BUTTON_Upload = wxNewId();
 //*)
@@ -149,6 +150,8 @@ FPPConnectDialog::FPPConnectDialog(wxWindow* parent, OutputManager* outputManage
 	FlexGridSizer4->Add(AddFPPButton, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
 	ReDiscover = new wxButton(this, ID_BUTTON2, _("Re-Discover"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON2"));
 	FlexGridSizer4->Add(ReDiscover, 1, wxALL, 5);
+	Button_ManageAltMedia = new wxButton(this, ID_BUTTON_ManageAltMedia, _("Manage Alt. Media"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON_ManageAltMedia"));
+	FlexGridSizer4->Add(Button_ManageAltMedia, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
 	StaticText3 = new wxStaticText(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, _T("wxID_ANY"));
 	FlexGridSizer4->Add(StaticText3, 1, wxALL|wxEXPAND, 5);
 	KeepWinOpen = new wxCheckBox(this, ID_CHECKBOX1, _("Keep Open"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_CHECKBOX1"));
@@ -165,7 +168,7 @@ FPPConnectDialog::FPPConnectDialog(wxWindow* parent, OutputManager* outputManage
 	Connect(ID_CHOICE_FILTER, wxEVT_COMMAND_CHOICE_SELECTED, (wxObjectEventFunction)&FPPConnectDialog::OnChoiceFilterSelect);
 	Connect(ID_CHOICE_FOLDER, wxEVT_COMMAND_CHOICE_SELECTED, (wxObjectEventFunction)&FPPConnectDialog::OnChoiceFolderSelect);
 	Connect(ID_BUTTON1, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPConnectDialog::OnAddFPPButtonClick);
-	Connect(ID_BUTTON2, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPConnectDialog::OnFPPReDiscoverClick);
+	Connect(ID_BUTTON2, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPConnectDialog::OnAddFPPButtonClick);
 	Connect(ID_BUTTON_Upload, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPConnectDialog::OnButton_UploadClick);
 	Connect(wxID_ANY, wxEVT_CLOSE_WINDOW, (wxObjectEventFunction)&FPPConnectDialog::OnClose);
 	//*)
@@ -478,7 +481,7 @@ void FPPConnectDialog::SelectIPsWithSubnet() {
                     SetCheckValue(CHECK_COL + rowStr, false);
                 }
             }
-        } 
+        }
         row++;
     }
 }
@@ -778,14 +781,14 @@ void FPPConnectDialog::SequenceSelector(const std::string regexKey) {
             auto const& isChecked = CheckListBox_Sequences->GetCheckedState(uitem) == wxCHK_CHECKED;
             if (isChecked) {
                 CheckListBox_Sequences->UncheckItem(uitem);
-            } 
+            }
             uitem = CheckListBox_Sequences->GetNextItem(uitem);
         }
         for (auto const& seq : list) {
             auto const& xsqName = showDirectory + wxFileName::GetPathSeparator() + seq;
             wxFileName fseqFile(xsqName);
             fseqFile.SetExt("fseq");
-            
+
             if (fseqDirectory != showDirectory) {
                 fseqFile.SetPath(fseqDirectory);
             }
@@ -1689,7 +1692,7 @@ void FPPConnectDialog::SequenceListPopup(wxTreeListEvent& event)
 void FPPConnectDialog::OnFPPReDiscoverClick(wxCommandEvent& event) {
     int curSize = instances.size();
     std::list<std::string> add;
-  
+
     wxProgressDialog prgs("Discovering FPP Instances",
                           "Discovering FPP Instances", 100, this);
     prgs.Pulse("Discovering FPP Instances");
@@ -1697,7 +1700,7 @@ void FPPConnectDialog::OnFPPReDiscoverClick(wxCommandEvent& event) {
     std::string fppConnectIP = "";
     prgs.Show();
     instances = FPP::GetInstances(this, _outputManager);
-    
+
     if (curSize < instances.size()) {
         int cur = 0;
         for (const auto& fpp : instances) {
@@ -1829,4 +1832,8 @@ void FPPConnectDialog::DisplayDateModified(const wxString& filePath, wxTreeListI
         wxDateTime last_modified_time(wxFileModificationTime(filePath));
         CheckListBox_Sequences->SetItemText(item, 1, last_modified_time.Format(wxT("%Y-%m-%d %H:%M:%S")));
     }
+}
+
+void FPPConnectDialog::OnButton_ManageAltMediaClick(wxCommandEvent& event)
+{
 }
