@@ -295,6 +295,32 @@ void xLightsXmlFile::ClearMediaFile()
     SetHeaderInfo(HEADER_INFO_TYPES::URL, "");
 }
 
+void xLightsXmlFile::RemoveAlternateMedia(const wxString& filename )
+{
+    static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
+    wxXmlNode* root = seqDocument.GetRoot();
+    
+    for (wxXmlNode* e = root->GetChildren(); e != nullptr; e = e->GetNext()) {
+        if (e->GetName() == "head") {
+            for (wxXmlNode* element = e->GetChildren(); element != nullptr; element = element->GetNext()) {
+                if (element->GetName() == "alternateMedia") {
+                    for (wxXmlNode* altMediaElement = element->GetChildren(); altMediaElement != nullptr; altMediaElement = altMediaElement->GetNext()) {
+                        if( altMediaElement->GetNodeContent() == filename) {
+                            ///@@@ remove node
+                            element->RemoveChild(altMediaElement);
+                            ///edit alternameMedia to remove this element as well
+                            int idx = alternateMedia.Index(filename);
+                            if (idx != wxNOT_FOUND) {
+                                alternateMedia.RemoveAt(idx);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 bool xLightsXmlFile::AddAlternateMedia(const wxString& ShowDir, const wxString& filename )
 {
     static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
@@ -1209,7 +1235,6 @@ bool xLightsXmlFile::LoadSequence(const wxString& ShowDir, bool ignore_audio, co
                 }
                 //TODO add loading alternate media information @@@
                 else if (element->GetName() == "alternateMedia") {
-                    logger_base.debug("TODO LoadSequence: alternateMedia needs to be loaded.");
                     alternateMedia.Clear();
                     for (wxXmlNode* e = element->GetChildren(); e != nullptr; e = e->GetNext()) {
                         if (e->GetName() == "mediaFile")

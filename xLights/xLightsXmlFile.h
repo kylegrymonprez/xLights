@@ -105,7 +105,7 @@ public:
     void ClearMediaFile();
     
     bool AddAlternateMedia( const wxString& ShowDir, const wxString& filename);
-    void RemoveAlternateMedia( const wxString& ShowDir, const wxString& filename);
+    void RemoveAlternateMedia( const wxString& filename);
 
     const wxString& GetHeaderInfo(HEADER_INFO_TYPES node_type) const;
     void SetHeaderInfo(HEADER_INFO_TYPES node_type, const wxString& node_value);

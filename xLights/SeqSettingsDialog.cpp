@@ -1641,9 +1641,6 @@ void SeqSettingsDialog::MediaChooser( const wxString promptString, const wxStrin
         OpenDialog.SetPath(TextCtrl_Xml_Media_File->GetValue());
     }
     
-    //this is the main audi for the sequence to use and needs to update all the correct
-    //main sequence UI and metadata
-        
     if (OpenDialog.ShowModal() == wxID_OK)
     {
         wxString fDir = OpenDialog.GetDirectory();
@@ -2156,14 +2153,16 @@ void SeqSettingsDialog::OnButton_AddMediaClick(wxCommandEvent& event)
     ValidateWindow();
 }
 
-void SeqSettingsDialog::OnButton_EditSelectedMediaClick(wxCommandEvent& event)
-{
-}
-
 void SeqSettingsDialog::OnButton_DeleteSelectedMediaClick(wxCommandEvent& event)
 {
+    int i = ListBox_AlternateMedia->GetSelection();
+    if (i != wxNOT_FOUND) {
+        xml_file->RemoveAlternateMedia(ListBox_AlternateMedia->GetString(i));
+        ListBox_AlternateMedia->Delete(i);
+    }
 }
 
 void SeqSettingsDialog::OnListBox_AlternateMediaSelect(wxCommandEvent& event)
 {
+    Button_DeleteSelectedMedia->Enable(ListBox_AlternateMedia->GetSelection() != wxNOT_FOUND);
 }
