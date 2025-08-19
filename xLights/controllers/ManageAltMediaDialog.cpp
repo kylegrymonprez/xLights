@@ -64,6 +64,14 @@ ManageAltMediaDialog::~ManageAltMediaDialog()
     //*)
 }
 
+void ManageAltMediaDialog::SetSequences(const wxArrayString& sequences)
+{
+    ComboBox_SelectSequence->Clear();                 // remove old entries
+    ComboBox_SelectSequence->Append(sequences);         // add all entries from the array
+    ComboBox_SelectSequence->SetSelection(wxNOT_FOUND); // nothing selected by default
+    ComboBox_SelectSequence->SetHint("Select Sequence");
+}
+
 
 void ManageAltMediaDialog::OnButton1Click(wxCommandEvent& event)
 {

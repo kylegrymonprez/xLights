@@ -131,6 +131,8 @@ class FPPConnectDialog: public wxDialog
 
         void SequenceSelector(const std::string regexKey);
         void SelectIPsWithSubnet();
+    
+        wxArrayString GetSelectedSeqsWithAltMedia();
 
 		DECLARE_EVENT_TABLE()
 };

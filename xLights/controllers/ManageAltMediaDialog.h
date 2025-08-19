@@ -25,6 +25,7 @@ class ManageAltMediaDialog: public wxDialog
         wxPanel* Panel_MappingContent;
         wxStaticText* StaticText_Sequence;
         //*)
+    void SetSequences(const wxArrayString& altMediaSequences);
 
     protected:
 

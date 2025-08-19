@@ -24,6 +24,7 @@
 #include "ControllerCaps.h"
 #include "utils/ip_utils.h"
 #include "FPPUploadProgressDialog.h"
+#include "ManageAltMediaDialog.h"
 #include "ModelPreview.h"
 
 #include <log4cpp/Category.hh>
@@ -195,10 +196,10 @@ FPPConnectDialog::FPPConnectDialog(wxWindow* parent, OutputManager* outputManage
     CheckListBox_Sequences->AppendColumn("Media", wxCOL_WIDTH_AUTOSIZE,
                                          wxALIGN_LEFT,
                                          wxCOL_RESIZABLE | wxCOL_SORTABLE);
-//    ///@@@ Alternate media
-//    CheckListBox_Sequences->AppendColumn("Alternate Media", wxCOL_WIDTH_AUTOSIZE,
-//                                         wxALIGN_LEFT,
-//                                         wxCOL_RESIZABLE | wxCOL_SORTABLE);
+    ///@@@ Alternate media
+    CheckListBox_Sequences->AppendColumn("Alternate Media", wxCOL_WIDTH_AUTOSIZE,
+                                         wxALIGN_LEFT,
+                                         wxCOL_RESIZABLE | wxCOL_SORTABLE);
 
     wxConfigBase* config = wxConfigBase::Get();
     auto seqSortCol = config->ReadLong("xLightsFPPConnectSequenceSortCol", SORT_SEQ_NAME_COL);
@@ -335,6 +336,21 @@ uint32_t FPPConnectDialog::GetSelectedSeqCount() {
     }
 
     return selected;
+}
+
+wxArrayString FPPConnectDialog::GetSelectedSeqsWithAltMedia() {
+    wxArrayString altMediaEntries;
+
+    auto item = CheckListBox_Sequences->GetFirstItem();
+    while (item.IsOk()) {
+        if (CheckListBox_Sequences->GetCheckedState(item) == wxCHK_CHECKED && CheckListBox_Sequences->GetItemText(item, 3) == "Available") {
+            wxString fullpath = CheckListBox_Sequences->GetItemText(item,0);
+            wxFileName fn(fullpath);
+            altMediaEntries.push_back(fn.GetFullName());   // "seqName.fseq"
+        }
+        item = CheckListBox_Sequences->GetNextItem(item);
+    }
+    return altMediaEntries;
 }
 
 void FPPConnectDialog::OnSequenceListToggled(wxDataViewEvent& event)
@@ -981,9 +997,9 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
                     }
 
                     //@@@
-//                    if( hasAlternateMedia ) {
-//                        CheckListBox_Sequences->SetItemText(item, 3, "⋯"); // U+22EF
-//                    }
+                    if( hasAlternateMedia ) {
+                        CheckListBox_Sequences->SetItemText(item, 3, "Available"); // U+22EF
+                    }
                 }
             }
         }
@@ -1063,7 +1079,6 @@ void FPPConnectDialog::LoadSequences()
             FSEQFile *file = FSEQFile::openFSEQFile(v.ToStdString());
             if (file != nullptr) {
                 for (auto& header : file->getVariableHeaders()) {
-                    logger_base.debug("header: %s %s", header.code[0], header.code[1]);
                     if (header.code[0] == 'm' && header.code[1] == 'f') {
                         wxString mediaName = (const char*)(&header.data[0]);
                         mediaName = FixFile("", mediaName);
@@ -1860,4 +1875,15 @@ void FPPConnectDialog::DisplayDateModified(const wxString& filePath, wxTreeListI
 
 void FPPConnectDialog::OnButton_ManageAltMediaClick(wxCommandEvent& event)
 {
+    wxArrayString selectedSequences = GetSelectedSeqsWithAltMedia();
+    if( selectedSequences.size() > 0 )
+    {
+        ManageAltMediaDialog dlg(this);
+        //Set which sequences have altmedia
+        dlg.SetSequences(GetSelectedSeqsWithAltMedia());
+        dlg.ShowModal();
+    } else {
+        wxMessageDialog msgDlg(this, "Error: No sequences with alternate media are selected.", "Error", wxOK | wxCENTRE);
+        msgDlg.ShowModal();
+    }
 }
