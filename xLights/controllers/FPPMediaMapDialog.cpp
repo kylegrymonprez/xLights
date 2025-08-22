@@ -1,0 +1,68 @@
+#include "FPPMediaMapDialog.h"
+
+//(*InternalHeaders(FPPMediaMapDialog)
+#include <wx/intl.h>
+#include <wx/string.h>
+//*)
+
+//(*IdInit(FPPMediaMapDialog)
+const wxWindowID FPPMediaMapDialog::ID_STATICTEXT_FPP_HOSTNAME = wxNewId();
+const wxWindowID FPPMediaMapDialog::ID_CHOICE_FppHostName = wxNewId();
+const wxWindowID FPPMediaMapDialog::ID_STATICTEXT_AltMedia = wxNewId();
+const wxWindowID FPPMediaMapDialog::ID_CHOICE_AltMedia = wxNewId();
+const wxWindowID FPPMediaMapDialog::ID_BUTTON_OK = wxNewId();
+const wxWindowID FPPMediaMapDialog::ID_BUTTON_Cancel = wxNewId();
+//*)
+
+BEGIN_EVENT_TABLE(FPPMediaMapDialog,wxDialog)
+    //(*EventTable(FPPMediaMapDialog)
+    //*)
+END_EVENT_TABLE()
+
+FPPMediaMapDialog::FPPMediaMapDialog(wxWindow* parent,wxWindowID id,const wxPoint& pos,const wxSize& size)
+{
+    //(*Initialize(FPPMediaMapDialog)
+    wxFlexGridSizer* FlexGridSizer1;
+    wxFlexGridSizer* FlexGridSizer2;
+
+    Create(parent, id, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE, _T("id"));
+    SetClientSize(wxSize(400,70));
+    Move(wxDefaultPosition);
+    FlexGridSizer1 = new wxFlexGridSizer(3, 2, 0, 0);
+    FlexGridSizer1->AddGrowableCol(1);
+    StaticText_FPPHostname = new wxStaticText(this, ID_STATICTEXT_FPP_HOSTNAME, _("FPP HostName"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT_FPP_HOSTNAME"));
+    FlexGridSizer1->Add(StaticText_FPPHostname, 1, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
+    Choice_FppHostName = new wxChoice(this, ID_CHOICE_FppHostName, wxDefaultPosition, wxSize(250,25), 0, 0, 0, wxDefaultValidator, _T("ID_CHOICE_FppHostName"));
+    FlexGridSizer1->Add(Choice_FppHostName, 1, wxALL|wxEXPAND, 5);
+    StaticText_AltMedia = new wxStaticText(this, ID_STATICTEXT_AltMedia, _("Alternate Media"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT_AltMedia"));
+    FlexGridSizer1->Add(StaticText_AltMedia, 1, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
+    Choice_AltMedia = new wxChoice(this, ID_CHOICE_AltMedia, wxDefaultPosition, wxSize(250,25), 0, 0, 0, wxDefaultValidator, _T("ID_CHOICE_AltMedia"));
+    FlexGridSizer1->Add(Choice_AltMedia, 1, wxALL|wxEXPAND, 5);
+    FlexGridSizer1->Add(-1,-1,1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
+    FlexGridSizer2 = new wxFlexGridSizer(1, 0, 0, 0);
+    Button_OK = new wxButton(this, ID_BUTTON_OK, _("OK"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON_OK"));
+    FlexGridSizer2->Add(Button_OK, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
+    Button_Cancel = new wxButton(this, ID_BUTTON_Cancel, _("Cancel"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON_Cancel"));
+    FlexGridSizer2->Add(Button_Cancel, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
+    FlexGridSizer1->Add(FlexGridSizer2, 1, wxALL|wxEXPAND, 5);
+    SetSizer(FlexGridSizer1);
+    Layout();
+
+    Connect(ID_BUTTON_OK, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPMediaMapDialog::OnButton_OKClick);
+    //*)
+}
+
+FPPMediaMapDialog::~FPPMediaMapDialog()
+{
+    //(*Destroy(FPPMediaMapDialog)
+    //*)
+}
+
+
+void FPPMediaMapDialog::OnButton_OKClick(wxCommandEvent& event)
+{
+}
+
+void FPPMediaMapDialog::OnButton_CancelClick(wxCommandEvent& event)
+{
+}

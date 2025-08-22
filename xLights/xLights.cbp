@@ -533,6 +533,8 @@
 		<Unit filename="controllers/FPP.h" />
 		<Unit filename="controllers/FPPConnectDialog.cpp" />
 		<Unit filename="controllers/FPPConnectDialog.h" />
+		<Unit filename="controllers/FPPMediaMapDialog.cpp" />
+		<Unit filename="controllers/FPPMediaMapDialog.h" />
 		<Unit filename="controllers/FPPUploadProgressDialog.cpp" />
 		<Unit filename="controllers/FPPUploadProgressDialog.h" />
 		<Unit filename="controllers/Falcon.cpp" />
@@ -1217,6 +1219,7 @@
 		<Unit filename="wxsmith/EmailDialog.wxs" />
 		<Unit filename="wxsmith/ExportModelSelect.wxs" />
 		<Unit filename="wxsmith/FPPConnectDialog.wxs" />
+		<Unit filename="wxsmith/FPPMediaMapDialog.wxs" />
 		<Unit filename="wxsmith/FPPUploadProgressDialog.wxs" />
 		<Unit filename="wxsmith/FacesPanel.wxs" />
 		<Unit filename="wxsmith/FanPanel.wxs" />
@@ -1573,6 +1576,7 @@
 					<wxDialog wxs="wxsmith/BulkEditComboDialog.wxs" src="BulkEditComboDialog.cpp" hdr="BulkEditComboDialog.h" fwddecl="0" i18n="1" name="BulkEditComboDialog" language="CPP" />
 					<wxDialog wxs="wxsmith/DuplicateDialog.wxs" src="DuplicateDialog.cpp" hdr="DuplicateDialog.h" fwddecl="0" i18n="1" name="DuplicateDialog" language="CPP" />
 					<wxDialog wxs="wxsmith/MetronomeLabelDialog.wxs" src="MetronomeLabelDialog.cpp" hdr="MetronomeLabelDialog.h" fwddecl="0" i18n="1" name="MetronomeLabelDialog" language="CPP" />
+					<wxDialog wxs="wxsmith/FPPMediaMapDialog.wxs" src="controllers/FPPMediaMapDialog.cpp" hdr="controllers/FPPMediaMapDialog.h" fwddecl="0" i18n="1" name="FPPMediaMapDialog" language="CPP" />
 					<wxDialog wxs="wxsmith/FPPUploadProgressDialog.wxs" src="controllers/FPPUploadProgressDialog.cpp" hdr="controllers/FPPUploadProgressDialog.h" fwddecl="0" i18n="1" name="FPPUploadProgressDialog" language="CPP" />
 					<wxDialog wxs="wxsmith/AutoLabelDialog.wxs" src="AutoLabelDialog.cpp" hdr="AutoLabelDialog.h" fwddecl="0" i18n="1" name="AutoLabelDialog" language="CPP" />
 					<wxDialog wxs="wxsmith/EditAliasesDialog.wxs" src="EditAliasesDialog.cpp" hdr="EditAliasesDialog.h" fwddecl="0" i18n="1" name="EditAliasesDialog" language="CPP" />
