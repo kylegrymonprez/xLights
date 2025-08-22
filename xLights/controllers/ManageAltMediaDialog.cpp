@@ -40,7 +40,7 @@ ManageAltMediaDialog::ManageAltMediaDialog(wxWindow* parent,wxWindowID id,const 
     FlexGridSizer2->Add(ComboBox_SelectSequence, 1, wxALL|wxEXPAND, 5);
     FlexGridSizer1->Add(FlexGridSizer2, 1, wxALL|wxEXPAND, 5);
     Panel_MappingContent = new wxPanel(this, ID_PANEL_MappingContent, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL, _T("ID_PANEL_MappingContent"));
-    Panel_MappingContent->SetMinSize(wxSize(150,200));
+    Panel_MappingContent->SetMinSize(wxSize(250,200));
     FlexGridSizer1->Add(Panel_MappingContent, 1, wxALL|wxEXPAND, 5);
     FlexGridSizer3 = new wxFlexGridSizer(0, 2, 0, 0);
     FlexGridSizer3->AddGrowableCol(1);
@@ -66,5 +66,21 @@ ManageAltMediaDialog::~ManageAltMediaDialog()
 
 
 void ManageAltMediaDialog::OnButton1Click(wxCommandEvent& event)
+{
+}
+
+void ManageAltMediaDialog::OnComboBox_SequenceSelected(wxCommandEvent& event)
+{
+}
+
+void ManageAltMediaDialog::OnButton_AddMappingClick(wxCommandEvent& event)
+{
+}
+
+void ManageAltMediaDialog::OnButton_DeleteMappingClick(wxCommandEvent& event)
+{
+}
+
+void ManageAltMediaDialog::OnButton_OKClick(wxCommandEvent& event)
 {
 }

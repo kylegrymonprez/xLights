@@ -41,6 +41,10 @@ class ManageAltMediaDialog: public wxDialog
 
         //(*Handlers(ManageAltMediaDialog)
         void OnButton1Click(wxCommandEvent& event);
+        void OnComboBox_SequenceSelected(wxCommandEvent& event);
+        void OnButton_AddMappingClick(wxCommandEvent& event);
+        void OnButton_DeleteMappingClick(wxCommandEvent& event);
+        void OnButton_OKClick(wxCommandEvent& event);
         //*)
 
         DECLARE_EVENT_TABLE()
