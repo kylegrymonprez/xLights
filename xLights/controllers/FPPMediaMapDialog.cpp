@@ -26,8 +26,9 @@ FPPMediaMapDialog::FPPMediaMapDialog(wxWindow* parent,wxWindowID id,const wxPoin
     wxFlexGridSizer* FlexGridSizer2;
 
     Create(parent, id, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE, _T("id"));
-    SetClientSize(wxSize(400,70));
+    SetClientSize(wxDefaultSize);
     Move(wxDefaultPosition);
+    SetMinSize(wxSize(-1,150));
     FlexGridSizer1 = new wxFlexGridSizer(3, 2, 0, 0);
     FlexGridSizer1->AddGrowableCol(1);
     FlexGridSizer1->AddGrowableRow(2);
@@ -47,7 +48,7 @@ FPPMediaMapDialog::FPPMediaMapDialog(wxWindow* parent,wxWindowID id,const wxPoin
     FlexGridSizer2->Add(Button_Cancel, 1, wxALL|wxEXPAND, 5);
     FlexGridSizer1->Add(FlexGridSizer2, 1, wxALL|wxEXPAND, 5);
     SetSizer(FlexGridSizer1);
-    Layout();
+    Fit();
 
     Connect(ID_CHOICE_FppHostName, wxEVT_COMMAND_CHOICE_SELECTED, (wxObjectEventFunction)&FPPMediaMapDialog::OnChoice_FppHostNameSelect);
     Connect(ID_CHOICE_AltMedia, wxEVT_COMMAND_CHOICE_SELECTED, (wxObjectEventFunction)&FPPMediaMapDialog::OnChoice_AltMediaSelect);
