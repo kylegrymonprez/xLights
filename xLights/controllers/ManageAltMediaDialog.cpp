@@ -58,6 +58,8 @@ ManageAltMediaDialog::ManageAltMediaDialog(wxWindow* parent,wxWindowID id,const 
     FlexGridSizer1->SetSizeHints(this);
 
     Connect(ID_COMBOBOX_SelectSequence, wxEVT_COMMAND_COMBOBOX_SELECTED, (wxObjectEventFunction)&ManageAltMediaDialog::OnComboBox_SequenceSelected);
+    Connect(ID_BUTTON_AddMapping, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&ManageAltMediaDialog::OnButton_AddMappingClick);
+    Connect(ID_BUTTON_RemoveMapping, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&ManageAltMediaDialog::OnButton_DeleteMappingClick);
     //*)
 }
 
@@ -84,7 +86,6 @@ void ManageAltMediaDialog::OnComboBox_SequenceSelected(wxCommandEvent& event)
     ListBox_AltMediaMappings->Append("Item 1");
     ListBox_AltMediaMappings->Append("Item 2");
     ListBox_AltMediaMappings->Append("Item 3");
-    
 }
 
 void ManageAltMediaDialog::OnButton_AddMappingClick(wxCommandEvent& event)

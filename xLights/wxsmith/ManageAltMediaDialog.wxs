@@ -42,7 +42,7 @@
 				<option>1</option>
 			</object>
 			<object class="sizeritem">
-				<object class="wxFlexGridSizer" variable="FlexGridSizer3" member="no">
+				<object class="wxFlexGridSizer" variable="FlexGridSizer_ButtonSizer" member="no">
 					<cols>2</cols>
 					<growablecols>1</growablecols>
 					<object class="sizeritem">
@@ -51,6 +51,7 @@
 							<object class="sizeritem">
 								<object class="wxButton" name="ID_BUTTON_AddMapping" variable="Button_AddMapping" member="yes">
 									<label>Add</label>
+									<handler function="OnButton_AddMappingClick" entry="EVT_BUTTON" />
 								</object>
 								<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
 								<border>5</border>
@@ -59,6 +60,7 @@
 							<object class="sizeritem">
 								<object class="wxButton" name="ID_BUTTON_RemoveMapping" variable="Button_DeleteMapping" member="yes">
 									<label>Delete</label>
+									<handler function="OnButton_DeleteMappingClick" entry="EVT_BUTTON" />
 								</object>
 								<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
 								<border>5</border>
