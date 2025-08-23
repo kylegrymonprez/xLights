@@ -78,6 +78,12 @@ void ManageAltMediaDialog::OnComboBox_SequenceSelected(wxCommandEvent& event)
     //@@@ Load existing mapping from FPP settings if it is there
 
     //@@@ Clear the mapping content panel
+    TreeCtrl_AltMediaMappings->DeleteAllItems();
+    wxTreeItemId root = TreeCtrl_AltMediaMappings->AddRoot("Root");
+    TreeCtrl_AltMediaMappings->AppendItem(root, "String 1");
+    TreeCtrl_AltMediaMappings->AppendItem(root, "String 2");
+    TreeCtrl_AltMediaMappings->AppendItem(root, "String 3");
+    
 }
 
 void ManageAltMediaDialog::OnButton_AddMappingClick(wxCommandEvent& event)
