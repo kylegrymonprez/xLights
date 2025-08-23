@@ -24,6 +24,8 @@ class FPPMediaMapDialog: public wxDialog
         wxStaticText* StaticText_AltMedia;
         wxStaticText* StaticText_FPPHostname;
         //*)
+        wxString GetFppHostName()  const { return m_selectedHostName; }
+        wxString GetAltMediaChoice()  const { return m_selectedAltMedia; }
 
     protected:
 
@@ -45,6 +47,8 @@ class FPPMediaMapDialog: public wxDialog
         void OnChoice_AltMediaSelect(wxCommandEvent& event);
         //*)
 
+        wxString m_selectedHostName;
+        wxString m_selectedAltMedia;
         DECLARE_EVENT_TABLE()
 };
 
