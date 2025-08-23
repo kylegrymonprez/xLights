@@ -49,7 +49,10 @@ FPPMediaMapDialog::FPPMediaMapDialog(wxWindow* parent,wxWindowID id,const wxPoin
     SetSizer(FlexGridSizer1);
     Layout();
 
+    Connect(ID_CHOICE_FppHostName, wxEVT_COMMAND_CHOICE_SELECTED, (wxObjectEventFunction)&FPPMediaMapDialog::OnChoice_FppHostNameSelect);
+    Connect(ID_CHOICE_AltMedia, wxEVT_COMMAND_CHOICE_SELECTED, (wxObjectEventFunction)&FPPMediaMapDialog::OnChoice_AltMediaSelect);
     Connect(ID_BUTTON_OK, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPMediaMapDialog::OnButton_OKClick);
+    Connect(ID_BUTTON_Cancel, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPMediaMapDialog::OnButton_CancelClick);
     //*)
 }
 
