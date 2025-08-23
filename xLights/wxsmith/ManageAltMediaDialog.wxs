@@ -31,8 +31,16 @@
 				<option>1</option>
 			</object>
 			<object class="sizeritem">
-				<object class="wxPanel" name="ID_PANEL_MappingContent" variable="Panel_MappingContent" member="yes">
-					<minsize>250,200</minsize>
+				<object class="wxTreeCtrl" name="ID_TREECTRL_AltMediaMappings" variable="TreeCtrl_AltMediaMappings" member="yes">
+					<image_list>&lt;none&gt;</image_list>
+					<tree_items>
+						<item>TreeCtrl_AltMediaMappings</item>
+						<item>&lt;none&gt;</item>
+					</tree_items>
+					<items_text>
+						<item2>TreeCtrl_AltMediaMappings</item2>
+						<item2>&lt;none&gt;</item2>
+					</items_text>
 				</object>
 				<flag>wxALL|wxEXPAND</flag>
 				<border>5</border>
