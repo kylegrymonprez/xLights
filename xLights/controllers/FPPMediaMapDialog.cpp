@@ -55,6 +55,8 @@ FPPMediaMapDialog::FPPMediaMapDialog(wxWindow* parent,wxWindowID id,const wxPoin
     Connect(ID_BUTTON_OK, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPMediaMapDialog::OnButton_OKClick);
     Connect(ID_BUTTON_Cancel, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPMediaMapDialog::OnButton_CancelClick);
     //*)
+    
+    Button_OK->Disable();
 }
 
 FPPMediaMapDialog::~FPPMediaMapDialog()
@@ -66,6 +68,7 @@ FPPMediaMapDialog::~FPPMediaMapDialog()
 
 void FPPMediaMapDialog::OnButton_OKClick(wxCommandEvent& event)
 {
+    
 }
 
 void FPPMediaMapDialog::OnButton_CancelClick(wxCommandEvent& event)
@@ -80,6 +83,8 @@ void FPPMediaMapDialog::OnChoice_FppHostNameSelect(wxCommandEvent& event)
     if (sel != wxNOT_FOUND) {
         m_selectedHostName = value;
     }
+    
+    CheckEnableOKButton();
 }
 
 
@@ -89,6 +94,16 @@ void FPPMediaMapDialog::OnChoice_AltMediaSelect(wxCommandEvent& event)
     wxString value = event.GetString(); // the actual string
 
     if (sel != wxNOT_FOUND) {
-        m_selectedHostName = value;
+        m_selectedAltMedia = value;
     }
+    
+    CheckEnableOKButton();
+}
+
+void FPPMediaMapDialog::CheckEnableOKButton()
+{
+    if ( !m_selectedAltMedia.IsEmpty() && !m_selectedHostName.IsEmpty() )
+        Button_OK->Enable();
+    else
+        Button_OK->Disable();
 }

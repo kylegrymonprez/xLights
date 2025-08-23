@@ -49,6 +49,7 @@ class FPPMediaMapDialog: public wxDialog
 
         wxString m_selectedHostName;
         wxString m_selectedAltMedia;
+        void CheckEnableOKButton();
         DECLARE_EVENT_TABLE()
 };
 
