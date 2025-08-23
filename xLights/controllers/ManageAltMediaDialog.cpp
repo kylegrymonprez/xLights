@@ -4,6 +4,7 @@
 #include <wx/intl.h>
 #include <wx/string.h>
 //*)
+#include "FPPMediaMapDialog.h"
 
 //(*IdInit(ManageAltMediaDialog)
 const wxWindowID ManageAltMediaDialog::ID_STATICTEXT_Sequence = wxNewId();
@@ -79,17 +80,18 @@ void ManageAltMediaDialog::OnComboBox_SequenceSelected(wxCommandEvent& event)
     //@@@ Load existing mapping from FPP settings if it is there
 
     //@@@ Clear the mapping content panel
-    TreeCtrl_AltMediaMappings->DeleteAllItems();
-    wxTreeItemId root = TreeCtrl_AltMediaMappings->AddRoot("Root");
-    TreeCtrl_AltMediaMappings->AppendItem(root, "String 1");
-    TreeCtrl_AltMediaMappings->AppendItem(root, "String 2");
-    TreeCtrl_AltMediaMappings->AppendItem(root, "String 3");
+    ListBox_AltMediaMappings->Clear();
+    ListBox_AltMediaMappings->Append("Item 1");
+    ListBox_AltMediaMappings->Append("Item 2");
+    ListBox_AltMediaMappings->Append("Item 3");
     
 }
 
 void ManageAltMediaDialog::OnButton_AddMappingClick(wxCommandEvent& event)
 {
     //@@@ New dialog popup that is FPP hostname to Media file from sequence header
+    FPPMediaMapDialog dlg(this);
+    dlg.ShowModal();
 }
 
 void ManageAltMediaDialog::OnButton_DeleteMappingClick(wxCommandEvent& event)
@@ -99,6 +101,9 @@ void ManageAltMediaDialog::OnButton_DeleteMappingClick(wxCommandEvent& event)
 
 void ManageAltMediaDialog::OnButton_OKClick(wxCommandEvent& event)
 {
+    ///@@@ Save the latest Settings
+    
+    EndDialog(wxID_OK);
 }
 
 void ManageAltMediaDialog::OnListBox_AltMediaMappingSelect(wxCommandEvent& event)
