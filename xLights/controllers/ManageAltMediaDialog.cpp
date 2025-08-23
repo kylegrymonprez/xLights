@@ -54,6 +54,8 @@ ManageAltMediaDialog::ManageAltMediaDialog(wxWindow* parent,wxWindowID id,const 
     FlexGridSizer1->Add(FlexGridSizer3, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     SetSizer(FlexGridSizer1);
     FlexGridSizer1->SetSizeHints(this);
+
+    Connect(ID_COMBOBOX_SelectSequence, wxEVT_COMMAND_COMBOBOX_SELECTED, (wxObjectEventFunction)&ManageAltMediaDialog::OnComboBox_SequenceSelected);
     //*)
 }
 
@@ -74,7 +76,7 @@ void ManageAltMediaDialog::SetSequences(const wxArrayString& sequences)
 void ManageAltMediaDialog::OnComboBox_SequenceSelected(wxCommandEvent& event)
 {
     //@@@ Load existing mapping from FPP settings if it is there
-    
+
     //@@@ Clear the mapping content panel
 }
 
