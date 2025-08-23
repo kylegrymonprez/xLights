@@ -41,6 +41,8 @@ class FPPMediaMapDialog: public wxDialog
         //(*Handlers(FPPMediaMapDialog)
         void OnButton_OKClick(wxCommandEvent& event);
         void OnButton_CancelClick(wxCommandEvent& event);
+        void OnChoice_FppHostNameSelect(wxCommandEvent& event);
+        void OnChoice_AltMediaSelect(wxCommandEvent& event);
         //*)
 
         DECLARE_EVENT_TABLE()

@@ -8,6 +8,7 @@
 			<cols>2</cols>
 			<rows>3</rows>
 			<growablecols>1</growablecols>
+			<growablerows>2</growablerows>
 			<object class="sizeritem">
 				<object class="wxStaticText" name="ID_STATICTEXT_FPP_HOSTNAME" variable="StaticText_FPPHostname" member="yes">
 					<label>FPP HostName</label>
@@ -41,7 +42,7 @@
 				<option>1</option>
 			</object>
 			<object class="spacer">
-				<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
+				<flag>wxALL|wxEXPAND</flag>
 				<border>5</border>
 				<option>1</option>
 			</object>
@@ -53,7 +54,7 @@
 							<label>OK</label>
 							<handler function="OnButton_OKClick" entry="EVT_BUTTON" />
 						</object>
-						<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
+						<flag>wxALL|wxEXPAND</flag>
 						<border>5</border>
 						<option>1</option>
 					</object>
@@ -61,7 +62,7 @@
 						<object class="wxButton" name="ID_BUTTON_Cancel" variable="Button_Cancel" member="yes">
 							<label>Cancel</label>
 						</object>
-						<flag>wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL</flag>
+						<flag>wxALL|wxEXPAND</flag>
 						<border>5</border>
 						<option>1</option>
 					</object>
