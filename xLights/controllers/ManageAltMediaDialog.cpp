@@ -8,7 +8,7 @@
 //(*IdInit(ManageAltMediaDialog)
 const wxWindowID ManageAltMediaDialog::ID_STATICTEXT_Sequence = wxNewId();
 const wxWindowID ManageAltMediaDialog::ID_COMBOBOX_SelectSequence = wxNewId();
-const wxWindowID ManageAltMediaDialog::ID_TREECTRL_AltMediaMappings = wxNewId();
+const wxWindowID ManageAltMediaDialog::ID_LISTBOX_AltMediaMappings = wxNewId();
 const wxWindowID ManageAltMediaDialog::ID_BUTTON_AddMapping = wxNewId();
 const wxWindowID ManageAltMediaDialog::ID_BUTTON_RemoveMapping = wxNewId();
 const wxWindowID ManageAltMediaDialog::ID_BUTTON_OK = wxNewId();
@@ -39,8 +39,9 @@ ManageAltMediaDialog::ManageAltMediaDialog(wxWindow* parent,wxWindowID id,const 
     ComboBox_SelectSequence = new wxComboBox(this, ID_COMBOBOX_SelectSequence, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, _T("ID_COMBOBOX_SelectSequence"));
     FlexGridSizer2->Add(ComboBox_SelectSequence, 1, wxALL|wxEXPAND, 5);
     FlexGridSizer1->Add(FlexGridSizer2, 1, wxALL|wxEXPAND, 5);
-    TreeCtrl_AltMediaMappings = new wxTreeCtrl(this, ID_TREECTRL_AltMediaMappings, wxDefaultPosition, wxDefaultSize, wxTR_DEFAULT_STYLE, wxDefaultValidator, _T("ID_TREECTRL_AltMediaMappings"));
-    FlexGridSizer1->Add(TreeCtrl_AltMediaMappings, 1, wxALL|wxEXPAND, 5);
+    ListBox_AltMediaMappings = new wxListBox(this, ID_LISTBOX_AltMediaMappings, wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, _T("ID_LISTBOX_AltMediaMappings"));
+    ListBox_AltMediaMappings->SetMinSize(wxSize(-1,200));
+    FlexGridSizer1->Add(ListBox_AltMediaMappings, 1, wxALL|wxEXPAND, 5);
     FlexGridSizer3 = new wxFlexGridSizer(0, 2, 0, 0);
     FlexGridSizer3->AddGrowableCol(1);
     FlexGridSizer4 = new wxFlexGridSizer(0, 3, 0, 0);
@@ -97,5 +98,9 @@ void ManageAltMediaDialog::OnButton_DeleteMappingClick(wxCommandEvent& event)
 }
 
 void ManageAltMediaDialog::OnButton_OKClick(wxCommandEvent& event)
+{
+}
+
+void ManageAltMediaDialog::OnListBox_AltMediaMappingSelect(wxCommandEvent& event)
 {
 }

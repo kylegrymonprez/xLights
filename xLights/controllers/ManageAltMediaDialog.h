@@ -5,9 +5,9 @@
 #include <wx/button.h>
 #include <wx/combobox.h>
 #include <wx/dialog.h>
+#include <wx/listbox.h>
 #include <wx/sizer.h>
 #include <wx/stattext.h>
-#include <wx/treectrl.h>
 //*)
 
 class ManageAltMediaDialog: public wxDialog
@@ -22,8 +22,8 @@ class ManageAltMediaDialog: public wxDialog
         wxButton* Button_DeleteMapping;
         wxButton* Button_OK;
         wxComboBox* ComboBox_SelectSequence;
+        wxListBox* ListBox_AltMediaMappings;
         wxStaticText* StaticText_Sequence;
-        wxTreeCtrl* TreeCtrl_AltMediaMappings;
         //*)
     void SetSequences(const wxArrayString& altMediaSequences);
 
@@ -32,7 +32,7 @@ class ManageAltMediaDialog: public wxDialog
         //(*Identifiers(ManageAltMediaDialog)
         static const wxWindowID ID_STATICTEXT_Sequence;
         static const wxWindowID ID_COMBOBOX_SelectSequence;
-        static const wxWindowID ID_TREECTRL_AltMediaMappings;
+        static const wxWindowID ID_LISTBOX_AltMediaMappings;
         static const wxWindowID ID_BUTTON_AddMapping;
         static const wxWindowID ID_BUTTON_RemoveMapping;
         static const wxWindowID ID_BUTTON_OK;
@@ -46,6 +46,7 @@ class ManageAltMediaDialog: public wxDialog
         void OnButton_AddMappingClick(wxCommandEvent& event);
         void OnButton_DeleteMappingClick(wxCommandEvent& event);
         void OnButton_OKClick(wxCommandEvent& event);
+        void OnListBox_AltMediaMappingSelect(wxCommandEvent& event);
         //*)
 
         DECLARE_EVENT_TABLE()

@@ -20,7 +20,9 @@
 						<option>1</option>
 					</object>
 					<object class="sizeritem">
-						<object class="wxComboBox" name="ID_COMBOBOX_SelectSequence" variable="ComboBox_SelectSequence" member="yes" />
+						<object class="wxComboBox" name="ID_COMBOBOX_SelectSequence" variable="ComboBox_SelectSequence" member="yes">
+							<handler function="OnComboBox_SequenceSelected" entry="EVT_COMBOBOX" />
+						</object>
 						<flag>wxALL|wxEXPAND</flag>
 						<border>5</border>
 						<option>1</option>
@@ -31,16 +33,9 @@
 				<option>1</option>
 			</object>
 			<object class="sizeritem">
-				<object class="wxTreeCtrl" name="ID_TREECTRL_AltMediaMappings" variable="TreeCtrl_AltMediaMappings" member="yes">
-					<image_list>&lt;none&gt;</image_list>
-					<tree_items>
-						<item>TreeCtrl_AltMediaMappings</item>
-						<item>&lt;none&gt;</item>
-					</tree_items>
-					<items_text>
-						<item2>TreeCtrl_AltMediaMappings</item2>
-						<item2>&lt;none&gt;</item2>
-					</items_text>
+				<object class="wxListBox" name="ID_LISTBOX_AltMediaMappings" variable="ListBox_AltMediaMappings" member="yes">
+					<default>-1</default>
+					<minsize>-1,200</minsize>
 				</object>
 				<flag>wxALL|wxEXPAND</flag>
 				<border>5</border>
