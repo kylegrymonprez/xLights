@@ -74,8 +74,21 @@ void FPPMediaMapDialog::OnButton_CancelClick(wxCommandEvent& event)
 
 void FPPMediaMapDialog::OnChoice_FppHostNameSelect(wxCommandEvent& event)
 {
+    int sel = event.GetSelection();     // the selected index (-1 if none)
+    wxString value = event.GetString(); // the actual string
+
+    if (sel != wxNOT_FOUND) {
+        m_selectedHostName = value;
+    }
 }
+
 
 void FPPMediaMapDialog::OnChoice_AltMediaSelect(wxCommandEvent& event)
 {
+    int sel = event.GetSelection();     // the selected index (-1 if none)
+    wxString value = event.GetString(); // the actual string
+
+    if (sel != wxNOT_FOUND) {
+        m_selectedHostName = value;
+    }
 }
