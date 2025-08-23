@@ -72,21 +72,21 @@ void ManageAltMediaDialog::SetSequences(const wxArrayString& sequences)
     ComboBox_SelectSequence->SetHint("Select Sequence");
 }
 
-
-void ManageAltMediaDialog::OnButton1Click(wxCommandEvent& event)
-{
-}
-
 void ManageAltMediaDialog::OnComboBox_SequenceSelected(wxCommandEvent& event)
 {
+    //@@@ Load existing mapping from FPP settings if it is there
+    
+    //@@@ Clear the mapping content panel
 }
 
 void ManageAltMediaDialog::OnButton_AddMappingClick(wxCommandEvent& event)
 {
+    //@@@ New dialog popup that is FPP hostname to Media file from sequence header
 }
 
 void ManageAltMediaDialog::OnButton_DeleteMappingClick(wxCommandEvent& event)
 {
+    ///@@@ Remove from existing FPP settings file
 }
 
 void ManageAltMediaDialog::OnButton_OKClick(wxCommandEvent& event)
