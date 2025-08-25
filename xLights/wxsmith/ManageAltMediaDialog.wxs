@@ -35,7 +35,8 @@
 			<object class="sizeritem">
 				<object class="wxListBox" name="ID_LISTBOX_AltMediaMappings" variable="ListBox_AltMediaMappings" member="yes">
 					<default>-1</default>
-					<minsize>-1,200</minsize>
+					<minsize>800,200</minsize>
+					<style>wxLB_HSCROLL</style>
 				</object>
 				<flag>wxALL|wxEXPAND</flag>
 				<border>5</border>

@@ -25,8 +25,8 @@ ManageAltMediaDialog::ManageAltMediaDialog(wxWindow* parent,wxWindowID id,const 
     //(*Initialize(ManageAltMediaDialog)
     wxFlexGridSizer* FlexGridSizer1;
     wxFlexGridSizer* FlexGridSizer2;
-    wxFlexGridSizer* FlexGridSizer3;
     wxFlexGridSizer* FlexGridSizer4;
+    wxFlexGridSizer* FlexGridSizer_ButtonSizer;
 
     Create(parent, id, wxEmptyString, wxDefaultPosition, wxDefaultSize, wxDEFAULT_DIALOG_STYLE, _T("id"));
     SetClientSize(wxDefaultSize);
@@ -40,20 +40,20 @@ ManageAltMediaDialog::ManageAltMediaDialog(wxWindow* parent,wxWindowID id,const 
     ComboBox_SelectSequence = new wxComboBox(this, ID_COMBOBOX_SelectSequence, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, _T("ID_COMBOBOX_SelectSequence"));
     FlexGridSizer2->Add(ComboBox_SelectSequence, 1, wxALL|wxEXPAND, 5);
     FlexGridSizer1->Add(FlexGridSizer2, 1, wxALL|wxEXPAND, 5);
-    ListBox_AltMediaMappings = new wxListBox(this, ID_LISTBOX_AltMediaMappings, wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, _T("ID_LISTBOX_AltMediaMappings"));
-    ListBox_AltMediaMappings->SetMinSize(wxSize(-1,200));
+    ListBox_AltMediaMappings = new wxListBox(this, ID_LISTBOX_AltMediaMappings, wxDefaultPosition, wxDefaultSize, 0, 0, wxLB_HSCROLL, wxDefaultValidator, _T("ID_LISTBOX_AltMediaMappings"));
+    ListBox_AltMediaMappings->SetMinSize(wxSize(800,200));
     FlexGridSizer1->Add(ListBox_AltMediaMappings, 1, wxALL|wxEXPAND, 5);
-    FlexGridSizer3 = new wxFlexGridSizer(0, 2, 0, 0);
-    FlexGridSizer3->AddGrowableCol(1);
+    FlexGridSizer_ButtonSizer = new wxFlexGridSizer(0, 2, 0, 0);
+    FlexGridSizer_ButtonSizer->AddGrowableCol(1);
     FlexGridSizer4 = new wxFlexGridSizer(0, 3, 0, 0);
     Button_AddMapping = new wxButton(this, ID_BUTTON_AddMapping, _("Add"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON_AddMapping"));
     FlexGridSizer4->Add(Button_AddMapping, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     Button_DeleteMapping = new wxButton(this, ID_BUTTON_RemoveMapping, _("Delete"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON_RemoveMapping"));
     FlexGridSizer4->Add(Button_DeleteMapping, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
-    FlexGridSizer3->Add(FlexGridSizer4, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
+    FlexGridSizer_ButtonSizer->Add(FlexGridSizer4, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     Button_OK = new wxButton(this, ID_BUTTON_OK, _("OK"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_BUTTON_OK"));
-    FlexGridSizer3->Add(Button_OK, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
-    FlexGridSizer1->Add(FlexGridSizer3, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
+    FlexGridSizer_ButtonSizer->Add(Button_OK, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
+    FlexGridSizer1->Add(FlexGridSizer_ButtonSizer, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
     SetSizer(FlexGridSizer1);
     FlexGridSizer1->SetSizeHints(this);
 
