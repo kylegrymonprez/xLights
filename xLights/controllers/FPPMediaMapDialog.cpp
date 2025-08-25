@@ -34,11 +34,11 @@ FPPMediaMapDialog::FPPMediaMapDialog(wxWindow* parent,wxWindowID id,const wxPoin
     FlexGridSizer1->AddGrowableRow(2);
     StaticText_FPPHostname = new wxStaticText(this, ID_STATICTEXT_FPP_HOSTNAME, _("FPP HostName"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT_FPP_HOSTNAME"));
     FlexGridSizer1->Add(StaticText_FPPHostname, 1, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
-    Choice_FppHostName = new wxChoice(this, ID_CHOICE_FppHostName, wxDefaultPosition, wxSize(250,25), 0, 0, 0, wxDefaultValidator, _T("ID_CHOICE_FppHostName"));
+    Choice_FppHostName = new wxChoice(this, ID_CHOICE_FppHostName, wxDefaultPosition, wxSize(550,25), 0, 0, 0, wxDefaultValidator, _T("ID_CHOICE_FppHostName"));
     FlexGridSizer1->Add(Choice_FppHostName, 1, wxALL|wxEXPAND, 5);
     StaticText_AltMedia = new wxStaticText(this, ID_STATICTEXT_AltMedia, _("Alternate Media"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT_AltMedia"));
     FlexGridSizer1->Add(StaticText_AltMedia, 1, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
-    Choice_AltMedia = new wxChoice(this, ID_CHOICE_AltMedia, wxDefaultPosition, wxSize(250,25), 0, 0, 0, wxDefaultValidator, _T("ID_CHOICE_AltMedia"));
+    Choice_AltMedia = new wxChoice(this, ID_CHOICE_AltMedia, wxDefaultPosition, wxSize(550,25), 0, 0, 0, wxDefaultValidator, _T("ID_CHOICE_AltMedia"));
     FlexGridSizer1->Add(Choice_AltMedia, 1, wxALL|wxEXPAND, 5);
     FlexGridSizer1->Add(-1,-1,1, wxALL|wxEXPAND, 5);
     FlexGridSizer2 = new wxFlexGridSizer(1, 0, 0, 0);
@@ -55,7 +55,7 @@ FPPMediaMapDialog::FPPMediaMapDialog(wxWindow* parent,wxWindowID id,const wxPoin
     Connect(ID_BUTTON_OK, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPMediaMapDialog::OnButton_OKClick);
     Connect(ID_BUTTON_Cancel, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPMediaMapDialog::OnButton_CancelClick);
     //*)
-    
+
     Button_OK->Disable();
 }
 
@@ -68,7 +68,7 @@ FPPMediaMapDialog::~FPPMediaMapDialog()
 
 void FPPMediaMapDialog::OnButton_OKClick(wxCommandEvent& event)
 {
-    
+
 }
 
 void FPPMediaMapDialog::OnButton_CancelClick(wxCommandEvent& event)
@@ -83,7 +83,7 @@ void FPPMediaMapDialog::OnChoice_FppHostNameSelect(wxCommandEvent& event)
     if (sel != wxNOT_FOUND) {
         m_selectedHostName = value;
     }
-    
+
     CheckEnableOKButton();
 }
 
@@ -96,7 +96,7 @@ void FPPMediaMapDialog::OnChoice_AltMediaSelect(wxCommandEvent& event)
     if (sel != wxNOT_FOUND) {
         m_selectedAltMedia = value;
     }
-    
+
     CheckEnableOKButton();
 }
 
