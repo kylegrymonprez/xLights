@@ -9,12 +9,13 @@
 #include <wx/sizer.h>
 #include <wx/stattext.h>
 //*)
+#include "FPP.h"
 
 class ManageAltMediaDialog: public wxDialog
 {
     public:
 
-        ManageAltMediaDialog(wxWindow* parent,wxWindowID id=wxID_ANY,const wxPoint& pos=wxDefaultPosition,const wxSize& size=wxDefaultSize);
+        ManageAltMediaDialog(wxWindow* parent, const wxArrayString& instances, const wxWindowID id=wxID_ANY,const wxPoint& pos=wxDefaultPosition,const wxSize& size=wxDefaultSize);
         virtual ~ManageAltMediaDialog();
 
         //(*Declarations(ManageAltMediaDialog)
@@ -25,7 +26,7 @@ class ManageAltMediaDialog: public wxDialog
         wxListBox* ListBox_AltMediaMappings;
         wxStaticText* StaticText_Sequence;
         //*)
-    void SetSequences(const wxArrayString& altMediaSequences);
+    void SetSequences(const std::map<wxString, std::list<std::string>>& sequenceToAltMap);
 
     protected:
 
@@ -48,6 +49,9 @@ class ManageAltMediaDialog: public wxDialog
         void OnButton_OKClick(wxCommandEvent& event);
         void OnListBox_AltMediaMappingSelect(wxCommandEvent& event);
         //*)
+        const wxArrayString& m_hostnames;
+        std::map<wxString, std::list<std::string>> m_sequenceMap;
+        wxString m_selectedSequence;
 
         DECLARE_EVENT_TABLE()
 };

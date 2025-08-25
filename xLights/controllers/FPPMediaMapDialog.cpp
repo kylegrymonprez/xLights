@@ -20,6 +20,7 @@ BEGIN_EVENT_TABLE(FPPMediaMapDialog,wxDialog)
 END_EVENT_TABLE()
 
 FPPMediaMapDialog::FPPMediaMapDialog(wxWindow* parent,wxWindowID id,const wxPoint& pos,const wxSize& size)
+FPPMediaMapDialog::FPPMediaMapDialog(wxWindow* parent, const wxArrayString& hostnames, const std::list<std::string>& altMediaOptions, wxWindowID id,const wxPoint& pos,const wxSize& size)
 {
     //(*Initialize(FPPMediaMapDialog)
     wxFlexGridSizer* FlexGridSizer1;
@@ -55,8 +56,18 @@ FPPMediaMapDialog::FPPMediaMapDialog(wxWindow* parent,wxWindowID id,const wxPoin
     Connect(ID_BUTTON_OK, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPMediaMapDialog::OnButton_OKClick);
     Connect(ID_BUTTON_Cancel, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&FPPMediaMapDialog::OnButton_CancelClick);
     //*)
-
+    
+    
+    
     Button_OK->Disable();
+
+    Choice_FppHostName->Clear();
+    Choice_AltMedia->Clear();
+    Choice_FppHostName->Append(hostnames);
+    for (const auto& entry : altMediaOptions) {
+        Choice_AltMedia->Append(entry);
+    }
+
 }
 
 FPPMediaMapDialog::~FPPMediaMapDialog()
@@ -73,6 +84,7 @@ void FPPMediaMapDialog::OnButton_OKClick(wxCommandEvent& event)
 
 void FPPMediaMapDialog::OnButton_CancelClick(wxCommandEvent& event)
 {
+    EndDialog(wxID_OK);
 }
 
 void FPPMediaMapDialog::OnChoice_FppHostNameSelect(wxCommandEvent& event)
@@ -106,4 +118,9 @@ void FPPMediaMapDialog::CheckEnableOKButton()
         Button_OK->Enable();
     else
         Button_OK->Disable();
+}
+
+void FPPMediaMapDialog::PopulateChoiceOptions()
+{
+    
 }

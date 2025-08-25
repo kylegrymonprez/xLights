@@ -338,6 +338,8 @@ uint32_t FPPConnectDialog::GetSelectedSeqCount() {
     return selected;
 }
 
+//@@@ we might be able to remove this and just return the map directly
+//std::map<wxString, wxArrayString> FPPConnectDialog::GetSelectedSeqsWithAltMedia() {
 wxArrayString FPPConnectDialog::GetSelectedSeqsWithAltMedia() {
     wxArrayString altMediaEntries;
 
@@ -888,8 +890,9 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
             int count = 0;
             bool isSequence = false;
             bool isMedia = false;
-            bool hasAlternateMedia = false;
+            bool isAlternateMedia = false;
             std::string mediaName;
+            std::list<std::string> altMediaNames;
 
             while (!done) {
                 if (!event) {
@@ -912,13 +915,16 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
                                     isSequence = true;
                                 } else if (NodeName == "mediaFile") {
                                     isMedia = true;
+                                    isAlternateMedia = false;
                                 } else if (NodeName == "altMediaFile") {
-                                    hasAlternateMedia = true;
+                                    isAlternateMedia = true;
+                                    isMedia = false;
                                 } else {
                                     isMedia = false;
+                                    isAlternateMedia = false;
                                 }
-                                if (count == 100) {
-                                    //media file will be very early in the file, dont waste time;
+                                if (NodeName == "nextid" || count == 100) {
+                                    //nextid is after the header payload, adn will be very early in the file, dont waste time;
                                     done = true;
                                 }
                             }
@@ -927,7 +933,11 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
                             if (isMedia) {
                                 SP_XmlCDataEvent * stagEvent = (SP_XmlCDataEvent*)event;
                                 mediaName = FromUTF8(stagEvent->getText());
-                                done = true;
+                                
+                            }
+                            if( isAlternateMedia ) {
+                                SP_XmlCDataEvent * stagEvent = (SP_XmlCDataEvent*)event;
+                                altMediaNames.push_back(FromUTF8(stagEvent->getText()));
                             }
                             break;
                     }
@@ -952,6 +962,8 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
                     isSequence = false;
                 }
             }
+                
+            ///@@@ Checking for media validity here - what do we need to do for alternate media?
             if (mediaName != "") {
                 if (!FileExists(mediaName)) {
                     wxFileName fn(mediaName);
@@ -973,7 +985,8 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
                     }
                 }
             }
-            logger_base.debug("XML:  %s   IsSeq:  %d    FSEQ:  %s   Media:  %s HasAltMedia: %s", (const char*)file.c_str(), isSequence, (const char*)fseqName.c_str(), (const char*)mediaName.c_str(), hasAlternateMedia ? "true" : "false");
+                
+            logger_base.debug("XML:  %s   IsSeq:  %d    FSEQ:  %s   Media:  %s # AltMedia: %d", (const char*)file.c_str(), isSequence, (const char*)fseqName.c_str(), (const char*)mediaName.c_str(), altMediaNames.size());
             if (isSequence) {
 
                 // where you have show folders within show folders and sequences with the same name
@@ -996,9 +1009,10 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString dir) const
                         CheckListBox_Sequences->SetItemText(item, 2, mediaName);
                     }
 
-                    //@@@
-                    if( hasAlternateMedia ) {
-                        CheckListBox_Sequences->SetItemText(item, 3, "Available"); // U+22EF
+                    ///@@@
+                    if( altMediaNames.size() > 0 ) {
+                        CheckListBox_Sequences->SetItemText(item, 3, "Available");
+                        m_sequencesToAltMediaMap[fseqName] = altMediaNames;
                     }
                 }
             }
@@ -1046,6 +1060,7 @@ void FPPConnectDialog::LoadSequences()
 {
     static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
     CheckListBox_Sequences->DeleteAllItems();
+    m_sequencesToAltMediaMap.clear();
     xLightsFrame* frame = static_cast<xLightsFrame*>(GetParent());
     wxString fseqDir = frame->GetFseqDirectory();
 
@@ -1878,9 +1893,18 @@ void FPPConnectDialog::OnButton_ManageAltMediaClick(wxCommandEvent& event)
     wxArrayString selectedSequences = GetSelectedSeqsWithAltMedia();
     if( selectedSequences.size() > 0 )
     {
-        ManageAltMediaDialog dlg(this);
+        wxArrayString fppHostnames;
+        for (const auto& inst : instances) {
+            if (inst->fppType == FPP_TYPE::FPP) {
+                if (true) {
+                    fppHostnames.Add(inst->hostName);
+                }
+            }
+        }
+        
+        ManageAltMediaDialog dlg(this, fppHostnames);
         //Set which sequences have altmedia
-        dlg.SetSequences(GetSelectedSeqsWithAltMedia());
+        dlg.SetSequences(m_sequencesToAltMediaMap);
         dlg.ShowModal();
     } else {
         wxMessageDialog msgDlg(this, "Error: No sequences with alternate media are selected.", "Error", wxOK | wxCENTRE);

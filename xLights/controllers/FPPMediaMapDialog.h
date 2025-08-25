@@ -13,7 +13,7 @@ class FPPMediaMapDialog: public wxDialog
 {
     public:
 
-        FPPMediaMapDialog(wxWindow* parent,wxWindowID id=wxID_ANY,const wxPoint& pos=wxDefaultPosition,const wxSize& size=wxDefaultSize);
+        FPPMediaMapDialog(wxWindow* parent, const wxArrayString& hostnames, const std::list<std::string>& altMediaOptions, wxWindowID id=wxID_ANY,const wxPoint& pos=wxDefaultPosition,const wxSize& size=wxDefaultSize);
         virtual ~FPPMediaMapDialog();
 
         //(*Declarations(FPPMediaMapDialog)
@@ -50,6 +50,7 @@ class FPPMediaMapDialog: public wxDialog
         wxString m_selectedHostName;
         wxString m_selectedAltMedia;
         void CheckEnableOKButton();
+        void PopulateChoiceOptions();
         DECLARE_EVENT_TABLE()
 };
 

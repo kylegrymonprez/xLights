@@ -20,7 +20,8 @@ BEGIN_EVENT_TABLE(ManageAltMediaDialog,wxDialog)
     //*)
 END_EVENT_TABLE()
 
-ManageAltMediaDialog::ManageAltMediaDialog(wxWindow* parent,wxWindowID id,const wxPoint& pos,const wxSize& size)
+ManageAltMediaDialog::ManageAltMediaDialog(wxWindow* parent ,const wxArrayString& fppHostNames, const wxWindowID id,const wxPoint& pos,const wxSize& size)
+: m_hostnames(fppHostNames)
 {
     //(*Initialize(ManageAltMediaDialog)
     wxFlexGridSizer* FlexGridSizer1;
@@ -69,29 +70,45 @@ ManageAltMediaDialog::~ManageAltMediaDialog()
     //*)
 }
 
-void ManageAltMediaDialog::SetSequences(const wxArrayString& sequences)
+void ManageAltMediaDialog::SetSequences(const std::map<wxString, std::list<std::string>>& sequenceToAltMap)
 {
     ComboBox_SelectSequence->Clear();                 // remove old entries
-    ComboBox_SelectSequence->Append(sequences);         // add all entries from the array
+    m_sequenceMap = sequenceToAltMap;
+    for (const auto& entry : sequenceToAltMap) {
+        wxFileName fn(entry.first);
+        wxString fileName = fn.GetFullName();
+        ComboBox_SelectSequence->Append(fn.GetFullName(), new wxStringClientData(entry.first));   // entry.first is the wxString key
+    }
     ComboBox_SelectSequence->SetSelection(wxNOT_FOUND); // nothing selected by default
     ComboBox_SelectSequence->SetHint("Select Sequence");
 }
 
 void ManageAltMediaDialog::OnComboBox_SequenceSelected(wxCommandEvent& event)
 {
-    //@@@ Load existing mapping from FPP settings if it is there
-
     //@@@ Clear the mapping content panel
     ListBox_AltMediaMappings->Clear();
-    ListBox_AltMediaMappings->Append("Item 1");
-    ListBox_AltMediaMappings->Append("Item 2");
-    ListBox_AltMediaMappings->Append("Item 3");
+    int sel = event.GetSelection();
+    if( sel != wxNOT_FOUND) {
+        auto* data = static_cast<wxStringClientData*>(ComboBox_SelectSequence->GetClientObject(sel));
+        m_selectedSequence = data->GetData();
+        auto it = m_sequenceMap.find(m_selectedSequence);
+        for (const auto& entry : it->second) {                // e
+            wxString w = wxString::FromUTF8(entry.c_str());   // convert to wxString
+            //@@@ Temp - need to read this from FPP settings once we can add
+            ListBox_AltMediaMappings->Append(wxString::Format("FPP X -> %s", w));
+        }
+    }
+//    ListBox_AltMediaMappings->Append("FPP X -> Media 1");
+//    ListBox_AltMediaMappings->Append("FPP Y -> Media 2");
+//    ListBox_AltMediaMappings->Append("FPP Z -> Media 3");
 }
 
 void ManageAltMediaDialog::OnButton_AddMappingClick(wxCommandEvent& event)
 {
     //@@@ New dialog popup that is FPP hostname to Media file from sequence header
-    FPPMediaMapDialog dlg(this);
+    
+    //@@@ temp fix sequences to hostnaames
+    FPPMediaMapDialog dlg(this, m_hostnames, m_sequenceMap[m_selectedSequence] );
     dlg.ShowModal();
 }
 

@@ -54,6 +54,7 @@ class FPPConnectDialog: public wxDialog
 		//*)
 
         wxTreeListCtrl* CheckListBox_Sequences;
+        mutable std::map<wxString, std::list<std::string>> m_sequencesToAltMediaMap;
 
 	protected:
 
