@@ -19,7 +19,6 @@ BEGIN_EVENT_TABLE(FPPMediaMapDialog,wxDialog)
     //*)
 END_EVENT_TABLE()
 
-FPPMediaMapDialog::FPPMediaMapDialog(wxWindow* parent,wxWindowID id,const wxPoint& pos,const wxSize& size)
 FPPMediaMapDialog::FPPMediaMapDialog(wxWindow* parent, const wxArrayString& hostnames, const std::list<std::string>& altMediaOptions, wxWindowID id,const wxPoint& pos,const wxSize& size)
 {
     //(*Initialize(FPPMediaMapDialog)
@@ -67,7 +66,8 @@ FPPMediaMapDialog::FPPMediaMapDialog(wxWindow* parent, const wxArrayString& host
     for (const auto& entry : altMediaOptions) {
         Choice_AltMedia->Append(entry);
     }
-
+    Choice_FppHostName->SetSelection(wxNOT_FOUND);
+    Choice_AltMedia->SetSelection(wxNOT_FOUND);
 }
 
 FPPMediaMapDialog::~FPPMediaMapDialog()
@@ -79,6 +79,8 @@ FPPMediaMapDialog::~FPPMediaMapDialog()
 
 void FPPMediaMapDialog::OnButton_OKClick(wxCommandEvent& event)
 {
+    //@@@ save to FPP settings
+    
 
 }
 

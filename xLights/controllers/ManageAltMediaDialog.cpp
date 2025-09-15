@@ -5,6 +5,7 @@
 #include <wx/string.h>
 //*)
 #include "FPPMediaMapDialog.h"
+#include <wx/config.h>
 
 //(*IdInit(ManageAltMediaDialog)
 const wxWindowID ManageAltMediaDialog::ID_STATICTEXT_Sequence = wxNewId();
@@ -76,7 +77,6 @@ void ManageAltMediaDialog::SetSequences(const std::map<wxString, std::list<std::
     m_sequenceMap = sequenceToAltMap;
     for (const auto& entry : sequenceToAltMap) {
         wxFileName fn(entry.first);
-        wxString fileName = fn.GetFullName();
         ComboBox_SelectSequence->Append(fn.GetFullName(), new wxStringClientData(entry.first));   // entry.first is the wxString key
     }
     ComboBox_SelectSequence->SetSelection(wxNOT_FOUND); // nothing selected by default
@@ -96,6 +96,15 @@ void ManageAltMediaDialog::OnComboBox_SequenceSelected(wxCommandEvent& event)
             wxString w = wxString::FromUTF8(entry.c_str());   // convert to wxString
             //@@@ Temp - need to read this from FPP settings once we can add
             ListBox_AltMediaMappings->Append(wxString::Format("FPP X -> %s", w));
+            
+            wxConfigBase* config = wxConfigBase::Get();
+            if (config != nullptr) {
+                const wxString itcsv = config->Read(wxString::Format("FPPConnectAltMedia_%s", w), wxEmptyString);
+                if (!itcsv.IsEmpty()) {
+                    
+                }
+            }
+
         }
     }
 //    ListBox_AltMediaMappings->Append("FPP X -> Media 1");
@@ -109,7 +118,11 @@ void ManageAltMediaDialog::OnButton_AddMappingClick(wxCommandEvent& event)
     
     //@@@ temp fix sequences to hostnaames
     FPPMediaMapDialog dlg(this, m_hostnames, m_sequenceMap[m_selectedSequence] );
-    dlg.ShowModal();
+    if (dlg.ShowModal() == wxID_OK) {
+        wxString selectedHost   = dlg.GetFppHostName();
+        wxString selectedAltMedia = dlg.GetAltMediaChoice();
+    }
+    
 }
 
 void ManageAltMediaDialog::OnButton_DeleteMappingClick(wxCommandEvent& event)

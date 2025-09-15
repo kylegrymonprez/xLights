@@ -1725,6 +1725,8 @@ void FPPConnectDialog::ApplySavedHostSettings()
     }
 }
 
+//void FPPConnectDialog::SaveAltMappings(wxString)
+
 void FPPConnectDialog::OnClose(wxCloseEvent& event)
 {
     EndDialog(0);
