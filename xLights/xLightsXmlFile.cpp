@@ -1047,6 +1047,24 @@ void xLightsXmlFile::ConvertToFixedPointTiming()
     }
 }
 
+void xLightsXmlFile::UpdateMediaFileInXML(const wxString& filename)
+{
+    media_file = filename;
+
+    wxXmlNode* root = seqDocument.GetRoot();
+
+    for (wxXmlNode* e = root->GetChildren(); e != nullptr; e = e->GetNext()) {
+        if (e->GetName() == "head") {
+            for (wxXmlNode* element = e->GetChildren(); element != nullptr; element = element->GetNext()) {
+                if (element->GetName() == "mediaFile") {
+                    SetNodeContent(element, media_file);
+                    return;
+                }
+            }
+        }
+    }
+}
+
 bool xLightsXmlFile::LoadSequence(const wxString& ShowDir, bool ignore_audio, const wxFileName &realFilename)
 {
     static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
@@ -1130,8 +1148,10 @@ bool xLightsXmlFile::LoadSequence(const wxString& ShowDir, bool ignore_audio, co
                     if (!ignore_audio) {
                         logger_base.debug("LoadSequence: mediaFile %s", (const char*)element->GetNodeContent().c_str());
                         media_file = FixFile(ShowDir, element->GetNodeContent());
-                        if (media_file != element->GetNodeContent()) element->SetContent(media_file);
-                        logger_base.debug("LoadSequence: mediaFile after fix %s", (const char*)media_file.c_str());
+                        if (media_file != element->GetNodeContent()) {
+                            UpdateMediaFileInXML(media_file);
+                            logger_base.debug("LoadSequence: mediaFile updated to %s", (const char*)media_file.c_str());
+                        }
                         wxFileName mf = media_file;
                         if (audio != nullptr) {
                             logger_base.debug("LoadSequence: removing prior audio.");
@@ -1440,7 +1460,7 @@ void xLightsXmlFile::UpdateVersion(const std::string& version)
     }
 }
 
-void xLightsXmlFile::ProcessAudacityTimingFiles(const wxString& dir, const wxArrayString& filenames, xLightsFrame* xLightsParent)
+void xLightsXmlFile::ProcessAudacityTimingFiles( const wxArrayString& filenames, xLightsFrame* xLightsParent)
 {
     wxTextFile f;
     wxString line;
@@ -1448,7 +1468,6 @@ void xLightsXmlFile::ProcessAudacityTimingFiles(const wxString& dir, const wxArr
 
     for (size_t i = 0; i < filenames.Count(); ++i) {
         wxFileName next_file(filenames[i]);
-        next_file.SetPath(dir);
 
         if (!f.Open(next_file.GetFullPath().c_str())) {
             //Add error dialog if open file failed
@@ -1550,12 +1569,11 @@ void xLightsXmlFile::ProcessAudacityTimingFiles(const wxString& dir, const wxArr
     }
 }
 
-void xLightsXmlFile::ProcessLorTiming(const wxString& dir, const wxArrayString& filenames, xLightsFrame* xLightsParent)
+void xLightsXmlFile::ProcessLorTiming(const wxArrayString& filenames, xLightsFrame* xLightsParent)
 {
     for (size_t i = 0; i < filenames.Count(); ++i )
     {
         wxFileName next_file(filenames[i]);
-        next_file.SetPath(dir);
 
         wxFile f;
         if (!f.Open(next_file.GetFullPath().c_str()))
@@ -1782,15 +1800,13 @@ void xLightsXmlFile::ProcessXTiming(wxXmlNode* node, xLightsFrame* xLightsParent
     }
 }
 
-void xLightsXmlFile::ProcessXTiming(const wxString& dir, const wxArrayString& filenames, xLightsFrame* xLightsParent)
+void xLightsXmlFile::ProcessXTiming(const wxArrayString& filenames, xLightsFrame* xLightsParent)
 {
     wxTextFile f;
 
     for (size_t i = 0; i < filenames.Count(); ++i)
     {
         wxFileName next_file(filenames[i]);
-        next_file.SetPath(dir);
-
         if (!f.Open(next_file.GetFullPath().c_str()))
         {
             DisplayError(wxString::Format("xTiming: Failed to open file: '%s'", next_file.GetFullPath()).ToStdString());
@@ -1843,7 +1859,7 @@ wxString RemoveTabs(const wxString& s, size_t tabs)
     return res;
 }
 
-void xLightsXmlFile::ProcessPapagayo(const wxString& dir, const wxArrayString& filenames, xLightsFrame* xLightsParent)
+void xLightsXmlFile::ProcessPapagayo( const wxArrayString& filenames, xLightsFrame* xLightsParent)
 {
     static log4cpp::Category &logger_base = log4cpp::Category::getInstance(std::string("log_base"));
     wxTextFile f;
@@ -1852,8 +1868,6 @@ void xLightsXmlFile::ProcessPapagayo(const wxString& dir, const wxArrayString& f
     {
         int linenum = 1;
         wxFileName next_file(filenames[i]);
-        next_file.SetPath(dir);
-
         logger_base.info("Loading papagayo file " + std::string(next_file.GetFullPath().c_str()));
 
         if (!f.Open(next_file.GetFullPath().c_str()))
@@ -2159,7 +2173,7 @@ std::string ReadSRTLine(wxTextFile& f, int linenum, long& startMS, long& endMS)
     return line;
 }
 
-void xLightsXmlFile::ProcessSRT(const wxString& dir, const wxArrayString& filenames, xLightsFrame* xLightsParent)
+void xLightsXmlFile::ProcessSRT( const wxArrayString& filenames, xLightsFrame* xLightsParent)
 {
     static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
     wxTextFile f;
@@ -2167,8 +2181,6 @@ void xLightsXmlFile::ProcessSRT(const wxString& dir, const wxArrayString& filena
     for (size_t i = 0; i < filenames.Count(); ++i)
     {
         wxFileName next_file(filenames[i]);
-        next_file.SetPath(dir);
-
         logger_base.info("Loading srt file " + std::string(next_file.GetFullPath().c_str()));
 
         if (!f.Open(next_file.GetFullPath().c_str()))
@@ -2262,7 +2274,7 @@ wxString DecodeLSPTTColour(int att)
     return wxString::Format("%d", att);
 }
 
-void xLightsXmlFile::ProcessLSPTiming(const wxString& dir, const wxArrayString& filenames, xLightsFrame* xLightsParent)
+void xLightsXmlFile::ProcessLSPTiming( const wxArrayString& filenames, xLightsFrame* xLightsParent)
 {
     static log4cpp::Category &logger_base = log4cpp::Category::getInstance(std::string("log_base"));
     wxTextFile f;
@@ -2272,8 +2284,6 @@ void xLightsXmlFile::ProcessLSPTiming(const wxString& dir, const wxArrayString& 
     for (size_t i = 0; i < filenames.Count(); ++i)
     {
         wxFileName next_file(filenames[i]);
-        next_file.SetPath(dir);
-
         logger_base.info("Decompressing LSP file " + std::string(next_file.GetFullPath().c_str()));
 
         wxFileInputStream fin(next_file.GetFullPath());
@@ -2388,7 +2398,7 @@ void xLightsXmlFile::ProcessLSPTiming(const wxString& dir, const wxArrayString& 
     xLightsParent->SetCursor(wxCURSOR_ARROW);
 }
 
-void xLightsXmlFile::ProcessXLightsTiming(const wxString& dir, const wxArrayString& filenames, xLightsFrame* xLightsParent) {
+void xLightsXmlFile::ProcessXLightsTiming( const wxArrayString& filenames, xLightsFrame* xLightsParent) {
     static log4cpp::Category &logger_base = log4cpp::Category::getInstance(std::string("log_base"));
     wxTextFile f;
 
@@ -2401,11 +2411,10 @@ void xLightsXmlFile::ProcessXLightsTiming(const wxString& dir, const wxArrayStri
     for (size_t i = 0; i < filenames.Count(); ++i)
     {
         wxFileName next_file(filenames[i]);
-        next_file.SetPath(dir);
 
         logger_base.info("Loading sequence file " + std::string(next_file.GetFullPath().c_str()));
         xLightsXmlFile file(next_file);
-        file.LoadSequence(dir, true, next_file);
+        file.LoadSequence(next_file.GetPath(), true, next_file);
 
         SequenceElements se(xLightsParent);
         se.SetFrequency(file.GetFrequency());
@@ -2483,7 +2492,7 @@ void xLightsXmlFile::AddMarksToLayer(const std::list<VixenTiming>& marks, Effect
     }
 }
 
-void xLightsXmlFile::ProcessVixen3Timing(const wxString& dir, const wxArrayString& filenames, xLightsFrame* xLightsParent) {
+void xLightsXmlFile::ProcessVixen3Timing( const wxArrayString& filenames, xLightsFrame* xLightsParent) {
     static log4cpp::Category &logger_base = log4cpp::Category::getInstance(std::string("log_base"));
 
     xLightsParent->SetCursor(wxCURSOR_WAIT);
@@ -2491,7 +2500,6 @@ void xLightsXmlFile::ProcessVixen3Timing(const wxString& dir, const wxArrayStrin
     for (size_t i = 0; i < filenames.Count(); ++i)
     {
         wxFileName next_file(filenames[i]);
-        next_file.SetPath(dir);
 
         logger_base.info("Loading Vixen 3 file " + std::string(next_file.GetFullPath().c_str()));
 
@@ -2635,6 +2643,24 @@ void xLightsXmlFile::AddJukebox(wxXmlNode* node)
 // function used to save sequence data
 bool xLightsXmlFile::Save(SequenceElements& seq_elements)
 {
+    if (SaveToDoc(seq_elements)) {
+        wxFileOutputStream fout(GetFullPath());
+        wxBufferedOutputStream *bout = new wxBufferedOutputStream(fout, 2 * 1024 * 1024);
+        if (!seqDocument.Save(*bout)) {
+            delete bout;
+            return false;
+        }
+        delete bout;
+        if (!fout.Close()) {
+            return false;
+        }
+
+        MarkNewFileRevision(GetFullPath());
+        return true;
+    }
+    return false;
+}
+bool xLightsXmlFile::SaveToDoc(SequenceElements& seq_elements) {
     wxXmlNode* root = seqDocument.GetRoot();
 
     root->DeleteAttribute("ModelBlending");
@@ -2647,6 +2673,7 @@ bool xLightsXmlFile::Save(SequenceElements& seq_elements)
             e->GetName() == "DataLayers" ||
             e->GetName() == "ColorPalettes" ||
             e->GetName() == "EffectDB" ||
+            e->GetName() == "SequenceMedia" ||
             e->GetName() == "TimingTags" ||
             e->GetName() == "lastView") {
             wxXmlNode* node_to_delete = e;
@@ -2662,6 +2689,12 @@ bool xLightsXmlFile::Save(SequenceElements& seq_elements)
     wxXmlNode* colorPalette_node = AddChildXmlNode(root, "ColorPalettes");
     StringIntMap effectStrings;
     wxXmlNode* effectDB_Node = AddChildXmlNode(root, "EffectDB");
+
+    // Save sequence media
+    wxXmlNode* sequenceImages_node = seq_elements.GetSequenceMedia().SaveToXml();
+    if (sequenceImages_node != nullptr) {
+        root->AddChild(sequenceImages_node);
+    }
 
     // Now add new elements to our xml document
     wxXmlNode* data_layer = AddChildXmlNode(root, "DataLayers");
@@ -2863,18 +2896,7 @@ bool xLightsXmlFile::Save(SequenceElements& seq_elements)
     }
 #endif
 
-    wxFileOutputStream fout(GetFullPath());
-    wxBufferedOutputStream *bout = new wxBufferedOutputStream(fout, 2 * 1024 * 1024);
-    if (!seqDocument.Save(*bout)) {
-        delete bout;
-        return false;
-    }
-    delete bout;
-    if (!fout.Close()) {
-        return false;
-    }
-
-    MarkNewFileRevision(GetFullPath());
+    
     return true;
 }
 
@@ -3064,14 +3086,38 @@ void xLightsXmlFile::AddFixedTimingSection(const std::string& interval_name, xLi
     AddChildXmlNode(node, "EffectLayer");
 }
 
+void xLightsXmlFile::AddFixedTimingSection(const std::string& interval_name, int interval, xLightsFrame* xLightsParent)
+{
+    AddTimingDisplayElement(interval_name, "1", "0");
+
+    if (sequence_loaded)
+    {
+        TimingElement* element = xLightsParent->AddTimingElement(interval_name);
+        element->SetFixedTiming(interval);
+        EffectLayer* effectLayer = element->GetEffectLayer(0);
+        int time = 0;
+        int end_time = GetSequenceDurationMS();
+        while (time <= end_time)
+        {
+            int next_time = (time + interval <= end_time) ? time + interval : end_time;
+            int startTime = TimeLine::RoundToMultipleOfPeriod(time, GetFrequency());
+            int endTime = TimeLine::RoundToMultipleOfPeriod(next_time, GetFrequency());
+            effectLayer->AddEffect(0, "", "", "", startTime, endTime, EFFECT_NOT_SELECTED, false);
+            time += interval;
+        }
+    }
+
+    wxXmlNode* node = AddFixedTiming(interval_name, string_format("%d", interval));
+    AddChildXmlNode(node, "EffectLayer");
+}
+
 void xLightsXmlFile::AddMetronomeLabelTimingSection(const std::string& interval_name, int _interval, const std::vector<std::string>& tags, xLightsFrame* xLightsParent, int minForRandomRange, bool randomLabels) {
     AddTimingDisplayElement(interval_name, "1", "0");
     wxXmlNode* node;
 
     std::vector<std::string> effectiveTags = tags;
     if (effectiveTags.empty()) {
-        // Assume a reasonable default count or use a parameter if available
-        for (int i = 1; i <= 10; ++i) { //
+        for (int i = 1; i <= 10; ++i) {
             effectiveTags.push_back(std::to_string(i));
         }
     }
@@ -3089,13 +3135,12 @@ void xLightsXmlFile::AddMetronomeLabelTimingSection(const std::string& interval_
             int startTime = TimeLine::RoundToMultipleOfPeriod(time, GetFrequency());
             int endTime = TimeLine::RoundToMultipleOfPeriod(next_time, GetFrequency());
 
-            // Select tag for the effect
             std::string label;
             if (randomLabels) {
                 int tagIndex;
                 do {
                     tagIndex = intRand(0, effectiveTags.size() - 1);
-                } while (tagIndex == lastRandomState && effectiveTags.size() > 1); // Avoid consecutive repeats if possible
+                } while (tagIndex == lastRandomState && effectiveTags.size() > 1);
                 lastRandomState = tagIndex;
                 label = effectiveTags[tagIndex];
             } else {
@@ -3106,10 +3151,41 @@ void xLightsXmlFile::AddMetronomeLabelTimingSection(const std::string& interval_
             time += interval;
             id++;
         }
+    } else {
+        // sequence not yet loaded - write tag effects directly into XML
+        node = AddElement(interval_name, "timing");
+        wxXmlNode* effectLayer = AddChildXmlNode(node, "EffectLayer");
+        int time = 0;
+        int id = 0;
+        int end_time = GetSequenceDurationMS();
+        int lastRandomState = -1;
+        while (time < end_time) {
+            int interval = minForRandomRange == -1 ? _interval : intRand(minForRandomRange, _interval);
+            int next_time = (time + interval <= end_time) ? time + interval : end_time;
+            int startTime = TimeLine::RoundToMultipleOfPeriod(time, GetFrequency());
+            int endTime = TimeLine::RoundToMultipleOfPeriod(next_time, GetFrequency());
+
+            std::string label;
+            if (randomLabels) {
+                int tagIndex;
+                do {
+                    tagIndex = intRand(0, effectiveTags.size() - 1);
+                } while (tagIndex == lastRandomState && effectiveTags.size() > 1);
+                lastRandomState = tagIndex;
+                label = effectiveTags[tagIndex];
+            } else {
+                label = effectiveTags[id % effectiveTags.size()];
+            }
+
+            AddTimingEffect(effectLayer, label, "0", "0",
+                string_format("%d", startTime), string_format("%d", endTime));
+            time += interval;
+            id++;
+        }
+        return; // node already handled, skip the AddFixedTiming path
     }
 
-    node = AddFixedTiming(interval_name, string_format("%d", _interval));
-
+    node = AddElement(interval_name, "timing");
     AddChildXmlNode(node, "EffectLayer");
 }
 

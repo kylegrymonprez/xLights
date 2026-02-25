@@ -65,6 +65,12 @@
 #include "../utils/CurlManager.h"
 #include "../utils/ip_utils.h"
 
+#include "../models/GridlinesObject.h"
+#include "../models/RulerObject.h"
+#include "../models/ImageObject.h"
+#include "../models/MeshObject.h"
+#include "../models/TerrianObject.h"
+
 #include "Falcon.h"
 #include "Minleon.h"
 #include "SanDevices.h"
@@ -112,7 +118,7 @@ FPP::FPP(const std::string& ad) : BaseController(ad, ""), majorVersion(0), minor
 
 FPP::FPP(const std::string& ip_, const std::string& proxy_, const std::string& model_) :
     BaseController(ip_, proxy_), majorVersion(0), minorVersion(0), patchVersion(0), outputFile(nullptr), parent(nullptr),
-    fppType(FPP_TYPE::FPP), proxy(proxy_), pixelControllerType(model_)
+    fppType(FPP_TYPE::FPP), pixelControllerType(model_)
 {
     ipAddress = ip_;
     if (ip_utils::IsValidHostname(ipAddress)) {
@@ -125,7 +131,7 @@ FPP::FPP(const std::string& ip_, const std::string& proxy_, const std::string& m
 FPP::FPP(const FPP &c)
     : majorVersion(c.majorVersion), minorVersion(c.minorVersion), patchVersion(c.patchVersion), outputFile(nullptr), parent(nullptr), hostName(c.hostName), description(c.description), ipAddress(c.ipAddress), fullVersion(c.fullVersion), platform(c.platform),
     model(c.model), ranges(c.ranges), mode(c.mode), pixelControllerType(c.pixelControllerType), username(c.username), password(c.password), 
-    fppType(c.fppType), proxy(c.proxy), capeInfo(c.capeInfo) {
+    fppType(c.fppType), capeInfo(c.capeInfo) {
 
 }
 
@@ -286,8 +292,8 @@ bool FPP::GetURLAsString(const std::string& url, std::string& val, bool recordEr
     logger_curl.debug(val.c_str());
     logger_curl.debug("RESPONSE END ---------");
     if (response_code == 401) {
-        if (password == "" && xlPasswordEntryDialog::GetStoredPasswordForService(ipAddress, username, password)) {
-            if (password != "") {
+        if (password.empty() && xlPasswordEntryDialog::GetStoredPasswordForService(ipAddress, username, password)) {
+            if (!password.empty()) {
                 return GetURLAsString(url, val);
             }
         }
@@ -321,7 +327,7 @@ int FPP::PutToURL(const std::string& url, const std::vector<uint8_t>& val, const
 }
 int FPP::TransferToURL(const std::string& url, const std::vector<uint8_t>& val, const std::string& contentType, bool isPost) const {
 
-    std::string fullUrl = ipAddress + url;
+    std::string fullUrl = (ip_utils::IsIPv6(ipAddress) ? "[" + ipAddress + "]" : ipAddress) + url;
     std::string ipAddForGet = ipAddress;
     if (fppType == FPP_TYPE::ESPIXELSTICK) {
         fullUrl = ipAddress + "/fpp?path=" +  url;
@@ -347,13 +353,26 @@ int FPP::TransferToURL(const std::string& url, const std::vector<uint8_t>& val, 
 
 bool FPP::GetURLAsJSON(const std::string& url, nlohmann::json& val, bool recordError) {
     std::string sval;
+    static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
     if (GetURLAsString(url, sval, recordError)) {
         try {
             val = nlohmann::json::parse(sval, nullptr, false);
             if (!val.is_discarded()) {
                 return true;
             }
-        } catch (...) {
+        } catch (nlohmann::json::parse_error& e) {
+            if (recordError) {
+                std::string preview = sval.length() > 500 ? sval.substr(0, 500) + "..." : sval;
+                logger_base.warn("FPP::GetURLAsJSON - JSON parse error for %s: %s, Response: %s", 
+                    url.c_str(), e.what(), preview.c_str());
+            }
+            return false;
+        } catch (std::exception& e) {
+            if (recordError) {
+                logger_base.error("FPP::GetURLAsJSON - Unexpected error for %s: %s", 
+                    url.c_str(), e.what());
+            }
+            return false;
         }
     }
     return false;
@@ -406,6 +425,21 @@ static std::string GetJSONStringValue(const nlohmann::json& val, const std::stri
 static int GetJSONIntValue(const nlohmann::json& val, const std::string &key, int def = 0) {
     if (val.contains(key) && val[key].is_number_integer()) {
         return val[key].get<int>();
+    }
+    return def;
+}
+static int GetJSONIntValueFromString(const nlohmann::json& val, const std::string &key, int def = 0) {
+    if (val.contains(key)) {
+        
+        if (val[key].is_number_integer()) {
+            return val[key].get<int>();
+        }
+        if (val[key].is_string()) {
+            std::string s = val[key].get<std::string>();
+            if (!s.empty()) {
+                return std::atoi(s.c_str());
+            }
+        }
     }
     return def;
 }
@@ -628,12 +662,9 @@ static inline void addString(std::vector<uint8_t> &buffer, const std::string &st
     buffer.resize(pos + sz);
     memcpy(&buffer[pos], str.c_str(), sz);
 }
-static inline void addString(std::vector<uint8_t> &buffer, const wxString &str) {
-    addString(buffer, ToUTF8(str));
-}
 
 int FPP::PostJSONToURL(const std::string& url, const nlohmann::json& val) {
-    std::string const str = val.dump(3);
+    std::string const str = val.dump(3, ' ', false, nlohmann::json::error_handler_t::replace);
     std::vector<uint8_t> memBuffPost;
     addString(memBuffPost, str);
     return PostToURL(url, memBuffPost, "application/json");
@@ -642,7 +673,7 @@ int FPP::PostJSONToURLAsFormData(const std::string& url, const std::string& extr
     std::vector<uint8_t> memBuffPost;
     addString(memBuffPost, extra);
     addString(memBuffPost, "&data={");
-    std::string const str = val.dump(3);
+    std::string const str = val.dump(3, ' ', false, nlohmann::json::error_handler_t::replace);
     addString(memBuffPost, str);
     addString(memBuffPost, "}");
     return PostToURL(url, memBuffPost, "application/x-www-form-urlencoded; charset=UTF-8");
@@ -650,8 +681,18 @@ int FPP::PostJSONToURLAsFormData(const std::string& url, const std::string& extr
 
 void FPP::DumpJSON(const nlohmann::json& json) const {
     static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
-    std::string const str = json.dump(3);
-    logger_base.debug(str);
+
+    std::string str;
+    try {
+        str = json.dump(3, ' ', false, nlohmann::json::error_handler_t::replace);
+        logger_base.debug(str);
+    } catch (const nlohmann::json::type_error& e) {
+        logger_base.error("JSON type_error during dump: " + std::string(e.what()));
+    } catch (const std::exception& e) {
+        logger_base.error("Other exception during JSON dump: " + std::string(e.what()));
+    } catch (...) {
+        logger_base.error("Unknown exception during JSON dump");
+    }
 }
 
 int FPP::PostToURL(const std::string& url, const std::string& val, const std::string& contentType) const {
@@ -1035,7 +1076,7 @@ bool FPP::CheckUploadMedia(const std::string &media, std::string &mediaBaseName)
     }
     
     std::string url = "/api/media/" + URLEncode(mediaBaseName) + "/meta";
-    std::string fullUrl = ipAddress + url;
+    std::string fullUrl = (ip_utils::IsIPv6(ipAddress) ? "[" + ipAddress + "]" : ipAddress) + url;
     std::string ipAddForGet = ipAddress;
     if (!_fppProxy.empty()) {
         fullUrl = "http://" + _fppProxy + "/proxy/" + fullUrl;
@@ -1051,9 +1092,12 @@ bool FPP::CheckUploadMedia(const std::string &media, std::string &mediaBaseName)
         if (rc == 200) {
             try {
                 nlohmann::json currentMeta = nlohmann::json::parse(resp, nullptr, false);
-                if (currentMeta.contains("format") && currentMeta["format"].contains("size") &&
-                    (mfn.GetSize() == GetJSONIntValue(currentMeta["format"], "size"))) {
-                    doMediaUpload = false;
+                auto mfnSize = mfn.GetSize();
+                if (currentMeta.contains("format") && currentMeta["format"].contains("size")) {
+                    auto fppsize = GetJSONIntValueFromString(currentMeta["format"], "size");
+                    if (mfnSize == fppsize) {
+                        doMediaUpload = false;
+                    }
                 }
             } catch (...) {
             }
@@ -1254,6 +1298,12 @@ bool FPP::PrepareUploadSequence(FSEQFile *file,
             ((V2FSEQFile*)outputFile)->m_sparseRanges.push_back(a);
         }
     }
+    if (fppType != FPP_TYPE::FPP || type < 2 || !IsVersionAtLeast(9, 3)) {
+        // need to remove some variable headers that could trigger extra memory usage
+        outputFile->removeVariableHeader('X', 'S');
+        outputFile->removeVariableHeader('X', 'N');
+        outputFile->removeVariableHeader('X', 'R');
+    }
     outputFile->writeHeader();
     return false;
 }
@@ -1301,7 +1351,7 @@ static bool PlaylistContainsEntry(nlohmann::json &pl, const std::string &media, 
     for (int x = 0; x < pl.size(); x++) {
         nlohmann::json entry = pl[x];
         if (seq == GetJSONStringValue(entry, "sequenceName")) {
-            if (media == "") {
+            if (media.empty()) {
                 if (GetJSONStringValue(entry, "type") == "sequence") {
                     return true;
                 }
@@ -1365,13 +1415,42 @@ bool FPP::UploadPlaylist(const std::string &name) {
     return false;
 }
 
+std::vector<std::string> FPP::GetPlaylistItems(const std::string& name) {
+    nlohmann::json origJson;
+    GetURLAsJSON("/api/playlist/" + URLEncode(name), origJson, false);
+    std::vector<std::string> items;
+    if (!origJson.is_object()) {
+        return items;
+    }
+    for (int x = 0; x < origJson["mainPlaylist"].size(); x++) {
+        nlohmann::json entry = origJson["mainPlaylist"][x];
+        auto seq = GetJSONStringValue(entry, "sequenceName");
+        items.push_back(seq);
+    }
+    return items;
+}
+
 bool FPP::UploadModels(const nlohmann::json &models) {
     PostJSONToURL("/api/models", models);
     return false;
 }
 
-bool FPP::UploadDisplayMap(const std::string &displayMap) {
-    PostToURL("/api/configfile/virtualdisplaymap", displayMap);
+bool FPP::UploadDisplayMap(std::map<std::string, std::string> &virtualDisplayData) {
+    if (!IsVersionAtLeast(10, 0)) {
+        PostToURL("/api/configfile/virtualdisplaymap", virtualDisplayData["/api/configfile/virtualdisplaymap"]);
+    } else {
+        for (auto &ent : virtualDisplayData) {
+            if (ent.first == "/api/configfile/virtualdisplaymap"
+                || ent.first == "/api/configfile/virtdisplay.json") {
+                PostToURL(ent.first, ent.second);
+            } else {
+                // file asset that needs uploading
+                std::string fn = ent.second;
+                std::string target = ent.first;
+                uploadFileV7(target, fn, "virtualdisplay_assets");
+            }
+        }
+    }
     return false;
 }
 
@@ -1396,10 +1475,14 @@ nlohmann::json FPP::CreateModelMemoryMap(ModelManager* allmodels, int32_t startC
     nlohmann::json json;
     nlohmann::json models;
     std::vector<std::string> names;
+    static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
     for (const auto& m : *allmodels) {
         Model* model = m.second;
 
         if (model->GetDisplayAs() == "ModelGroup") {
+            continue;
+        }
+        if (!model->IsActive()) {
             continue;
         }
 
@@ -1457,39 +1540,56 @@ nlohmann::json FPP::CreateModelMemoryMap(ModelManager* allmodels, int32_t startC
 
     nlohmann::json ogModelJSON;
     if (GetURLAsJSON("/api/models", ogModelJSON)) {
-        for (auto const& ogmodel : ogModelJSON) {
-            if (!ogmodel.contains("Name")) {
-                continue;
-            }
-            if (!ogmodel["Name"].is_string()) {
-                continue;
-            }
-            auto ogName = GetJSONStringValue(ogmodel, "Name");
-            if (GetJSONBoolValue(ogmodel, "autoCreated")) {
-                continue;
-            }
+        try {
+            if (!ogModelJSON.is_array()) {
+                logger_base.warn("GetURLAsJson /api/models returned non-array JSON");
+            } else {
+                for (auto const& ogmodel : ogModelJSON) {
+                    try {
+                        if (!ogmodel.contains("Name")) {
+                            continue;
+                        }
+                        if (!ogmodel["Name"].is_string()) {
+                            continue;
+                        }
+                        auto ogName = GetJSONStringValue(ogmodel, "Name");
+                        if (GetJSONBoolValue(ogmodel, "autoCreated")) {
+                            continue;
+                        }
 
-            if (!IsVersionAtLeast(8, 0)) {
-                //I don't think this works
-                if (ogmodel.contains("StartChannel") && ogmodel["StartChannel"].is_number_integer()) {
-                    auto ogStartChan = ogmodel["StartChannel"].get<int32_t>();
-                    if (ogStartChan < startChan || ogStartChan > endChannel ) {
+                        if (!IsVersionAtLeast(8, 0)) {
+                            //I don't think this works
+                            if (ogmodel.contains("StartChannel") && ogmodel["StartChannel"].is_number_integer()) {
+                                auto ogStartChan = ogmodel["StartChannel"].get<int32_t>();
+                                if (ogStartChan < startChan || ogStartChan > endChannel) {
+                                    continue;
+                                }
+                            }
+                        }
+
+                        if (ogmodel.contains("xLights") && ogmodel["xLights"].is_boolean()) {
+                            auto isfromXlights = ogmodel["xLights"].get<bool>();
+                            if (isfromXlights) {
+                                continue;
+                            }
+                        }
+
+                        if (std::find(names.cbegin(), names.cend(), ogName) != names.end()) { // only add if name doesn't exist
+                            continue;
+                        }
+                        models.push_back(ogmodel);
+                    } catch (nlohmann::json::exception& e) {
+                        logger_base.warn("Model JSON parsing error: %s, Model JSON: %s", 
+                            e.what(), ogmodel.dump().c_str());
                         continue;
                     }
                 }
             }
-
-            if (ogmodel.contains("xLights") && ogmodel["xLights"].is_boolean()) {
-                auto isfromXlights = ogmodel["xLights"].get<bool>();
-                if (isfromXlights) {
-                    continue;
-                }
-            }
-            
-            if (std::find(names.cbegin(), names.cend(), ogName) != names.end()) { // only add if name doesn't exist
-                continue;
-            }
-            models.push_back(ogmodel);
+        } catch (nlohmann::json::exception& e) {
+            logger_base.error("Model /api/models JSON parsing failed: %s, JSON: %s", 
+                e.what(), ogModelJSON.dump().c_str());
+        } catch (std::exception& e) {
+            logger_base.error("Model /api/models processing failed: %s", e.what());
         }
     }
 
@@ -1502,7 +1602,9 @@ static bool Compare3dPointTuple(const std::tuple<float, float, float, int> &l,
     return std::get<2>(l) < std::get<2>(r);
 }
 
-std::string FPP::CreateVirtualDisplayMap(ModelManager* allmodels, int previewWi, int previewHi) {
+void FPP::CreateVirtualDisplayMap(ModelManager &allmodels, ViewObjectManager &objects,
+                                  int previewWi, int previewHi,
+                                  std::map<std::string, std::string> &virtualDisplayData) {
     std::string ret;
 
     constexpr float PADDING{ 10.0F };
@@ -1511,11 +1613,11 @@ std::string FPP::CreateVirtualDisplayMap(ModelManager* allmodels, int previewWi,
     float minY{ 0.0F };
     float maxY{ 0.0F };
 
-    if (allmodels->size() == 0) {
-        return ret;
+    if (allmodels.size() == 0 && objects.size() == 0) {
+        return;
     }
 
-    for (auto m = allmodels->begin(); m != allmodels->end(); ++m) {
+    for (auto m = allmodels.begin(); m != allmodels.end(); ++m) {
         Model* model = m->second;
 
         if (model->GetLayoutGroup() != "Default") {
@@ -1538,7 +1640,7 @@ std::string FPP::CreateVirtualDisplayMap(ModelManager* allmodels, int previewWi,
     ret += "# Preview Size\n";
     ret += ToUTF8(wxString::Format("%d,%d\n", totW, totH));
 
-    for (auto m = allmodels->begin(); m != allmodels->end(); ++m) {
+    for (auto m = allmodels.begin(); m != allmodels.end(); ++m) {
         Model* model = m->second;
 
         if (model->GetLayoutGroup() != "Default") {
@@ -1599,7 +1701,48 @@ std::string FPP::CreateVirtualDisplayMap(ModelManager* allmodels, int previewWi,
         }
 
     }
-    return ret;
+    virtualDisplayData.emplace("/api/configfile/virtualdisplaymap", ret);
+    if (objects.size() > 0) {
+        nlohmann::json virtualDisplay;
+        virtualDisplay["view_objects"] = nlohmann::json::array();
+        for (auto &e : objects) {
+            nlohmann::json obj;
+            auto *xml = e.second->GetModelXml();
+            auto *attr = xml->GetAttributes();
+            while (attr != nullptr) {
+                obj[attr->GetName().ToStdString()] = attr->GetValue().ToStdString();
+                attr = attr->GetNext();
+            }
+            
+            std::string wp = obj["WorldPosX"];
+            obj["WorldPosX"] = std::to_string(std::atof(wp.c_str()) - minX);
+            
+            wp = obj["WorldPosY"];
+            obj["WorldPosY"] = std::to_string(std::atof(wp.c_str()) - minY);
+            
+            if (e.second->GetDisplayAs() == "Mesh") {
+                std::string fn = obj["ObjFile"];
+                wxFileName fileName(fn);
+                std::string bn = fileName.GetFullName().ToStdString();
+                obj["ObjFile"] = bn;
+                virtualDisplayData[bn] = fn;
+                MeshObject *mesh = dynamic_cast<MeshObject*>(e.second);
+                for (auto &fr : mesh->GetFileReferences()) {
+                    wxFileName fileName(fr);
+                    bn = fileName.GetFullName().ToStdString();
+                    virtualDisplayData[bn] = fr;
+                }
+            } else if (e.second->GetDisplayAs() == "Image") {
+                std::string fn = obj["Image"];
+                wxFileName fileName(fn);
+                std::string bn = fileName.GetFullName().ToStdString();
+                obj["Image"] = bn;
+                virtualDisplayData[bn] = fn;
+            }
+            virtualDisplay["view_objects"].push_back(obj);
+        }
+        virtualDisplayData.emplace("/api/configfile/virtdisplay.json", virtualDisplay.dump(3, ' ', false, nlohmann::json::error_handler_t::replace));
+    }
 }
 #endif
 
@@ -1880,7 +2023,19 @@ nlohmann::json FPP::CreateUniverseFile(const std::list<Controller*>& selected, b
                     universes = nlohmann::json::array();
                 }
             } else if (it->GetType() == OUTPUT_ARTNET) {
-                universe["type"] = (int)((eth->GetIP() != "MULTICAST") + 2);
+                ArtNetOutput* ano = dynamic_cast<ArtNetOutput*>(it);
+                if (IsVersionAtLeast(9, 5, 0)) {
+                    bool isForcePort = ano->isForceSourcePort();
+                    if (eth->GetIP() == "MULTICAST") {
+                        universe["type"] = 2;
+                    } else if (isForcePort) {
+                        universe["type"] = 3;
+                    } else {
+                        universe["type"] = 9;
+                    }
+                } else {
+                    universe["type"] = (int)((eth->GetIP() != "MULTICAST") + 2);
+                }
                 if (!input && (it->GetIP() != "MULTICAST")) {
                     universe["address"] = it->GetIP();
                 }
@@ -1892,7 +2047,6 @@ nlohmann::json FPP::CreateUniverseFile(const std::list<Controller*>& selected, b
                     universes.push_back(universe);
                     break;
                 }
-                //ArtNetOutput* ano = dynamic_cast<ArtNetOutput*>(it);
                 universe["universeCount"] = 1;
                 universes.push_back(universe);
             } else if (it->GetType() == OUTPUT_KINET) {
@@ -2103,7 +2257,7 @@ static bool mergeSerialInto(nlohmann::json &otherDmxData, nlohmann::json &otherO
 bool FPP::IsCompatible(const ControllerCaps *rules,
                        std::string &origVend, std::string &origMod, std::string origVar, const std::string &origId,
                        std::string& driver, bool& supportsV5Receivers) {
-    if (origMod == "") {
+    if (origMod.empty()) {
         Controller::ConvertOldTypeToVendorModel(origId, origVend, origMod, origVar);
     }
     if (IsVersionAtLeast(7, 0)) {
@@ -2451,7 +2605,7 @@ bool FPP::UploadSerialOutputs(ModelManager* allmodels,
                 port["footer"] = controller->GetSaveablePostFix();
             }
             std::string description = controller->GetDescription();
-            if (description == "") {
+            if (description.empty()) {
                 description = controller->GetName();
             }
             port["description"] = description;
@@ -2617,7 +2771,7 @@ bool FPP::UploadPixelOutputs(ModelManager* allmodels,
         return false;
     }
     std::string fppFileName = rules->GetCustomPropertyByPath("fppStringFileName");
-    if (fppFileName == "") {
+    if (fppFileName.empty()) {
         fppFileName = "co-bbbStrings";
     }
     std::string check;
@@ -2648,7 +2802,7 @@ bool FPP::UploadPixelOutputs(ModelManager* allmodels,
             if (f.contains("pinoutVersion")) {
                 pinout = f["pinoutVersion"].get<std::string>();
             }
-            if (pinout == "") {
+            if (pinout.empty()) {
                 pinout = "1.x";
             }
             if (f.contains("subType")) {
@@ -3141,7 +3295,7 @@ static void CreateController(Discovery &discovery, DiscoveredData *inst) {
         }
         created = true;
     }
-    if (inst->typeId < 0x80) {
+    if (inst->typeId > 0 && inst->typeId < 0x80) {
         if (inst->controller->GetProtocol() != OUTPUT_DDP) {
             inst->controller->SetProtocol(OUTPUT_DDP);
         }
@@ -3279,19 +3433,19 @@ static void ProcessFPPSystems(Discovery &discovery, const std::string &systemsSt
                 found->typeId = inst.typeId;
                 found->uuid = inst.uuid;
             } else {
-                if (found->platform == "") {
+                if (found->platform.empty()) {
                     found->platform = inst.platform;
                 }
-                if (found->mode == "") {
+                if (found->mode.empty()) {
                     found->mode = inst.mode;
                 }
-                if (found->platformModel == "") {
+                if (found->platformModel.empty()) {
                     found->platformModel = inst.platformModel;
                 }
                 if (found->typeId == 0) {
                     found->typeId = inst.typeId;
                 }
-                if (found->uuid == "") {
+                if (found->uuid.empty()) {
                     found->uuid = inst.uuid;
                 }
                 if (inst.ranges.size() > found->ranges.size()) {
@@ -3585,7 +3739,7 @@ static void ProcessFPPSysinfo(Discovery &discovery, const std::string &ip, const
         }
         return true;
     });
-    if (inst->proxy == "") {
+    if (inst->proxy.empty()) {
         discovery.AddCurl(baseIp, "/api/proxies",
                             [&discovery, host] (int rc, const std::string &buffer, const std::string &err) {
             if (rc == 200) {
@@ -3636,19 +3790,19 @@ static void ProcessFPPPingPacket(Discovery &discovery, uint8_t *buffer,int len) 
             if (inst->typeId == 0) {
                 inst->typeId = buffer[9];
             }
-            if (inst->hostname == "") {
+            if (inst->hostname.empty()) {
                 inst->hostname = (char *)&buffer[19];
             }
-            if (inst->platformModel == "") {
+            if (inst->platformModel.empty()) {
                 inst->platformModel = (char *)&buffer[125];
             }
-            if (inst->platform == "") {
+            if (inst->platform.empty()) {
                 inst->platform = (char *)&buffer[125];
             }
-            if (inst->ip == "") {
+            if (inst->ip.empty()) {
                 inst->ip = ip;
             }
-            if (inst->version == "") {
+            if (inst->version.empty()) {
                 inst->version = (char *)&buffer[84];
             }
             if (inst->minorVersion == 0) {
@@ -3818,7 +3972,7 @@ static bool supportedForFPPConnect(DiscoveredData* res, OutputManager* outputMan
     }
 
     if ((res->typeId >= 0xC2) && (res->typeId <= 0xC3)) {
-        if (res->ranges == "") {
+        if (res->ranges.empty()) {
             auto c = outputManager->GetControllers(res->ip);
             if (c.size() == 1) {
                 ControllerEthernet *controller = dynamic_cast<ControllerEthernet*>(c.front());
@@ -3849,7 +4003,7 @@ static bool supportedForFPPConnect(DiscoveredData* res, OutputManager* outputMan
 }
 
 inline void setIfEmpty(std::string &val, const std::string &nv) {
-    if (val == "") {
+    if (val.empty()) {
         val = nv;
     }
 }
@@ -3882,6 +4036,12 @@ void FPP::MapToFPPInstances(Discovery& discovery, std::list<FPP*>& instances, Ou
             }
         }
     }
+    logger_base.info("----------- FPP Discovery Results ------------");
+    for (auto res : discovery.GetResults()) {
+        bool http = (res->extraData.contains("httpConnected") && res->extraData["httpConnected"].get<bool>() == true);
+        logger_base.info("   Instance: %s (uuid: %s)(hn: %s)(proxy: %s)(ver: %s)(http: %s)(t: %X)", res->ip.c_str(), res->uuid.c_str(), res->hostname.c_str(), res->proxy.c_str(), res->version.c_str(), http ? "true" : "false", res->typeId);
+    }
+    logger_base.info("----------------------------------------------");
     for (auto res : discovery.GetResults()) {
         if (::supportedForFPPConnect(res, outputManager)) {
             logger_base.info("FPP Discovery - Found Supported FPP Instance: %s (u: %s)(h: %s)(p: %s)(r: %s)", res->ip.c_str(), res->uuid.c_str(), res->hostname.c_str(), res->proxy.c_str(), res->ranges.c_str());
@@ -3945,7 +4105,9 @@ void FPP::MapToFPPInstances(Discovery& discovery, std::list<FPP*>& instances, Ou
                 instances.push_back(fpp);
             } else if (!skipit) {
                 fpp->ipAddress = res->ip;
-                setIfEmpty(fpp->proxy, res->proxy);
+                if (fpp->proxy().empty()) {
+                    fpp->proxy() = res->proxy;
+                }
                 setIfEmpty(fpp->hostName, res->hostname);
                 setIfEmpty(fpp->uuid, res->uuid);
                 setIfEmpty(fpp->description, res->description);
@@ -3973,7 +4135,7 @@ void FPP::MapToFPPInstances(Discovery& discovery, std::list<FPP*>& instances, Ou
                 if (res->extraData.contains("cape")) {
                     fpp->capeInfo = res->extraData["cape"];
                 }
-                fpp->canZipUpload = res->controller;
+                fpp->canZipUpload = res->canZipUpload;
             }
         } else {
             logger_base.info("FPP Discovery - %s is not a supported FPP Instance", res->ip.c_str());
@@ -3987,7 +4149,7 @@ void FPP::MapToFPPInstances(Discovery& discovery, std::list<FPP*>& instances, Ou
 }
 
 void FPP::TypeIDtoControllerType(int typeId, FPP* inst) {
-    if (typeId < 0x80) {
+    if (typeId > 0 && typeId < 0x80) {
         inst->fppType = FPP_TYPE::FPP;
     } else if (typeId >= 0x88 && typeId <= 0x9F) {
         inst->fppType = FPP_TYPE::FALCONV4V5;

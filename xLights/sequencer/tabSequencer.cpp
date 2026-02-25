@@ -20,6 +20,8 @@
 
 #include "../xLightsMain.h"
 #include "SequenceElements.h"
+#include "SequenceMedia.h"
+#include "../ManageMediaPanel.h"
 #include "../TopEffectsPanel.h"
 #include "../EffectIconPanel.h"
 #include "../ValueCurvesPanel.h"
@@ -250,6 +252,7 @@ void xLightsFrame::InitSequencer()
     if (CurrentSeqXmlFile != nullptr && CurrentSeqXmlFile->GetSequenceLoaded()) {
         if (_seqData.NumChannels() != roundTo4(GetMaxNumChannels())) {
             logger_base.info("Number of channels has changed ... reallocating sequence data memory.");
+            logger_base.info("Channels prior %d and channels current %d", _seqData.NumChannels(), roundTo4(GetMaxNumChannels()));
 
             AbortRender();
 
@@ -484,7 +487,6 @@ void xLightsFrame::CheckForValidModels()
 {
     static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
 
-    //bool cancelled = cancelled_in;
     bool cancelled = false;
 
     logger_base.debug("CheckForValidModels: building model list.");
@@ -503,6 +505,7 @@ void xLightsFrame::CheckForValidModels()
     logger_base.debug("CheckForValidModels: Remove models that already exist.");
 
     std::vector<std::string> missingModels;
+    bool ringBell = _promptBatchRenderIssues;
 
     if ((!_renderMode && !_checkSequenceMode) || _promptBatchRenderIssues) {
         for (int x = _sequenceElements.GetElementCount() - 1; x >= 0; x--) {
@@ -542,6 +545,12 @@ void xLightsFrame::CheckForValidModels()
         }
         missings.pop_back();
         missings.pop_back(); //drop last delimiter
+        if (ringBell && _renderMode) {
+            ringBell = false; 
+            if (IsRenderBell()) {
+                wxBell();
+            }
+        }
         auto msg = wxString::Format("The sequence you are opening '%s' contains %d models which are not in your layout (%s). We suggest you import this sequence instead. Do you want to continue to open it?", seqName, (int)missingModels.size(), missings.c_str());
         if (wxMessageBox(msg, "Many missing models in this sequence", wxYES_NO) == wxNO) {
             mapall = true;
@@ -570,6 +579,12 @@ void xLightsFrame::CheckForValidModels()
                 if (m == nullptr) {
                     logger_base.debug("CheckForValidModels:    Missing model: %s.", (const char*)name.c_str());
                     if (!mapall) {
+                        if (ringBell && _renderMode) {
+                            ringBell = false; 
+                            if (IsRenderBell()) {
+                                wxBell();
+                            }
+                        }
                         dialog.StaticTextMessage->SetLabel("Model '" + name + "'\ndoes not exist in your list of models");
                         dialog.ChoiceModels->Set(ToArrayString(AllNames));
                         bool renameAlias = false;
@@ -605,6 +620,12 @@ void xLightsFrame::CheckForValidModels()
 
                         // if mapto is not blank then we can use an oldname alias to remap automagically
                         if (!renameAlias && ((!_renderMode && !_checkSequenceMode) || _promptBatchRenderIssues) && !cancelled && HasEffects(me)) {
+                            if (ringBell && _renderMode) {
+                                ringBell = false; 
+                                if (IsRenderBell()) {
+                                    wxBell();
+                                }
+                            }
                             cancelled = (dialog.ShowModal() == wxID_CANCEL);
                         }
                     }
@@ -705,6 +726,12 @@ void xLightsFrame::CheckForValidModels()
                     if (m == nullptr) {
                         // If we have effects at any level
                         if (((!_renderMode && !_checkSequenceMode) || _promptBatchRenderIssues) && HasEffects(el)) {
+                            if (ringBell && _renderMode) {
+                                ringBell = false; 
+                                if (IsRenderBell()) {
+                                    wxBell();
+                                }
+                            }
                             HandleChoices(this, AllNames, ModelNames, el,
                                 "Model " + name + " does not exist in your layout.\n"
                                 + "How should we handle this?",
@@ -739,6 +766,12 @@ void xLightsFrame::CheckForValidModels()
                             }
                         }
                         if (((!_renderMode && !_checkSequenceMode) || _promptBatchRenderIssues) && (hasNodeEffects || hasStrandEffects)) {
+                            if (ringBell && _renderMode) {
+                                ringBell = false; 
+                                if (IsRenderBell()) {
+                                    wxBell();
+                                }
+                            }
                             HandleChoices(this, AllNames, ModelNames, el,
                                 "Model " + name + " is a Model Group but has Node/Strand effects.\n"
                                 + "How should we handle this?",
@@ -759,6 +792,12 @@ void xLightsFrame::CheckForValidModels()
                                 }
                                 if ((!_renderMode && !_checkSequenceMode) || _promptBatchRenderIssues) {
                                     int priorCnt = el->GetSubModelAndStrandCount();
+                                    if (ringBell && _renderMode) {
+                                        ringBell = false; 
+                                        if (IsRenderBell()) {
+                                            wxBell();
+                                        }
+                                    }
                                     HandleChoices(this, AllSMNames, ModelSMNames, sme,
                                         "SubModel " + sme->GetName() + " of Model " + m->GetName() + " does not exist.\n"
                                         + "How should we handle this?",
@@ -793,7 +832,7 @@ void xLightsFrame::LoadAudioData(xLightsXmlFile& xml_file)
             mediaFilename = xml_file.GetMediaFile();
             ObtainAccessToURL(mediaFilename);
             if (mediaFilename.empty() || !FileExists(mediaFilename) || !wxIsReadable(mediaFilename)) {
-                SeqSettingsDialog setting_dlg(this, &xml_file, mediaDirectories, wxT(""), wxEmptyString);
+                SeqSettingsDialog setting_dlg(this, &xml_file, &_sequenceElements, mediaDirectories, wxT(""), wxEmptyString);
                 setting_dlg.Fit();
                 int ret_val = setting_dlg.ShowModal();
 
@@ -855,8 +894,6 @@ void xLightsFrame::LoadSequencer(xLightsXmlFile& xml_file)
     PushTraceContext();
     SetFrequency(xml_file.GetFrequency());
     _sequenceElements.SetViewsManager(GetViewsManager()); // This must come first before LoadSequencerFile.
-    _sequenceElements.SetModelsNode(ModelsNode);
-    _sequenceElements.SetEffectsNode(EffectsNode);
 
     AddTraceMessage("loading");
     _sequenceElements.LoadSequencerFile(xml_file, GetShowDirectory());
@@ -1150,6 +1187,11 @@ void xLightsFrame::SelectedEffectChanged(SelectedEffectChangedEvent& event)
             EffectsPanel1->SetEffectType(pageIndex);
             ResetPanelDefaultSettings(EffectsPanel1->EffectChoicebook->GetChoiceCtrl()->GetStringSelection(), nullptr, true);
         } else {
+            const std::string eff = EffectsPanel1->EffectChoicebook->GetChoiceCtrl()->GetStringSelection();
+            if (eff == "Moving Head") {
+                // We want new dropped moving head effects to start out empty of commands
+                ResetPanelDefaultSettings(eff, nullptr, true);
+            }
             event.updateUI = false;
         }
     }
@@ -1378,11 +1420,66 @@ void xLightsFrame::EffectFileDroppedOnGrid(wxCommandEvent& event)
     std::string effectName = parms[0].ToStdString();
     std::string filename = parms[1].ToStdString();
 
+    // Check if the file is outside the show directory
+    wxFileName fn(filename);
+    wxString showDir = GetShowDirectory();
+    bool isPictures = (effectName == "Pictures");
+    bool isOutside = !fn.GetFullPath().StartsWith(showDir);
+
+    if (isOutside && fn.FileExists()) {
+        wxArrayString choices;
+        choices.Add("Copy to show directory");
+        if (isPictures) choices.Add("Embed in sequence");
+        choices.Add("Use original location");
+
+        wxSingleChoiceDialog dlg(this,
+            wxString::Format("'%s' is outside the show directory.\nHow would you like to use it?",
+                             fn.GetFullName()),
+            "File Outside Show Directory", choices);
+        if (dlg.ShowModal() == wxID_CANCEL) return;
+
+        int choice = dlg.GetSelection();
+        
+        if (choices[choice] == "Copy to show directory") {
+            wxString dest = showDir;
+            if (effectName == "Pictures") {
+                dest = showDir + wxFileName::GetPathSeparator() + "Images";
+            } else if (effectName == "Shader") {
+                dest = showDir + wxFileName::GetPathSeparator() + "Shaders";
+            } else if (effectName == "Video") {
+                dest = showDir + wxFileName::GetPathSeparator() + "Videos";
+            } else if (effectName == "Glediator") {
+                dest = showDir + wxFileName::GetPathSeparator() + "Glediator";
+            }
+            if (!wxDirExists(dest)) {
+                wxMkdir(dest);
+            }
+            dest += wxFileName::GetPathSeparator() + fn.GetFullName();
+            if (!wxCopyFile(fn.GetFullPath(), dest, false)) {
+                wxMessageBox("Failed to copy file to show directory.", "Error", wxICON_ERROR | wxOK, this);
+                return;
+            }
+            filename = dest.ToStdString();
+        } else if (choices[choice] == "Embed in sequence") {
+            // Load and embed as SequenceMedia entry
+            wxImage img(fn.GetFullPath());
+            if (!img.IsOk()) {
+                wxMessageBox("Failed to load image for embedding.", "Error", wxICON_ERROR | wxOK, this);
+                return;
+            }
+            SequenceMedia& media = _sequenceElements.GetSequenceMedia();
+            auto i = media.GetImage(fn.GetFullPath());
+            std::string embeddedName = "Images/" + fn.GetFullName().ToStdString();
+            media.RenameImage(fn.GetFullPath(), embeddedName);
+            media.EmbedImage(embeddedName);
+            filename = embeddedName;
+        }
+        // else: Use original location — filename unchanged
+    }
+
     int effectIndex = 0;
-    for (size_t i = 0; i < EffectsPanel1->EffectChoicebook->GetChoiceCtrl()->GetCount(); i++)
-    {
-        if (EffectsPanel1->EffectChoicebook->GetChoiceCtrl()->GetString(i) == effectName)
-        {
+    for (size_t i = 0; i < EffectsPanel1->EffectChoicebook->GetChoiceCtrl()->GetCount(); i++) {
+        if (EffectsPanel1->EffectChoicebook->GetChoiceCtrl()->GetString(i) == effectName) {
             EffectsPanel1->EffectChoicebook->SetSelection(i);
             effectIndex = i;
             break;
@@ -1398,8 +1495,7 @@ void xLightsFrame::EffectFileDroppedOnGrid(wxCommandEvent& event)
     Effect* last_effect_created = nullptr;
 
     _sequenceElements.get_undo_mgr().CreateUndoStep();
-    for (size_t i = 0; i < _sequenceElements.GetSelectedRangeCount(); i++)
-    {
+    for (size_t i = 0; i < _sequenceElements.GetSelectedRangeCount(); i++) {
         EffectLayer* el = _sequenceElements.GetSelectedRange(i)->Layer;
         if (el->GetParentElement()->GetType() == ElementType::ELEMENT_TYPE_TIMING) {
             continue;
@@ -1415,19 +1511,13 @@ void xLightsFrame::EffectFileDroppedOnGrid(wxCommandEvent& event)
             EFFECT_SELECTED, false);
 
         // Now set the filename
-        if (effectName == "Video")
-        {
+        if (effectName == "Video") {
             effect->GetSettings()["E_FILEPICKERCTRL_Video_Filename"] = filename;
-        }
-        else if (effectName == "Pictures")
-        {
-            effect->GetSettings()["E_FILEPICKER_Pictures_Filename"] = filename;
-        }
-        else if (effectName == "Glediator")
-        {
+        } else if (effectName == "Pictures") {
+            effect->GetSettings()["E_TEXTCTRL_Pictures_Filename"] = filename;
+        } else if (effectName == "Glediator") {
             effect->GetSettings()["E_FILEPICKERCTRL_Glediator_Filename"] = filename;
-        }
-        else if (effectName == "Shader") {
+        } else if (effectName == "Shader") {
             effect->GetSettings()["E_0FILEPICKERCTRL_IFS"] = filename;
         }
 
@@ -2895,6 +2985,15 @@ void xLightsFrame::ResetPanelDefaultSettings(const std::string& effect, const Mo
     // this should be used sparingly ...
     EffectsPanel1->SetDefaultEffectValues(effect);
 }
+void xLightsFrame::ResetAllPanelDefaultSettings() {
+    SetChoicebook(EffectsPanel1->EffectChoicebook, "On");
+    timingPanel->SetDefaultControls(nullptr, false);
+    bufferPanel->SetDefaultControls(nullptr, false);
+    colorPanel->SetDefaultSettings(false);
+
+    EffectsPanel1->SetDefaultEffectValues();
+}
+
 
 void xLightsFrame::SetEffectControls(const SettingsMap &settings) {
 
@@ -3742,29 +3841,27 @@ void xLightsFrame::ImportTimingElement()
     wxFileDialog* OpenDialog = new wxFileDialog(this, "Choose Timing file(s)", wxEmptyString, wxEmptyString,
                                                 "Timing files (*.xtiming)|*.xtiming|Papagayo files (*.pgo)|*.pgo|Subrip Subtitle File (*.srt)|*.srt|Text files (*.txt)|*.txt|Vixen 3 (*.tim)|*.tim|LOR (*.lms)|*.lms|LOR (*.las)|*.las|LSP (*.msq)|*.msq|xLights (*.xsq)|*.xsq|Old xLights (*.xml)|*.xml",
                                                 wxFD_OPEN | wxFD_MULTIPLE, wxDefaultPosition);
-    wxString fDir;
     if (OpenDialog->ShowModal() == wxID_OK) {
-        fDir = OpenDialog->GetDirectory();
         wxArrayString filenames;
-        OpenDialog->GetFilenames(filenames);
+        OpenDialog->GetPaths(filenames);
         if (filenames.size() > 0) {
             wxFileName file1(filenames[0]);
             if (file1.GetExt().Lower() == "lms" || file1.GetExt().Lower() == "las") {
-                CurrentSeqXmlFile->ProcessLorTiming(fDir, filenames, this);
+                CurrentSeqXmlFile->ProcessLorTiming( filenames, this);
             } else if (file1.GetExt().Lower() == "xtiming") {
-                CurrentSeqXmlFile->ProcessXTiming(fDir, filenames, this);
+                CurrentSeqXmlFile->ProcessXTiming( filenames, this);
             } else if (file1.GetExt().Lower() == "pgo") {
-                CurrentSeqXmlFile->ProcessPapagayo(fDir, filenames, this);
+                CurrentSeqXmlFile->ProcessPapagayo( filenames, this);
             } else if (file1.GetExt().Lower() == "srt") {
-                CurrentSeqXmlFile->ProcessSRT(fDir, filenames, this);
+                CurrentSeqXmlFile->ProcessSRT( filenames, this);
             } else if (file1.GetExt().Lower() == "msq") {
-                CurrentSeqXmlFile->ProcessLSPTiming(fDir, filenames, this);
+                CurrentSeqXmlFile->ProcessLSPTiming( filenames, this);
             } else if (file1.GetExt().Lower() == "xml" || file1.GetExt().Lower() == "xsq") {
-                CurrentSeqXmlFile->ProcessXLightsTiming(fDir, filenames, this);
+                CurrentSeqXmlFile->ProcessXLightsTiming( filenames, this);
             } else if (file1.GetExt().Lower() == "tim") {
-                CurrentSeqXmlFile->ProcessVixen3Timing(fDir, filenames, this);
+                CurrentSeqXmlFile->ProcessVixen3Timing( filenames, this);
             } else {
-                CurrentSeqXmlFile->ProcessAudacityTimingFiles(fDir, filenames, this);
+                CurrentSeqXmlFile->ProcessAudacityTimingFiles( filenames, this);
             }
         }
     }
@@ -4007,7 +4104,7 @@ std::vector<std::string> GetPresets(wxXmlNode* node, const std::string& path)
 
 std::vector<std::string> xLightsFrame::GetPresets() const
 {
-    return ::GetPresets(_sequenceElements.GetEffectsNode(), "");
+    return ::GetPresets(EffectsNode, "");
 }
 
 wxXmlNode* xLightsFrame::FindPreset(wxXmlNode* node, wxArrayString& path, int level) const
@@ -4021,8 +4118,6 @@ wxXmlNode* xLightsFrame::FindPreset(wxXmlNode* node, wxArrayString& path, int le
             if (UnXmlSafe(n->GetAttribute("name", "")) == path[level]) {
                 return FindPreset(n, path, level + 1);
             }
-        } else {
-            wxASSERT(false);
         }
     }
     return nullptr;
@@ -4035,7 +4130,7 @@ Effect* xLightsFrame::ApplyEffectsPreset(const std::string& presetName)
 
     auto path = wxSplit(presetName, '\\');
 
-    ele = FindPreset(_sequenceElements.GetEffectsNode(), path, 0);
+    ele = FindPreset(EffectsNode, path, 0);
 
     if (ele != nullptr) {
         res = mainSequencer->PanelEffectGrid->Paste(ele->GetAttribute("settings"), ele->GetAttribute("xLightsVersion", "4.0"));

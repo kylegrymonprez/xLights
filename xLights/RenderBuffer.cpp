@@ -180,6 +180,14 @@ const wxString &RenderBuffer::GetXmlHeaderInfo(HEADER_INFO_TYPES node_type) cons
     return xLightsFrame::CurrentSeqXmlFile->GetHeaderInfo(node_type);
 }
 
+SequenceMedia* RenderBuffer::GetSequenceMedia() const
+{
+    if (frame == nullptr) {
+        return nullptr;
+    }
+    return &frame->GetSequenceElements().GetSequenceMedia();
+}
+
 void RenderBuffer::AlphaBlend(const RenderBuffer& src)
 {
     if (src.BufferWi != BufferWi || src.BufferHt != BufferHt) return;
@@ -622,6 +630,11 @@ const wxFontInfo& TextDrawingContext::GetTextFont(const std::string& FontString)
             }
             if (font.GetStrikethrough()) {
                 info.Strikethrough();
+            }
+            if (font.GetStyle() == wxFONTSTYLE_ITALIC) {
+                info.Italic();
+            } else if (font.GetStyle() == wxFONTSTYLE_SLANT) {
+                info.Slant();
             }
             info.AntiAliased(false);
             info.Encoding(font.GetEncoding());

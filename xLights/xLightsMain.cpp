@@ -41,6 +41,7 @@
 #include <cctype>
 #include <cstring>
 #include <thread>
+#include <string>
 
 #include "AboutDialog.h"
 #include "BatchRenderDialog.h"
@@ -118,7 +119,9 @@
 #include "xlColourData.h"
 #include "utils/Curl.h"
 #include "ai/chatGPT.h"
+#include "ai/AIImageDialog.h"
 #include "models/DMX/DmxMovingHeadComm.h"
+#include "ColorPanel.h"
 
 #include "../xSchedule/wxHTTPServer/wxhttpserver.h"
 
@@ -272,6 +275,7 @@ const wxWindowID xLightsFrame::ID_MNU_DUMPRENDERSTATE = wxNewId();
 const wxWindowID xLightsFrame::ID_MENU_GENERATE2DPATH = wxNewId();
 const wxWindowID xLightsFrame::ID_MENUITEM_GenerateCustomModel = wxNewId();
 const wxWindowID xLightsFrame::ID_MNU_REMAPCUSTOM = wxNewId();
+const wxWindowID xLightsFrame::ID_MENUITEM_GenerateAIImage = wxNewId();
 const wxWindowID xLightsFrame::ID_MNU_GENERATELYRICS = wxNewId();
 const wxWindowID xLightsFrame::ID_MENUITEM_CONVERT = wxNewId();
 const wxWindowID xLightsFrame::ID_MNU_PREPAREAUDIO = wxNewId();
@@ -1029,6 +1033,8 @@ xLightsFrame::xLightsFrame(wxWindow* parent, int ab, wxWindowID id, bool renderO
     Menu1->Append(Menu_GenerateCustomModel);
     MenuItem_RemapCustom = new wxMenuItem(Menu1, ID_MNU_REMAPCUSTOM, _("Remap Custom Model"), wxEmptyString, wxITEM_NORMAL);
     Menu1->Append(MenuItem_RemapCustom);
+    Menu_GenerateAIImage = new wxMenuItem(Menu1, ID_MENUITEM_GenerateAIImage, _("Generate AI Image"), _("Create images using AI - if configured."), wxITEM_NORMAL);
+    Menu1->Append(Menu_GenerateAIImage);
     MenuItem_GenerateLyrics = new wxMenuItem(Menu1, ID_MNU_GENERATELYRICS, _("Generate &Lyrics From Data"), _("Generate lyric phenomes from data"), wxITEM_NORMAL);
     Menu1->Append(MenuItem_GenerateLyrics);
     MenuItemConvert = new wxMenuItem(Menu1, ID_MENUITEM_CONVERT, _("&Convert"), wxEmptyString, wxITEM_NORMAL);
@@ -1301,6 +1307,7 @@ xLightsFrame::xLightsFrame(wxWindow* parent, int ab, wxWindowID id, bool renderO
     Connect(ID_MENU_GENERATE2DPATH, wxEVT_COMMAND_MENU_SELECTED, (wxObjectEventFunction)&xLightsFrame::OnMenuItem_Generate2DPathSelected);
     Connect(ID_MENUITEM_GenerateCustomModel, wxEVT_COMMAND_MENU_SELECTED, (wxObjectEventFunction)&xLightsFrame::OnMenu_GenerateCustomModelSelected);
     Connect(ID_MNU_REMAPCUSTOM, wxEVT_COMMAND_MENU_SELECTED, (wxObjectEventFunction)&xLightsFrame::OnMenuItem_RemapCustomSelected);
+    Connect(ID_MENUITEM_GenerateAIImage, wxEVT_COMMAND_MENU_SELECTED, (wxObjectEventFunction)&xLightsFrame::OnMenuItem_GenerateAIImageSelected);
     Connect(ID_MNU_GENERATELYRICS, wxEVT_COMMAND_MENU_SELECTED, (wxObjectEventFunction)&xLightsFrame::OnMenuItem_GenerateLyricsSelected);
     Connect(ID_MENUITEM_CONVERT, wxEVT_COMMAND_MENU_SELECTED, (wxObjectEventFunction)&xLightsFrame::OnMenuItemConvertSelected);
     Connect(ID_MNU_PREPAREAUDIO, wxEVT_COMMAND_MENU_SELECTED, (wxObjectEventFunction)&xLightsFrame::OnMenuItem_PrepareAudioSelected);
@@ -1374,9 +1381,9 @@ xLightsFrame::xLightsFrame(wxWindow* parent, int ab, wxWindowID id, bool renderO
     Connect(wxID_ANY, wxEVT_CLOSE_WINDOW, (wxObjectEventFunction)&xLightsFrame::OnClose);
     Connect(wxEVT_CHAR, (wxObjectEventFunction)&xLightsFrame::OnChar);
     //*)
-    
+
     Notebook1->SetArtProvider(new wxAuiGenericTabArt());
-    
+
     wxConfigBase* config = wxConfigBase::Get();
     if (config == nullptr) {
         logger_base.error("Null config ... this wont end well.");
@@ -1399,6 +1406,7 @@ xLightsFrame::xLightsFrame(wxWindow* parent, int ab, wxWindowID id, bool renderO
     }
     logger_base.debug("Show directory %s.", (const char*)dir.c_str());
 
+#if !defined(_DEBUG)
     if (dir != "") {
 #ifdef __WXMSW__
         _tod.PrepTipOfDay(this);
@@ -1407,7 +1415,7 @@ xLightsFrame::xLightsFrame(wxWindow* parent, int ab, wxWindowID id, bool renderO
         _tod->PrepTipOfDay(this);
 #endif
     }
-
+#endif
     Connect(wxEVT_HELP, (wxObjectEventFunction)&xLightsFrame::OnHelp);
     Notebook1->Connect(wxEVT_HELP, (wxObjectEventFunction)&xLightsFrame::OnHelp, 0, this);
 
@@ -1889,7 +1897,7 @@ xLightsFrame::xLightsFrame(wxWindow* parent, int ab, wxWindowID id, bool renderO
     logger_base.debug("Effects panel initialised.");
 
     _serviceManager = std::make_unique<ServiceManager>(this);
-
+    
     EffectTreeDlg = nullptr; // must be before any call to SetDir
 
     starttime = wxDateTime::UNow();
@@ -3251,7 +3259,7 @@ void xLightsFrame::ShowSequenceSettings()
     AbortRender(60000, &numThreadsAborted);
 
     // populate dialog
-    SeqSettingsDialog dialog(this, xLightsFrame::CurrentSeqXmlFile, mediaDirectories, wxEmptyString, wxEmptyString);
+    SeqSettingsDialog dialog(this, xLightsFrame::CurrentSeqXmlFile, &_sequenceElements, mediaDirectories, wxEmptyString, wxEmptyString);
     dialog.Fit();
     int ret_code = dialog.ShowModal();
 
@@ -3416,7 +3424,8 @@ void xLightsFrame::OnMenuItem_File_Close_SequenceSelected(wxCommandEvent& event)
 void xLightsFrame::OnMenuItem_File_Export_VideoSelected(wxCommandEvent& event)
 {
     const char wildcard[] = "MP4 files (*.mp4)|*.mp4";
-    wxFileDialog pExportDlg(this, _("Export House Preview Video"), wxEmptyString, CurrentSeqXmlFile->GetName(), wildcard, wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+    std::string path = CurrentSeqXmlFile->GetName() + ".mp4";
+    wxFileDialog pExportDlg(this, _("Export House Preview Video"), wxEmptyString, path, wildcard, wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
     int exportChoice = pExportDlg.ShowModal();
 
     if (exportChoice != wxID_OK) {
@@ -6371,6 +6380,38 @@ std::string xLightsFrame::CheckSequence(bool displayInEditor, bool writeToFile)
             last = newlast;
             lastm = m;
         }
+        // Check for single line models with left-to-right physical orientation
+        if (m->GetDisplayAs() == "Single Line") {
+            size_t nodeCount = m->GetNodeCount();
+            if (nodeCount < 2)
+                continue; // Not a valid line
+
+            auto xmlNode = m->GetModelXml();
+
+            float startX = 0.0f, startY = 0.0f, startZ = 0.0f;
+            float endX = 0.0f, endY = 0.0f, endZ = 0.0f;
+
+            double temp;
+
+            if (xmlNode->GetAttribute("X1").ToDouble(&temp)) startX = static_cast<float>(temp);
+            if (xmlNode->GetAttribute("Y1").ToDouble(&temp)) startY = static_cast<float>(temp);
+            if (xmlNode->GetAttribute("Z1").ToDouble(&temp)) startZ = static_cast<float>(temp);
+
+            if (xmlNode->GetAttribute("X2").ToDouble(&temp)) endX = static_cast<float>(temp);
+            if (xmlNode->GetAttribute("Y2").ToDouble(&temp)) endY = static_cast<float>(temp);
+            if (xmlNode->GetAttribute("Z2").ToDouble(&temp)) endZ = static_cast<float>(temp);
+
+            float deltaX = fabs(startX - endX);
+            float deltaY = fabs(startY - endY);
+            float deltaZ = fabs(startZ - endZ);
+            if (deltaX > deltaY && deltaX > deltaZ) {
+                if (startX > endX) {
+                    wxString msg = wxString::Format("    %s: Model '%s' should have the green square on the left of the blue square for best render results.",
+                        "WARN", m->GetName());
+                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "config", errcount, warncount);
+                }
+            }
+        }
     }
     if (errcount + warncount == errcountsave + warncountsave) {
         LogCheckSequenceMsg("    No problems found");
@@ -8997,7 +9038,7 @@ void xLightsFrame::OnMenuItem_CrashXLightsSelected(wxCommandEvent& event)
 void xLightsFrame::OnMenuItemBatchRenderSelected(wxCommandEvent& event)
 {
     static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
-    BatchRenderDialog dlg(this);
+    BatchRenderDialog dlg(this, &_outputManager);
     if (dlg.Prepare(this->GetShowDirectory()) && dlg.ShowModal() == wxID_OK && CloseSequence()) {
         wxArrayString files = dlg.GetFileList();
         wxArrayString filesToRender;
@@ -9044,7 +9085,7 @@ bool xLightsFrame::CheckForUpdate(int maxRetries, bool canSkipUpdates, bool show
     MenuItem_Update->Enable(true);
     int rc = 0;
     logger_base.debug("Downloading %s", (const char*)githubTagURL.c_str());
-    
+
     bool didConnect = false;
     std::string resp;
     nlohmann::json val;
@@ -9223,7 +9264,7 @@ void xLightsFrame::ShowPresetsPanel()
 
     if (EffectTreeDlg == nullptr) {
         EffectTreeDlg = new EffectTreeDialog(this);
-        EffectTreeDlg->InitItems(_sequenceElements.GetEffectsNode());
+        EffectTreeDlg->InitItems(EffectsNode);
     }
     EffectTreeDlg->Show();
 }
@@ -9618,7 +9659,6 @@ void xLightsFrame::OnCharHook(wxKeyEvent& event)
 
 void xLightsFrame::OnMenuItem_ZoomSelected(wxCommandEvent& event)
 {
-    //::wxLaunchDefaultBrowser("https://zoom.us/j/175801909");
     ::wxLaunchDefaultBrowser("https://zoom.us/j/175801909?pwd=ZU1hNzM5bjJpOGZ1d1BOb1BzMUFndz09");
 }
 
@@ -10744,3 +10784,39 @@ void xLightsFrame::OnMenuItemFindShowFolderSelected(wxCommandEvent& event)
 aiBase* xLightsFrame::GetAIService(aiType::TYPE serviceType) {
     return _serviceManager->findService(serviceType);
 }
+std::vector<aiBase*> xLightsFrame::GetAIServices(aiType::TYPE serviceType) {
+    return _serviceManager->findServices(serviceType);
+}
+
+void xLightsFrame::OnMenuItem_GenerateAIImageSelected(wxCommandEvent& event) {
+    auto services = _serviceManager->findServices(aiType::TYPE::IMAGES);
+    if (services.empty()) {
+        wxMessageBox("No AI Services Registered for creating images", "Error", wxICON_ERROR);
+        return;
+    }
+    auto serv = services[0];
+    if (services.size() > 1) {
+        wxArrayString choices;
+        for (auto s : services) {
+            choices.push_back(s->GetLLMName());
+        }
+        wxSingleChoiceDialog dlg(this, "AI Image Generator", "Choose AI Image Generator", choices, nullptr);
+        if (dlg.ShowModal() != wxID_CANCEL) {
+            serv = services[dlg.GetSelection()];
+        }
+    }
+    AIImageDialog dlg(this, serv);
+    dlg.ShowModal();
+}
+
+void xLightsFrame::SetPaletteSizeString(const wxString& size) {
+    if (GetPaletteSizeString() != size) {
+        wxConfigBase* config = wxConfigBase::Get();
+        config->Write("PaletteSize", size);
+
+        if (colorPanel) {
+            colorPanel->RefreshPaletteSize();
+        }
+    }
+}
+

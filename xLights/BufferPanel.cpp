@@ -480,6 +480,7 @@ BufferPanel::BufferPanel(wxWindow* parent, wxWindowID id, const wxPoint& pos, co
     Connect(subBufferPanel->GetId(),SUBBUFFER_RANGE_CHANGED,(wxObjectEventFunction)&BufferPanel::HandleCommandChange);
     
     ValidateWindow();
+    SetMinSize(wxSize(50, 50));
 }
 
 BufferPanel::~BufferPanel()
@@ -1029,6 +1030,8 @@ void BufferPanel::OnBufferStyleChoiceSelect(wxCommandEvent& event)
 
     if (BufferPanel::CanRenderBufferUseCamera(bs))
     {
+        auto currentCamera = Choice_PerPreviewCamera->GetStringSelection();
+
         Choice_PerPreviewCamera->Clear();
 
         Choice_PerPreviewCamera->Append("2D");
@@ -1040,13 +1043,16 @@ void BufferPanel::OnBufferStyleChoiceSelect(wxCommandEvent& event)
             Choice_PerPreviewCamera->Append(frame->viewpoint_mgr.GetCamera3D(i)->GetName());
         }
 
-        Choice_PerPreviewCamera->SetStringSelection(_defaultCamera);
-        if (Choice_PerPreviewCamera->GetStringSelection() != _defaultCamera) {
+        if (Choice_PerPreviewCamera->FindString(currentCamera) != wxNOT_FOUND) {
+            if (!currentCamera.empty()) {
+                Choice_PerPreviewCamera->SetStringSelection(currentCamera);
+            } else {
+                Choice_PerPreviewCamera->SetStringSelection(_defaultCamera);
+            }
+        } else {
             Choice_PerPreviewCamera->SetStringSelection("2D");
         }
-    }
-    else
-    {
+    } else {
         Choice_PerPreviewCamera->SetStringSelection("2D");
     }
 

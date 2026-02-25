@@ -500,9 +500,11 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="AboutDialog.cpp" />
     <ClCompile Include="ai\AIColorPaletteDialog.cpp" />
     <ClCompile Include="ai\aiBase.cpp" />
+    <ClCompile Include="ai\AIImageDialog.cpp" />
     <ClCompile Include="ai\chatGPT.cpp" />
     <ClCompile Include="ai\ollama.cpp" />
     <ClCompile Include="ai\ServiceManager.cpp" />
+    <ClCompile Include="ai\Gemini.cpp" />
     <ClCompile Include="AlignmentDialog.cpp" />
     <ClCompile Include="AutoLabelDialog.cpp" />
     <ClCompile Include="automation\automation.cpp" />
@@ -819,6 +821,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="LMSImportChannelMapDialog.cpp" />
     <ClCompile Include="LorConvertDialog.cpp" />
     <ClCompile Include="LyricsDialog.cpp" />
+    <ClCompile Include="ManageMediaPanel.cpp" />
     <ClCompile Include="MIDI\Binasc.cpp" />
     <ClCompile Include="MIDI\MidiEvent.cpp" />
     <ClCompile Include="MIDI\MidiEventList.cpp" />
@@ -928,6 +931,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="sequencer\MainSequencer.cpp" />
     <ClCompile Include="sequencer\RowHeading.cpp" />
     <ClCompile Include="sequencer\SequenceElements.cpp" />
+    <ClCompile Include="sequencer\SequenceMedia.cpp" />
     <ClCompile Include="sequencer\tabSequencer.cpp" />
     <ClCompile Include="sequencer\TimeLine.cpp" />
     <ClCompile Include="sequencer\UndoManager.cpp" />
@@ -1024,8 +1028,10 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClInclude Include="AboutDialog.h" />
     <ClCompile Include="ai\AIColorPaletteDialog.h" />
     <ClInclude Include="ai\aiBase.h" />
+    <ClInclude Include="ai\AIImageDialog.h" />
     <ClInclude Include="ai\aiType.h" />
     <ClInclude Include="ai\chatGPT.h" />
+    <ClInclude Include="ai\gemini.h" />
     <ClInclude Include="ai\ollama.h" />
     <ClInclude Include="ai\ServiceManager.h" />
     <ClInclude Include="AlignmentDialog.h" />
@@ -1360,6 +1366,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClInclude Include="LMSImportChannelMapDialog.h" />
     <ClInclude Include="LorConvertDialog.h" />
     <ClInclude Include="LyricsDialog.h" />
+    <ClInclude Include="ManageMediaPanel.h" />
     <ClInclude Include="ModelDimmingCurveDialog.h" />
     <ClInclude Include="ModelFaceDialog.h" />
     <ClInclude Include="ModelGroupPanel.h" />
@@ -1468,6 +1475,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClInclude Include="sequencer\MainSequencer.h" />
     <ClInclude Include="sequencer\RowHeading.h" />
     <ClInclude Include="sequencer\SequenceElements.h" />
+    <ClInclude Include="sequencer\SequenceMedia.h" />
     <ClInclude Include="sequencer\TimeLine.h" />
     <ClInclude Include="sequencer\UndoManager.h" />
     <ClInclude Include="sequencer\Waveform.h" />

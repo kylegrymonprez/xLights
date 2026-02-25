@@ -284,17 +284,17 @@ wxImage ApplyOrientation(const wxImage& img, int orient) {
     case 2: return res.Mirror(true);  // horizontal flip
     case 3: return res.Rotate180();
     case 4: return res.Mirror(false); // vertical flip
-    case 5: return res.Mirror(true).Rotate90(false); // horizontal flip + 90° CCW
-    case 6: return res.Rotate90(true);  // 90° CW
-    case 7: return res.Mirror(true).Rotate90(true);  // horizontal flip + 90° CW
-    case 8: return res.Rotate90(false); // 90° CCW
+    case 5: return res.Mirror(true).Rotate90(false); // horizontal flip + 90ï¿½ CCW
+    case 6: return res.Rotate90(true);  // 90ï¿½ CW
+    case 7: return res.Mirror(true).Rotate90(true);  // horizontal flip + 90ï¿½ CW
+    case 8: return res.Rotate90(false); // 90ï¿½ CCW
     default: return res;
     }
 }
 
-int GetExifOrientation(const wxString& filename) {
+int GetExifOrientation(const std::string& filename) {
     static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
-    std::ifstream file(filename.ToStdString(), std::ios::binary);
+    std::ifstream file(filename, std::ios::binary);
     if (!file) {
         logger_base.debug("Failed to open file: %s", (const char*)filename.c_str());
         file.close();
@@ -827,11 +827,8 @@ void SetXmlNodeAttribute(wxXmlNode* node, wxString const& property, wxString con
 void DownloadVamp() {
     wxMessageBox("We are about to download the Queen Mary Vamp plugins for your platform. Once downloaded please install them and then close and reopen xLights to use them.");
 #ifdef __WXMSW__
-    if (GetBitness() == "64bit") {
-        ::wxLaunchDefaultBrowser("https://code.soundsoftware.ac.uk/attachments/download/2623/qm-vamp-plugins-1.8.0-win64.msi");
-    } else {
-        ::wxLaunchDefaultBrowser("https://code.soundsoftware.ac.uk/attachments/download/2621/qm-vamp-plugins-1.8.0-win32.zip");
-    }
+    //::wxLaunchDefaultBrowser("https://code.soundsoftware.ac.uk/attachments/download/2623/qm-vamp-plugins-1.8.0-win64.msi");
+    ::wxLaunchDefaultBrowser("https://github.com/vamp-plugins/vamp-plugin-pack/releases/download/v2.0/Vamp.Plugin.Pack.Installer.2.0.exe");
 #else
     // likely can/should be used for all platforms
     ::wxLaunchDefaultBrowser("https://www.vamp-plugins.org/pack.html");
@@ -1446,6 +1443,15 @@ wxColor LightOrMediumGrey() {
         return medGray;
     } else {
         return *wxLIGHT_GREY;
+    }
+}
+wxColor RedOrLightRed() {
+    if (IsDarkMode()) {
+        // In Dark Mode pure red is hard to read on grey, use a lighter salmon/coral red
+        static const wxColor lightRed(0xFF, 0x6B, 0x6B);
+        return lightRed;
+    } else {
+        return *wxRED;
     }
 }
 void CleanupIpAddress(wxString& IpAddr) {

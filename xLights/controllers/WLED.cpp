@@ -116,12 +116,12 @@ WLED::~WLED() {
 
 #pragma region Private Functions
 
-bool WLED::ParseOutputJSON(nlohmann::json const& jsonVal, int maxPort, ControllerCaps* caps) {
+bool WLED::ParseOutputJSON(nlohmann::json const& jsonVal, int maxPort, ControllerCaps* caps, bool fullControl) {
 
     _pixelOutputs.clear();
 
     for (int i = 1; i <= maxPort; i++) {
-        WLEDOutput* output = ExtractOutputJSON(jsonVal, i, caps);
+        WLEDOutput* output = ExtractOutputJSON(jsonVal, i, caps, fullControl);
         output->Dump();
         _pixelOutputs.push_back(output);
     }
@@ -129,11 +129,11 @@ bool WLED::ParseOutputJSON(nlohmann::json const& jsonVal, int maxPort, Controlle
     return true;
 }
 
-WLEDOutput* WLED::ExtractOutputJSON(nlohmann::json const& jsonVal, int port, ControllerCaps* caps) {
+WLEDOutput* WLED::ExtractOutputJSON(nlohmann::json const& jsonVal, int port, ControllerCaps* caps, bool fullControl) {
 
     WLEDOutput* output = new WLEDOutput(port);
 
-    if (jsonVal.contains("hw") && jsonVal.at("hw").contains("led") &&
+    if (!fullControl && jsonVal.contains("hw") && jsonVal.at("hw").contains("led") &&
         jsonVal.at("hw").at("led").contains("ins") &&
         jsonVal.at("hw").at("led").at("ins").size() > (port - 1)) {
         auto const& json = jsonVal.at("hw").at("led").at("ins").at(port - 1);
@@ -240,7 +240,7 @@ static size_t writeFunction(void* ptr, size_t size, size_t nmemb, std::string* d
 }
 
 bool WLED::PostJSON(nlohmann::json const& jsonVal) {
-    std::string str = jsonVal.dump(3);
+    std::string str = jsonVal.dump(3, ' ', false, nlohmann::json::error_handler_t::replace);
     const std::string url = GetCfgURL();
 
     static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
@@ -301,13 +301,6 @@ bool WLED::SetupInput(Controller* c, nlohmann::json& jsonVal, bool rgbw) {
     int port = 0;
     auto o = controller->GetFirstOutput();
 
-    if (o->GetType() == OUTPUT_E131 || o->GetType() == OUTPUT_ARTNET) {
-        if (o->GetChannels() > 510) {
-            DisplayError(wxString::Format("Attempt to upload a universe of size %d to the WLED controller, but only a size of 510 or smaller is supported", o->GetChannels()).ToStdString());
-            return false;
-        }
-    }
-
     if (o->GetType() == OUTPUT_E131) {
         port = 5568;
     }
@@ -320,6 +313,11 @@ bool WLED::SetupInput(Controller* c, nlohmann::json& jsonVal, bool rgbw) {
         if (ddp) {
             if (ddp->IsKeepChannelNumbers()) {
                 DisplayError("The DDP 'Keep Channel Numbers' option is not support with WLED, Please Disable");
+                return false;
+            }
+
+            if (rgbw) {
+                DisplayError("Four Channel Pixles and DDP, do not work well in WLED, Please Use E131");
                 return false;
             }
         }
@@ -471,7 +469,10 @@ bool WLED::SetOutputs(ModelManager* allmodels, OutputManager* outputManager, Con
         return false;
     }
 
-    int maxPort = caps->GetMaxPixelPort();
+    bool const fullControl = caps->SupportsFullxLightsControl() && controller->IsFullxLightsControl();
+    int const defaultBrightness = controller->GetDefaultBrightnessUnderFullControl();
+
+    int const maxPort = caps->GetMaxPixelPort();
 
     //get current config JSON
     const std::string page = GetURL(GetCfgURL());
@@ -503,7 +504,7 @@ bool WLED::SetOutputs(ModelManager* allmodels, OutputManager* outputManager, Con
         return false;
     }
 
-    bool worked = ParseOutputJSON(val, maxPort, caps);
+    bool worked = ParseOutputJSON(val, maxPort, caps, fullControl);
     if (!worked) {
         DisplayError("Unable to Parse JSON.", parent);
         progress.Update(100, "Aborting.");
@@ -545,13 +546,17 @@ bool WLED::SetOutputs(ModelManager* allmodels, OutputManager* outputManager, Con
         return false;
     }
 
+    if (fullControl) {
+        val["light"]["scale-bri"] = defaultBrightness;
+    }
+
     logger_base.info("Uploading JSON to WLED.");
     progress.Update(70, "Uploading JSON to WLED.");
 
     //reboot
     val["rb"] = true;
 
-    bool uploadWorked = PostJSON(val);
+    bool const uploadWorked = PostJSON(val);
 
     if (!uploadWorked) {
         logger_base.error("Error Uploading to WLED controller, JSON:%s.", (const char*)page.c_str());

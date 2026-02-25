@@ -109,7 +109,18 @@ wxString xLightsFrame::LoadEffectsFileNoCheck()
 
             if (xbkptime > xmltime) {
                 // autosave file is newer
-                if (wxMessageBox("Autosaved rgbeffects file found which seems to be newer than your current rgbeffects file ... would you like to open that instead?", "Newer file found", wxYES_NO) == wxYES) {
+                wxString xmlTimeStr = xmltime.Format("%Y-%m-%d %H:%M:%S");
+                wxString backupTimeStr = xbkptime.Format("%Y-%m-%d %H:%M:%S");
+
+                // Build the message with both timestamps
+                wxString msg = wxString::Format(
+                    "An autosaved rgbeffects file was found that is newer than your current file.\n\n"
+                    "Current file:  %s\n"
+                    "Autosave file: %s\n\n"
+                    "Would you like to use the autosave file instead?",
+                    xmlTimeStr, backupTimeStr
+                );
+                if (wxMessageBox(msg, "Newer Autosave File Found", wxYES_NO | wxICON_QUESTION) == wxYES) {
                     // run a backup ... equivalent of a F10
 
                     // we have not actually read the backup location yet so lets just use the show folder
@@ -1558,6 +1569,20 @@ void xLightsFrame::SaveAsSequence()
             ok = false;
             DisplayError("File name cannot be empty", this);
         }
+        if (ok) {
+            wxFileName fnFile(newFilename);
+            fnFile.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_TILDE | wxPATH_NORM_ABSOLUTE | wxPATH_NORM_LONG | wxPATH_NORM_SHORTCUT);
+            wxFileName fnDir(CurrentDir, "");
+            fnFile.Normalize(wxPATH_NORM_DOTS | wxPATH_NORM_TILDE | wxPATH_NORM_ABSOLUTE | wxPATH_NORM_LONG | wxPATH_NORM_SHORTCUT);
+            wxString filePath = fnFile.GetPath(wxPATH_GET_VOLUME | wxPATH_GET_SEPARATOR);
+            wxString showPath = fnDir.GetPath(wxPATH_GET_VOLUME | wxPATH_GET_SEPARATOR);
+            if (!filePath.StartsWith(showPath)) {
+                ok = false;
+                DisplayWarning("Sequence files must be saved within the current show directory:\n" + showPath +
+                               "\n\nPlease choose a location inside the show directory.", this);
+                fd.SetDirectory(CurrentDir);
+            }
+        }
     } while (!ok);
 
     SaveAsSequence(newFilename);
@@ -1594,7 +1619,7 @@ void xLightsFrame::RenderAll()
     EnableSequenceControls(false);
     wxYield();      // ensure all controls are disabled.
     wxStopWatch sw; // start a stopwatch timer
-
+    _sequenceElements.GetSequenceMedia().MarkAllUnused();
     ProgressBar->Show();
     GaugeSizer->Layout();
     SetStatusText(_("Rendering all layers"));

@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 
 #include "../models/ModelManager.h"
+#include "../models/ViewObjectManager.h"
 #include "ControllerUploadData.h"
 #include "BaseController.h"
 
@@ -42,6 +43,8 @@ class FPP : public BaseController
     FPP(const FPP &c);
     virtual ~FPP();
     
+    std::string &proxy() { return _fppProxy; }
+    
     std::string hostName;
     std::string description;
     std::string ipAddress;
@@ -58,7 +61,6 @@ class FPP : public BaseController
     std::string uuid = "";
     std::list<std::string> playlists;
 
-    std::string proxy;
     std::set<std::string> proxies;
     bool isaProxy = false;
     bool solePlayer = false;
@@ -112,7 +114,7 @@ class FPP : public BaseController
     
     bool UploadPlaylist(const std::string &playlist);
     bool UploadModels(const nlohmann::json& models);
-    bool UploadDisplayMap(const std::string &displayMap);
+    bool UploadDisplayMap(std::map<std::string, std::string> &virtualDisplayData);
     bool UploadUDPOut(const nlohmann::json& udp);
 
     bool UploadPixelOutputs(ModelManager* allmodels,
@@ -140,6 +142,8 @@ class FPP : public BaseController
     [[nodiscard]] std::vector<std::string> GetProxyList();
     [[nodiscard]] std::vector<std::tuple<std::string, std::string>> GetProxies();
 
+    [[nodiscard]] std::vector<std::string> GetPlaylistItems(const std::string& name);
+
     static void PrepareDiscovery(Discovery &discovery);
     static void PrepareDiscovery(Discovery &discovery, const std::list<std::string> &addresses, bool broadcastPing = true);
     static void MapToFPPInstances(Discovery &discovery, std::list<FPP*> &instances, OutputManager* outputManager);
@@ -153,9 +157,11 @@ class FPP : public BaseController
 
 #ifndef DISCOVERYONLY
     nlohmann::json CreateModelMemoryMap(ModelManager* allmodels, int32_t startChan, int32_t endChannel);
-    static std::string CreateVirtualDisplayMap(ModelManager* allmodels, int previewWi, int previewHi);
-    static nlohmann::json CreateUniverseFile(const std::list<Controller*>& controllers, bool input, std::map<int, int>* rngs = nullptr);
-    static nlohmann::json CreateUniverseFile(Controller* controller, bool input);
+    static void CreateVirtualDisplayMap(ModelManager &allmodels, ViewObjectManager &objects,
+                                        int previewWi, int previewHi,
+                                        std::map<std::string, std::string> &virtualDisplayData);
+    nlohmann::json CreateUniverseFile(const std::list<Controller*>& controllers, bool input, std::map<int, int>* rngs = nullptr);
+    nlohmann::json CreateUniverseFile(Controller* controller, bool input);
 #endif
     static std::string GetVendor(const std::string& type);
     static std::string GetModel(const std::string& type);

@@ -463,7 +463,8 @@ public:
 
     bool ImportSuperStar(Element *el, wxXmlDocument &doc, int x_size, int y_size,
                          int x_offset, int y_offset,
-                         int imageResizeType, const wxSize &modelSize, const wxString& layerBlend);
+                         int imageResizeType, const wxSize &modelSize, const wxString& layerBlend,
+                         const wxString& defaultGroupName = {});
     bool ImportLMS(wxXmlDocument &doc, const wxFileName &filename);
     bool ImportLPE(wxXmlDocument &doc, const wxFileName &filename);
     bool ImportVixen3(const wxFileName &filename);
@@ -604,6 +605,7 @@ public:
     void OnMenuItem_ZoomSelected(wxCommandEvent& event);
     void OnMenuItem_CleanupFileLocationsSelected(wxCommandEvent& event);
     void OnMenuItem_Generate2DPathSelected(wxCommandEvent& event);
+    void OnMenuItem_GenerateAIImage(wxCommandEvent& event);
     void OnMenuItem_PrepareAudioSelected(wxCommandEvent& event);
     void OnMenuItem_UserManualSelected(wxCommandEvent& event);
     void OnMenuItem_ValueCurvesSelected(wxCommandEvent& event);
@@ -646,13 +648,12 @@ public:
     void OnButton_OpenBaseShowDirClick(wxCommandEvent& event);
     void OnMenuItemFindShowFolderSelected(wxCommandEvent& event);
     void OnMenuItemShiftEffectsAndTimingSelected(wxCommandEvent& event);
+    void OnMenuItem_GenerateAIImageSelected(wxCommandEvent& event);
     //*)
     void OnCharHook(wxKeyEvent& event);
     void OnHelp(wxHelpEvent& event);
 
 private :
-
-    //void OnMenuItem53Selected(wxCommandEvent& event);
 
     void DoMenuAction(wxMenuEvent &evt);
 	void ShowHideAllSequencerWindows(bool show);
@@ -795,6 +796,7 @@ public:
     static const wxWindowID ID_MENU_GENERATE2DPATH;
     static const wxWindowID ID_MENUITEM_GenerateCustomModel;
     static const wxWindowID ID_MNU_REMAPCUSTOM;
+    static const wxWindowID ID_MENUITEM_GenerateAIImage;
     static const wxWindowID ID_MNU_GENERATELYRICS;
     static const wxWindowID ID_MENUITEM_CONVERT;
     static const wxWindowID ID_MNU_PREPAREAUDIO;
@@ -1026,6 +1028,7 @@ public:
     wxMenuItem* MenuItem_Zoom;
     wxMenuItem* MenuItem_xScanner;
     wxMenuItem* MenuItem_xSchedule;
+    wxMenuItem* Menu_GenerateAIImage;
     wxMenuItem* Menu_GenerateCustomModel;
     wxMenuItem* Menu_Settings_Sequence;
     wxMenuItem* QuitMenuItem;
@@ -1324,6 +1327,12 @@ public:
     bool IsDisableKeyAcceleration() const { return _disableKeyAcceleration; }
     void SetDisableKeyAcceleration(bool b);
 
+    wxString GetPaletteSizeString() const {
+        wxConfigBase* config = wxConfigBase::Get();
+        return config->Read("PaletteSize", "Normal");
+    }
+    void SetPaletteSizeString(const wxString& size);
+
     bool IsSuppressFadeHints() const { return mSuppressFadeHints; }
     void SetSuppressFadeHints(bool b);
 
@@ -1338,6 +1347,7 @@ public:
     void SetHidePresetPreview(bool b);
 
     aiBase* GetAIService(aiType::TYPE serviceType = aiType::TYPE::PROMPT);
+    std::vector<aiBase*> GetAIServices(aiType::TYPE serviceType = aiType::TYPE::PROMPT);
 
     bool IsShowBaseShowFolder() const
     {
@@ -1589,6 +1599,7 @@ public:
 
     void UpdateSequenceVideoPanel( const wxString& path );
 
+    const wxXmlDocument& GetEffectsXml() const { return EffectsXml; };
 protected:
     bool SeqLoadXlightsFile(const wxString& filename, bool ChooseModels);
     bool SeqLoadXlightsFile(xLightsXmlFile& xml_file, bool ChooseModels);
@@ -1761,6 +1772,7 @@ public:
     ViewsModelsPanel* GetDisplayElementsPanel() const { return displayElementsPanel; }
     EffectsPanel* GetEffectsPanel() const { return EffectsPanel1; }
     void ResetPanelDefaultSettings(const std::string& effect, const Model* model, bool optionbased);
+    void ResetAllPanelDefaultSettings();
 
     void UnselectEffect();
     FindDataPanel* GetFindDataPanel() const

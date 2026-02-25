@@ -439,11 +439,13 @@ bool xLightsFrame::SetDir(const wxString& newdir, bool permanent)
     }
 
     logger_base.debug("Get start channels right.");
+    _outputModelManager.RemoveWork("ASAP", OutputModelManager::WORK_CALCULATE_START_CHANNELS);
+    _outputModelManager.RemoveWork("ASAP", OutputModelManager::WORK_RESEND_CONTROLLER_CONFIG);
     _outputModelManager.AddImmediateWork(OutputModelManager::WORK_CALCULATE_START_CHANNELS, "SetDir");
     _outputModelManager.AddImmediateWork(OutputModelManager::WORK_RESEND_CONTROLLER_CONFIG, "SetDir");
     logger_base.debug("Start channels done.");
 
-    if (mBackupOnLaunch && !_renderMode) {
+    if (mBackupOnLaunch && !_renderMode && !CurrentDir.StartsWith(wxFileName::GetTempDir())) {
         logger_base.debug("Backing up show directory before we do anything this session in this folder : %s.", (const char *)CurrentDir.c_str());
         DoBackup(false, true);
         logger_base.debug("Backup completed.");
@@ -1624,6 +1626,10 @@ wxBitmap xLightsFrame::CreateLedBitmap(bool online) {
 }
 
 void xLightsFrame::OnPingTimer(wxTimerEvent& event) {
+    if (List_Controllers == nullptr) {
+        //xLights not fully started, likely waiting for show folder to be selected
+        return;
+    }
     if (Notebook1->GetSelection() != SETUPTAB || _pingInProgress) {
         return;
     }

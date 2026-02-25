@@ -1175,13 +1175,19 @@ void Model::GetControllerProtocols(wxArrayString& cp, int& idx)
     }
 }
 
-wxArrayString Model::GetSmartRemoteValues(int smartRemoteCount)
+wxArrayString Model::GetSmartRemoteValues(int smartRemoteCount) const
 {
     wxArrayString res;
-    // res.push_back("None");
+    auto caps = GetControllerCaps();
+    bool hinkspix = (caps && caps->GetVendor() == "HinksPix");
+
     for (int i = 0; i < smartRemoteCount; ++i) {
-        res.push_back(wxString((char)(65 + i)));
-    }
+        if (hinkspix) {
+            res.push_back(wxString::Format("%d", i));
+        } else { 
+            res.push_back(wxString(char(65 + i)));
+        } 
+    } 
     return res;
 }
 
@@ -2793,7 +2799,7 @@ std::string Model::ComputeStringStartChannel(int i)
 
     wxString stch = ModelXml->GetAttribute("StartChannel", "1");
     wxString priorStringStartChannelAsString = ModelXml->GetAttribute(StartChanAttrName(i - 1));
-    int priorLength = CalcCannelsPerString();
+    int priorLength = CalcChannelsPerString();
     // This will be required once custom model supports multiple strings ... working on that
     // if (DisplayAs == "Custom")
     //{
@@ -2951,7 +2957,7 @@ bool Model::UpdateStartChannelFromChannelString(std::map<std::string, Model*>& m
 
     if (valid) {
         size_t NumberOfStrings = HasOneString(DisplayAs) ? 1 : parm1;
-        int ChannelsPerString = CalcCannelsPerString();
+        int ChannelsPerString = CalcChannelsPerString();
         SetStringStartChannels(zeroBased, NumberOfStrings, StartChannel, ChannelsPerString);
     }
 
@@ -3244,7 +3250,7 @@ void Model::SetFromXml(wxXmlNode* ModelNode, bool zb)
 
     // calculate starting channel numbers for each string
     size_t NumberOfStrings = HasOneString(DisplayAs) ? 1 : parm1;
-    int ChannelsPerString = CalcCannelsPerString();
+    int ChannelsPerString = CalcChannelsPerString();
 
     SetStringStartChannels(zeroBased, NumberOfStrings, StartChannel, ChannelsPerString);
     GetModelScreenLocation().Read(ModelNode);
@@ -3411,12 +3417,21 @@ void Model::ReplaceIPInStartChannels(const std::string& oldIP, const std::string
     }
 }
 
-std::string Model::DecodeSmartRemote(int sr)
+std::string Model::DecodeSmartRemote(int sr) const
 {
     if (sr == 0)
         return "None";
+
+    auto caps = GetControllerCaps();
+    bool hinkspix = (caps && caps->GetVendor() == "HinksPix");
+
+    if (hinkspix) {
+        return std::to_string(sr - 1);
+    }
+
     return std::string(1, ('A' + sr - 1));
 }
+
 
 wxXmlNode* Model::GetControllerConnection() const
 {
@@ -3476,7 +3491,7 @@ void Model::ParseSubModel(wxXmlNode* node)
     sortedSubModels[sm->GetName()] = sm;
 }
 
-int Model::CalcCannelsPerString()
+int Model::CalcChannelsPerString()
 {
     int ChannelsPerString = parm2 * GetNodeChannelCount(StringType);
     if (SingleChannel)
@@ -6049,6 +6064,7 @@ void Model::ImportModelChildren(wxXmlNode* root, xLightsFrame* xlights, wxString
     importAliases = 0;
     for (wxXmlNode* n = root->GetChildren(); n != nullptr; n = n->GetNext()) {
         if (n->GetName() == "stateInfo") {
+            stateInfo.clear();
             AddState(n);
         } else if (n->GetName() == "subModel") {
             AddSubmodel(n);

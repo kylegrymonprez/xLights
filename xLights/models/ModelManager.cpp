@@ -1777,9 +1777,21 @@ std::string ModelManager::GetModelsOnChannels(uint32_t start, uint32_t end, int 
 std::vector<std::string> ModelManager::GetGroupsContainingModel(Model* model) const
 {
     std::vector<std::string> res;
+    if (model == nullptr) {
+        static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
+        logger_base.error("ModelManager::GetGroupsContainingModel called with nullptr");
+        return res;
+    }
+
     for (const auto& it : *this) {
         if (it.second->GetDisplayAs() == "ModelGroup") {
             auto mg = dynamic_cast<ModelGroup*>(it.second);
+            if (mg == nullptr) {
+                static log4cpp::Category& logger_base = log4cpp::Category::getInstance(std::string("log_base"));
+                logger_base.error("ModelManager::GetGroupsContainingModel - Model '%s' claims to be ModelGroup but cast failed", 
+                    it.first.c_str());
+                continue;
+            }
             if (mg->ContainsModel(model)) {
                 res.push_back(it.first);
             } else {
@@ -1991,7 +2003,17 @@ bool ModelManager::MergeFromBase(const std::string& baseShowDir, bool prompt)
                                 m->AddAttribute("FromBase", "1");
                                 m->AddAttribute("BaseModels", models1); // keep a copy of the models from the base show folder as we may want to prevent these being removed
                                 changed = true;
+
+                                int currentOffsetX = mg->GetXCentreOffset();
+                                int currentOffsetY = mg->GetYCentreOffset();
                                 Model* newm = CreateModel(new wxXmlNode(*m));
+                                auto newmg = dynamic_cast<ModelGroup*>(newm);
+                                if (newmg != nullptr) {
+                                    newmg->SetXCentreOffset(currentOffsetX);
+                                    newmg->SetYCentreOffset(currentOffsetY);
+                                    logger_base.debug("Restored offsets after replace - X: %d, Y: %d", currentOffsetX, currentOffsetY);
+                                }
+
                                 ReplaceModel(name, newm);
                                 logger_base.debug("Updating model group from base show folder: '%s'.", (const char*)name.c_str());
                             }
