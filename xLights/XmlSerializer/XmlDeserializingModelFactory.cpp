@@ -575,6 +575,23 @@ Model* XmlDeserializingModelFactory::DeserializeCustom(pugi::xml_node node, xLig
     }
 
     model->Setup();
+
+    // Any per-string start nodes that were not present in the XML remain 0.
+    // Now that Setup() has built the node list, ComputeStringStartNode() returns
+    // accurate values. Set them and re-run Setup() so stringStartChan is consistent.
+    if (num_strings > 1) {
+        bool anyUpdated = false;
+        for (int i = 0; i < num_strings; i++) {
+            if (model->GetIndivStartNode(i) == 0) {
+                model->SetNodeSize(i, model->ComputeStringStartNode(i));
+                anyUpdated = true;
+            }
+        }
+        if (anyUpdated) {
+            model->Setup();
+        }
+    }
+
     return model;
 }
 

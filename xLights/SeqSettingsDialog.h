@@ -16,6 +16,7 @@
 
 //(*Headers(SeqSettingsDialog)
 #include <wx/bmpbuttn.h>
+#include <wx/filename.h>
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
@@ -118,6 +119,7 @@ class SeqSettingsDialog: public wxDialog
         wxGridSizer* GridSizerWizButtons;
 		FlickerFreeBitmapButton* BitmapButton_Wiz_Music;
 		FlickerFreeBitmapButton* BitmapButton_Wiz_Anim;
+		FlickerFreeBitmapButton* BitmapButton_Wiz_Effect;
 		FlickerFreeBitmapButton* BitmapButton_25ms;
 		FlickerFreeBitmapButton* BitmapButton_50ms;
 		FlickerFreeBitmapButton* BitmapButton_Custom;
@@ -206,6 +208,7 @@ class SeqSettingsDialog: public wxDialog
 		static const long ID_GRID_TIMING;
         static const long ID_BITMAPBUTTON_Wiz_Music;
         static const long ID_BITMAPBUTTON_Wiz_Anim;
+        static const long ID_BITMAPBUTTON_Wiz_Effect;
         static const long ID_BITMAPBUTTON_25ms;
         static const long ID_BITMAPBUTTON_50ms;
         static const long ID_BITMAPBUTTON_Custom;
@@ -273,6 +276,7 @@ class SeqSettingsDialog: public wxDialog
         void OnButton_Xml_Delete_TimingClick(wxCommandEvent& event);
 		void OnBitmapButton_Wiz_MusicClick(wxCommandEvent& event);
 		void OnBitmapButton_Wiz_AnimClick(wxCommandEvent& event);
+		void OnBitmapButton_Wiz_EffectClick(wxCommandEvent& event);
 		void OnBitmapButton_25msClick(wxCommandEvent& event);
 		void OnBitmapButton_50msClick(wxCommandEvent& event);
 		void OnBitmapButton_CustomClick(wxCommandEvent& event);
@@ -306,6 +310,8 @@ class SeqSettingsDialog: public wxDialog
         wxBitmapBundle musical_seq_pressed;
         wxBitmapBundle animation_seq;
         wxBitmapBundle animation_seq_pressed;
+        wxBitmapBundle effect_seq;
+        wxBitmapBundle effect_seq_pressed;
         wxBitmapBundle time_25ms;
         wxBitmapBundle time_25ms_pressed;
         wxBitmapBundle time_50ms;
@@ -333,6 +339,7 @@ class SeqSettingsDialog: public wxDialog
         void WizardPage1();
         void WizardPage2();
         void WizardPage3();
+        void AdvanceAfterTiming();
         void WizardPage4();
         void WizardPage5();
         bool ImportDataLayer(const wxString& filetypes, ConvertLogDialog* plog);
