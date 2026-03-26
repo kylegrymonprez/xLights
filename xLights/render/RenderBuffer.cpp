@@ -444,7 +444,7 @@ void TextDrawingContext::SetFont(const wxFontInfo& font, const xlColor& color)
 
         if (style != fontStyle
             || font.GetPixelSize().y != fontSize
-            || font.GetFaceName() != fontName
+            || font.GetFaceName().ToStdString() != fontName
             || color != fontColor)
         {
             this->font = gc->CreateFont(font.GetPixelSize().y, font.GetFaceName(), style, xlColorToWxColour(color));
@@ -458,7 +458,7 @@ void TextDrawingContext::SetFont(const wxFontInfo& font, const xlColor& color)
 
             fontStyle = style;
             fontSize = font.GetPixelSize().y;
-            fontName = font.GetFaceName();
+            fontName = font.GetFaceName().ToStdString();
             fontColor = color;
         }
         gc->SetFont(this->font);
@@ -546,7 +546,7 @@ const wxFontInfo& TextDrawingContext::GetShapeFont(const std::string& font)
         ff.SetNativeFontInfoUserDesc(font); // This needs FontMapLock above
 
         wxFontInfo _font = wxFontInfo(wxSize(0, 12));
-        wxString face = ff.GetFaceName();
+        std::string face = ff.GetFaceName().ToStdString();
         if (face == WIN_NATIVE_EMOJI_FONT || face == OSX_NATIVE_EMOJI_FONT || face == LINUX_NATIVE_EMOJI_FONT) {
             _font.FaceName(NATIVE_EMOJI_FONT);
         } else {
@@ -560,40 +560,49 @@ const wxFontInfo& TextDrawingContext::GetShapeFont(const std::string& font)
     return FONT_MAP_SHP[font];
 }
 
-void TextDrawingContext::DrawText(const wxString &msg, int x, int y, double rotation) {
+void TextDrawingContext::DrawText(const std::string &msg, int x, int y, double rotation) {
+    wxString wmsg(msg);
     if (gc != nullptr) {
-        gc->DrawText(msg, x, y, DegToRad(rotation));
+        gc->DrawText(wmsg, x, y, DegToRad(rotation));
     } else {
-        dc->DrawRotatedText(msg, x, y, rotation);
+        dc->DrawRotatedText(wmsg, x, y, rotation);
     }
 }
 
-void TextDrawingContext::DrawText(const wxString &msg, int x, int y) {
+void TextDrawingContext::DrawText(const std::string &msg, int x, int y) {
+    wxString wmsg(msg);
     if (gc != nullptr) {
-        gc->DrawText(msg, x, y);
+        gc->DrawText(wmsg, x, y);
     } else {
-        dc->DrawText(msg, x, y);
+        dc->DrawText(wmsg, x, y);
     }
 }
 
-void TextDrawingContext::GetTextExtent(const wxString &msg, double *width, double *height) {
+void TextDrawingContext::GetTextExtent(const std::string &msg, double *width, double *height) {
+    wxString wmsg(msg);
     if (gc != nullptr) {
-        gc->GetTextExtent(msg, width, height);
+        gc->GetTextExtent(wmsg, width, height);
     } else {
-        wxSize size = dc->GetTextExtent(msg);
+        wxSize size = dc->GetTextExtent(wmsg);
         *width = size.GetWidth();
         *height = size.GetHeight();
     }
 }
-void TextDrawingContext::GetTextExtents(const wxString &msg, wxArrayDouble &extents) {
+void TextDrawingContext::GetTextExtents(const std::string &msg, std::vector<double> &extents) {
+    wxString wmsg(msg);
     if (gc != nullptr) {
-        gc->GetPartialTextExtents(msg, extents);
+        wxArrayDouble wxExtents;
+        gc->GetPartialTextExtents(wmsg, wxExtents);
+        extents.resize(wxExtents.size());
+        for (size_t x = 0; x < wxExtents.size(); x++) {
+            extents[x] = wxExtents[x];
+        }
         return;
     }
     wxArrayInt sizes;
-    dc->GetPartialTextExtents(msg, sizes);
+    dc->GetPartialTextExtents(wmsg, sizes);
     extents.resize(sizes.size());
-    for (int x = 0; x < sizes.size(); x++) {
+    for (size_t x = 0; x < sizes.size(); x++) {
         extents[x] = sizes[x];
     }
 }

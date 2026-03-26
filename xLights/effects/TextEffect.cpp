@@ -11,14 +11,18 @@
 #include "TextEffect.h"
 #include "../AudioManager.h"
 
+#include <cassert>
+#include <chrono>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
+#include <iomanip>
+#include <fstream>
 #include <format>
 #include <mutex>
 #include <array>
+#include <sstream>
 #include <unordered_map>
-
-#include <wx/checkbox.h>
 
 #include "../render/Effect.h"
 #include "../render/Element.h"
@@ -27,11 +31,13 @@
 #include "../UtilClasses.h"
 #include "../models/Model.h"
 #include "../UtilFunctions.h"
+#include "../ui/wxUtilities.h"
 #include "../FontManager.h"
 #include "../xLightsMain.h"
 #include "../ExternalHooks.h"
 #include "../render/SequenceFile.h"
 #include "../utils/string_utils.h"
+#include "../utils/xlRect.h"
 #include "../utils/xlSize.h"
 
 #include "../../include/text-16.xpm"
@@ -42,6 +48,12 @@
 #include <log.h>
 
 #define MAXTEXTLINES 100
+
+// Local alignment constants (matching wx values) so we don't depend on wx headers
+constexpr int TEXT_ALIGN_CENTER_HORIZONTAL = 0x0100;
+constexpr int TEXT_ALIGN_RIGHT = 0x0200;
+constexpr int TEXT_ALIGN_BOTTOM = 0x0400;
+constexpr int TEXT_ALIGN_CENTER_VERTICAL = 0x0800;
 
 TextEffect::TextEffect(int id) : RenderableEffect(id, "Text", text_16, text_24, text_32, text_48, text_64), font_mgr(FontManager::instance())
 {
@@ -57,16 +69,16 @@ std::list<std::string> TextEffect::CheckEffectSettings(const SettingsMap& settin
 {
     std::list<std::string> res = RenderableEffect::CheckEffectSettings(settings, media, model, eff, renderCache);
 
-    wxString textFilename = settings.Get("E_FILEPICKERCTRL_Text_File", "");
-    wxString text = ToWXString(settings.Get("E_TEXTCTRL_Text", ""));
-    wxString lyricTrack = settings.Get("E_CHOICE_Text_LyricTrack", "");
+    std::string textFilename = settings.Get("E_FILEPICKERCTRL_Text_File", "");
+    std::string text = settings.Get("E_TEXTCTRL_Text", "");
+    std::string lyricTrack = settings.Get("E_CHOICE_Text_LyricTrack", "");
 
     if (text == "" && textFilename == "" && lyricTrack == "") {
         res.push_back(std::format("    ERR: Text effect has no actual text. Model '{}', Start {}", model->GetFullName(), FORMATTIME(eff->GetStartTimeMS())));
     } else if (textFilename != "" && !FileExists(textFilename)) {
-        res.push_back(std::format("    ERR: Text effect cant find file '{}'. Model '{}', Start {}", textFilename.ToStdString(), model->GetFullName(), FORMATTIME(eff->GetStartTimeMS())));
-    } else if (textFilename != "" && !IsFileInShowDir(xLightsFrame::CurrentDir, textFilename.ToStdString())) {
-        res.push_back(std::format("    WARN: Text effect file '{}' not under show directory. Model '{}', Start {}", textFilename.ToStdString(), model->GetFullName(), FORMATTIME(eff->GetStartTimeMS())));
+        res.push_back(std::format("    ERR: Text effect cant find file '{}'. Model '{}', Start {}", textFilename, model->GetFullName(), FORMATTIME(eff->GetStartTimeMS())));
+    } else if (textFilename != "" && !IsFileInShowDir(xLightsFrame::CurrentDir, textFilename)) {
+        res.push_back(std::format("    WARN: Text effect file '{}' not under show directory. Model '{}', Start {}", textFilename, model->GetFullName(), FORMATTIME(eff->GetStartTimeMS())));
     }
 
     if (model->GetDisplayAs() == DisplayAsType::ModelGroup) {
@@ -78,7 +90,7 @@ std::list<std::string> TextEffect::CheckEffectSettings(const SettingsMap& settin
 std::list<std::string> TextEffect::GetFileReferences(Model* model, const SettingsMap &SettingsMap) const
 {
     std::list<std::string> res;    
-    wxString textFilename = SettingsMap["E_FILEPICKERCTRL_Text_File"];
+    std::string textFilename = SettingsMap["E_FILEPICKERCTRL_Text_File"];
     if (textFilename != "")
     {
         res.push_back(textFilename);
@@ -89,7 +101,7 @@ std::list<std::string> TextEffect::GetFileReferences(Model* model, const Setting
 bool TextEffect::CleanupFileLocations(xLightsFrame* frame, SettingsMap &SettingsMap)
 {
     bool rc = false;
-    wxString file = SettingsMap["E_FILEPICKERCTRL_Text_File"];
+    std::string file = SettingsMap["E_FILEPICKERCTRL_Text_File"];
     if (FileExists(file))
     {
         if (!frame->IsInShowFolder(file))
@@ -105,10 +117,10 @@ bool TextEffect::CleanupFileLocations(xLightsFrame* frame, SettingsMap &Settings
 bool TextEffect::SupportsRenderCache(const SettingsMap& settings) const
 {
     // we dont want to use render cache if text is coming from a file as the file might have changed
-    if (ToWXString(settings["TEXTCTRL_Text"]) == "" && FileExists(settings["FILEPICKERCTRL_Text_File"]))
+    if (settings["TEXTCTRL_Text"] == "" && FileExists(settings["FILEPICKERCTRL_Text_File"]))
         return false;
     // we dont want to use render cache if text is coming from lyric track, if you have text then it overrides the lyric track
-    if (ToWXString(settings["TEXTCTRL_Text"]) == ""  && settings["CHOICE_Text_LyricTrack"] != "")
+    if (settings["TEXTCTRL_Text"] == ""  && settings["CHOICE_Text_LyricTrack"] != "")
         return false;
     return true;
 }
@@ -262,7 +274,7 @@ void TextEffect::adjustSettings(const std::string& version, Effect* effect, bool
         }
     }
 
-    wxString file = settings["E_FILEPICKERCTRL_Text_File"];
+    std::string file = settings["E_FILEPICKERCTRL_Text_File"];
     if (file != "")
     {
         if (!FileExists(file))
@@ -274,7 +286,7 @@ void TextEffect::adjustSettings(const std::string& version, Effect* effect, bool
 
 void TextEffect::SelectTextColor(std::string& palette, int index) const
 {
-    wxString new_palette = "";
+    std::string new_palette;
     auto palette_array = Split(palette, ',');
     int found_color = 0;
     for( int i=0; i < palette_array.size(); i++ ) {
@@ -319,7 +331,7 @@ enum TextDirection {
     TEXTDIR_UPDOWN
 };
 
-static TextDirection TextEffectDirectionsIndex(const wxString &st) {
+static TextDirection TextEffectDirectionsIndex(const std::string &st) {
     if (st == "left") return TEXTDIR_LEFT;
     if (st == "right") return TEXTDIR_RIGHT;
     if (st == "up") return TEXTDIR_UP;
@@ -338,7 +350,7 @@ static TextDirection TextEffectDirectionsIndex(const wxString &st) {
     if (st == "up-down") return TEXTDIR_UPDOWN;
     return TEXTDIR_NONE;
 }
-static int TextCountDownIndex(const wxString &st) {
+static int TextCountDownIndex(const std::string &st) {
     if (st == "seconds") return 1;
     if (st == "to date 'd h m s'") return 2;
     if (st == "to date 'h:m:s'") return 3;
@@ -349,7 +361,7 @@ static int TextCountDownIndex(const wxString &st) {
     return 0;
 }
 
-static int TextEffectsIndex(const wxString &st) {
+static int TextEffectsIndex(const std::string &st) {
     if (st == "vert text up") return 1;
     if (st == "vert text down") return 2;
     if (st == "rotate up 45") return 3;
@@ -362,29 +374,33 @@ static int TextEffectsIndex(const wxString &st) {
 void TextEffect::Render(Effect *effect, const SettingsMap &SettingsMap, RenderBuffer &buffer) {
 
     // determine if we are rendering an xLights Font
-    wxString xl_font = SettingsMap.Get("CHOICE_Text_Font", "Use OS Fonts");
+    std::string xl_font = SettingsMap.Get("CHOICE_Text_Font", "Use OS Fonts");
     if( xl_font != "Use OS Fonts" )
     {
         RenderXLText(effect, SettingsMap, buffer);
         return;
     }
 
-    wxString text = ToWXString(SettingsMap["TEXTCTRL_Text"]);
-    text.Replace("\\n", "\n");
+    std::string text = SettingsMap["TEXTCTRL_Text"];
+    Replace(text, "\\n", "\n");
 
-    wxString filename = SettingsMap["FILEPICKERCTRL_Text_File"];
-    wxString lyricTrack = SettingsMap["CHOICE_Text_LyricTrack"];
+    std::string filename = SettingsMap["FILEPICKERCTRL_Text_File"];
+    std::string lyricTrack = SettingsMap["CHOICE_Text_LyricTrack"];
 
-    if (text.IsEmpty())
+    if (text.empty())
     {
         if (FileExists(filename)) {
-            wxFile file(filename);
-            if (file.IsOpened()) {
-                wxString fileContent;
-                if (file.ReadAll(&fileContent)) {
+            std::ifstream file(filename, std::ios::in);
+            if (file.is_open()) {
+                std::ostringstream ss;
+                ss << file.rdbuf();
+                std::string fileContent = ss.str();
+                file.close();
+
+                if (!fileContent.empty()) {
                     auto lines = Split(fileContent, '\n');
 
-                    text.Clear();
+                    text.clear();
                     int lineCount = std::min((int)lines.size(), MAXTEXTLINES);
 
                     for (int i = 0; i < lineCount; i++) {
@@ -394,22 +410,21 @@ void TextEffect::Render(Effect *effect, const SettingsMap &SettingsMap, RenderBu
                         text += lines[i];
                     }
 
-                    while (!text.IsEmpty() && text.Last() == '\n') {
-                        text.RemoveLast();
+                    while (!text.empty() && text.back() == '\n') {
+                        text.pop_back();
                     }
                 }
-                file.Close();
             }
         }
         else
         {
-            if (!lyricTrack.IsEmpty())
+            if (!lyricTrack.empty())
             {
                 Element* t = nullptr;
                 for (int i = 0; i < mSequenceElements->GetElementCount(); i++)
                 {
-                    auto lt = lyricTrack.BeforeLast('-');
-                    lt = lt.Left(lt.size() - 1);
+                    auto lt = BeforeLast(lyricTrack, '-');
+                    lt = lt.substr(0, lt.size() - 1);
                     Element* e = mSequenceElements->GetElement(i);
                     if (e->GetEffectLayerCount() > 1 && e->GetType() == ElementType::ELEMENT_TYPE_TIMING && e->GetName() == lt)
                     {
@@ -422,7 +437,7 @@ void TextEffect::Render(Effect *effect, const SettingsMap &SettingsMap, RenderBu
                 {
                     long time = buffer.curPeriod * buffer.frameTimeInMs;
                     EffectLayer* el = nullptr;
-                    if (lyricTrack.EndsWith(" - Phrases"))
+                    if (EndsWith(lyricTrack, " - Phrases"))
                     {
                         el = t->GetEffectLayer(0);
                     }
@@ -450,7 +465,7 @@ void TextEffect::Render(Effect *effect, const SettingsMap &SettingsMap, RenderBu
         text = FlipWord(SettingsMap, text, buffer);
     }
 
-    if (!text.IsEmpty()) {
+    if (!text.empty()) {
 
         int starty = std::strtol(SettingsMap.Get("SLIDER_Text_YStart", "0").c_str(), nullptr, 10);
         int startx = std::strtol(SettingsMap.Get("SLIDER_Text_XStart", "0").c_str(), nullptr, 10);
@@ -502,7 +517,7 @@ void TextEffect::Render(Effect *effect, const SettingsMap &SettingsMap, RenderBu
 }
 
 xlSize GetMultiLineTextExtent(TextDrawingContext *dc,
-                              const wxString& text,
+                              const std::string& text,
                               int *widthText,
                               int *heightText,
                               int *hl)
@@ -511,10 +526,10 @@ xlSize GetMultiLineTextExtent(TextDrawingContext *dc,
     double heightTextTotal = 0;
     double heightLineDefault = 0, heightLine = 0;
 
-    wxString curLine;
-    for ( wxString::const_iterator pc = text.begin(); ; ++pc )
+    std::string curLine;
+    for ( size_t idx = 0; ; ++idx )
     {
-        if ( pc == text.end() || *pc == wxS('\n') )
+        if ( idx == text.size() || text[idx] == '\n' )
         {
             if ( curLine.empty() )
             {
@@ -531,7 +546,7 @@ xlSize GetMultiLineTextExtent(TextDrawingContext *dc,
                 {
                     // but we don't know it yet - choose something reasonable
                     double dummy;
-                    dc->GetTextExtent(wxS("W"), &dummy, &heightLineDefault);
+                    dc->GetTextExtent("W", &dummy, &heightLineDefault);
                 }
 
                 heightTextTotal += heightLineDefault;
@@ -544,7 +559,7 @@ xlSize GetMultiLineTextExtent(TextDrawingContext *dc,
                 heightTextTotal += heightLine;
             }
 
-            if ( pc == text.end() )
+            if ( idx == text.size() )
             {
                 break;
             }
@@ -555,7 +570,7 @@ xlSize GetMultiLineTextExtent(TextDrawingContext *dc,
         }
         else
         {
-            curLine += *pc;
+            curLine += text[idx];
         }
     }
     *widthText = widthTextMax;
@@ -567,7 +582,7 @@ xlSize GetMultiLineTextExtent(TextDrawingContext *dc,
 class CachedTextInfo {
 public:
     CachedTextInfo() {}
-    CachedTextInfo(const std::string &txt, const std::string font, const std::vector<xlColor> &c, const wxRect &r)
+    CachedTextInfo(const std::string &txt, const std::string font, const std::vector<xlColor> &c, const xlRect &r)
     : text(txt), rect(r), color(c), fontString(font) {}
     ~CachedTextInfo() {}
     
@@ -579,7 +594,7 @@ public:
     }
     
     std::string text;
-    wxRect rect;
+    xlRect rect;
     std::vector<xlColor> color;
     std::string fontString;
 };
@@ -615,25 +630,25 @@ public:
         textCache[inf] = img;
     }
     
-    xlSize GetMultiLineTextExtent(const std::string &font, const wxString &msg) {
-        std::pair<std::string, wxString> key(font, msg);
+    xlSize GetMultiLineTextExtent(const std::string &font, const std::string &msg) {
+        std::pair<std::string, std::string> key(font, msg);
         auto i = textExtentCache.find(key);
         if (i == textExtentCache.end()) {
             return xlSize(-1, -1);
         }
         return i->second;
     }
-    void PutMultiLineTextExtent(const std::string &font, const wxString &msg, const xlSize &sz) {
-        std::pair<std::string, wxString> key(font, msg);
+    void PutMultiLineTextExtent(const std::string &font, const std::string &msg, const xlSize &sz) {
+        std::pair<std::string, std::string> key(font, msg);
         textExtentCache[key] = sz;
     }
 
     std::unordered_map<CachedTextInfo, wxImage*, CachedTextInfoHasher> textCache;
-    std::map<std::pair<std::string, wxString>, xlSize> textExtentCache;
+    std::map<std::pair<std::string, std::string>, xlSize> textExtentCache;
 };
 
 xlSize GetMultiLineTextExtent(TextDrawingContext *dc,
-                              const wxString& text,
+                              const std::string& text,
                               TextRenderCache *cache,
                               const std::string &font,
                               bool &fontSet)
@@ -653,8 +668,8 @@ xlSize GetMultiLineTextExtent(TextDrawingContext *dc,
 }
 
 void DrawLabel(TextDrawingContext *dc,
-               const wxString& text,
-               const wxRect& rect,
+               const std::string& text,
+               const xlRect& rect,
                int alignment,
                TextRenderCache *cache,
                const std::string &fontString,
@@ -669,11 +684,11 @@ void DrawLabel(TextDrawingContext *dc,
     int height = heightText;
 
     int x, y;
-    if ( alignment & wxALIGN_RIGHT )
+    if ( alignment & TEXT_ALIGN_RIGHT )
     {
         x = rect.GetRight() - width;
     }
-    else if ( alignment & wxALIGN_CENTRE_HORIZONTAL )
+    else if ( alignment & TEXT_ALIGN_CENTER_HORIZONTAL )
     {
         x = (rect.GetLeft() + rect.GetRight() + 1 - width) / 2;
     }
@@ -682,11 +697,11 @@ void DrawLabel(TextDrawingContext *dc,
         x = rect.GetLeft();
     }
 
-    if ( alignment & wxALIGN_BOTTOM )
+    if ( alignment & TEXT_ALIGN_BOTTOM )
     {
         y = rect.GetBottom() - height;
     }
-    else if ( alignment & wxALIGN_CENTRE_VERTICAL )
+    else if ( alignment & TEXT_ALIGN_CENTER_VERTICAL )
     {
         y = (rect.GetTop() + rect.GetBottom() + 1 - height) / 2;
     }
@@ -702,36 +717,36 @@ void DrawLabel(TextDrawingContext *dc,
     //     wxMSW which uses this function for multi-line texts, so we may only
     //     call DrawText() for single-line strings from here to avoid infinite
     //     recursion.
-    wxString curLine;
+    std::string curLine;
     int curPos = 0;
-    for ( wxString::const_iterator pc = text.begin(); ; ++pc )
+    for ( size_t idx = 0; ; ++idx )
     {
-        if ( pc == text.end() || *pc == '\n' ) {
+        if ( idx == text.size() || text[idx] == '\n' ) {
             int xRealStart = x; // init it here to avoid compielr warnings
             if ( !curLine.empty() )
             {
                 // NB: can't test for !(alignment & wxALIGN_LEFT) because
                 //     wxALIGN_LEFT is 0
-                if ( alignment & (wxALIGN_RIGHT | wxALIGN_CENTRE_HORIZONTAL) )
+                if ( alignment & (TEXT_ALIGN_RIGHT | TEXT_ALIGN_CENTER_HORIZONTAL) )
                 {
                     int x1,y1,z1;
                     int widthLine = GetMultiLineTextExtent(dc, curLine, &x1, &y1, &z1).width;
 
-                    if ( alignment & wxALIGN_RIGHT )
+                    if ( alignment & TEXT_ALIGN_RIGHT )
                     {
                         xRealStart += width - widthLine;
                     }
-                    else // if ( alignment & wxALIGN_CENTRE_HORIZONTAL )
+                    else // if ( alignment & TEXT_ALIGN_CENTER_HORIZONTAL )
                     {
                         xRealStart += (width - widthLine) / 2;
                     }
                 }
                 //else: left aligned, nothing to do
                 if (colors.size() != 1) {
-                    wxArrayDouble d;
+                    std::vector<double> d;
                     dc->GetTextExtents(curLine, d);
                     for (int x1 = 0; x1 < curLine.size(); x1++) {
-                        wxString c = curLine[x1];
+                        std::string c(1, curLine[x1]);
                         if (c != " ") {
                             SetFont(dc, fontString, colors[curPos % colors.size()]);
                             double loc = xRealStart;
@@ -740,13 +755,13 @@ void DrawLabel(TextDrawingContext *dc,
                                     loc += d[x1 - 1];
                                 }
                                 else {
-                                    wxASSERT(false); // this seems to happen when fonts are not good
+                                    assert(false); // this seems to happen when fonts are not good
                                 }
                             }
                             dc->DrawText(c, loc, y);
                         }
-                        if ((perWord && c == ' ' && x1 + 1 < curLine.size() && curLine[x1 + 1] != ' ') ||
-                            (!perWord && c != ' ')) {
+                        if ((perWord && c == " " && x1 + 1 < curLine.size() && curLine[x1 + 1] != ' ') ||
+                            (!perWord && c != " ")) {
                             curPos++;
                         }
                     }
@@ -757,14 +772,14 @@ void DrawLabel(TextDrawingContext *dc,
 
             y += heightLine;
 
-            if ( pc == text.end() )
+            if ( idx == text.size() )
                 break;
 
             curLine.clear();
         }
         else // not end of line
         {
-            curLine += *pc;
+            curLine += text[idx];
         }
     }
 }
@@ -819,7 +834,7 @@ TextRenderCache *GetCache(RenderBuffer &buffer, int id) {
 //jwylie - 2016-11-01  -- enhancement: add minute seconds countdown
 wxImage *TextEffect::RenderTextLine(RenderBuffer &buffer,
                                     TextDrawingContext* dc,
-                                    const wxString& Line_orig,
+                                    const std::string& Line_orig,
                                     const std::string &fontString,
                                     int dir,
                                     bool center, bool norepeat, int Effect, int Countdown, int tspeed,
@@ -827,10 +842,10 @@ wxImage *TextEffect::RenderTextLine(RenderBuffer &buffer,
                                     bool isPixelBased, bool perWord) const
 {
     int i;
-    wxString Line = Line_orig;
-    wxString msg, tempmsg;
+    std::string Line = Line_orig;
+    std::string msg, tempmsg;
 
-    if (Line.IsEmpty()) return nullptr;
+    if (Line.empty()) return nullptr;
 
     int state = (buffer.curPeriod - buffer.curEffStartPer) * tspeed * buffer.frameTimeInMs / 50;
 
@@ -847,7 +862,7 @@ wxImage *TextEffect::RenderTextLine(RenderBuffer &buffer,
             msg.clear();
             for(i=0; i<tempmsg.length(); i++)
             {
-                msg = msg + tempmsg.GetChar(tempmsg.length()-i-1) + "\n";
+                msg = msg + tempmsg[tempmsg.length()-i-1] + "\n";
             }
             break;
         case 2:
@@ -856,7 +871,7 @@ wxImage *TextEffect::RenderTextLine(RenderBuffer &buffer,
             msg.clear();
             for(i=0; i<tempmsg.length(); i++)
             {
-                msg = msg + tempmsg.GetChar(i) + "\n";
+                msg = msg + tempmsg[i] + "\n";
             }
             break;
         default: break;
@@ -866,8 +881,10 @@ wxImage *TextEffect::RenderTextLine(RenderBuffer &buffer,
     bool fontSet = false;
     
     xlSize textsize = GetMultiLineTextExtent(dc, msg, cache, fontString, fontSet);
-    int extra_left = IsGoingLeft(dir)? textsize.width - GetMultiLineTextExtent(dc, wxString(msg).Trim(false), cache, fontString, fontSet).width: 0; //CAUTION: trim() alters object, so make a copy first
-    int extra_right = IsGoingRight(dir)? textsize.width - GetMultiLineTextExtent(dc, wxString(msg).Trim(true), cache, fontString, fontSet).width: 0;
+    auto ltrim = [](const std::string& s) { size_t start = s.find_first_not_of(" \t"); return start == std::string::npos ? std::string() : s.substr(start); };
+    auto rtrim = [](const std::string& s) { size_t end = s.find_last_not_of(" \t"); return end == std::string::npos ? std::string() : s.substr(0, end + 1); };
+    int extra_left = IsGoingLeft(dir)? textsize.width - GetMultiLineTextExtent(dc, ltrim(msg), cache, fontString, fontSet).width: 0;
+    int extra_right = IsGoingRight(dir)? textsize.width - GetMultiLineTextExtent(dc, rtrim(msg), cache, fontString, fontSet).width: 0;
     int xoffset=0;
     int yoffset=0;
 
@@ -920,7 +937,7 @@ wxImage *TextEffect::RenderTextLine(RenderBuffer &buffer,
 
     if (TextRotation == 0.0)
     {
-        wxRect rect(0,0,buffer.BufferWi,buffer.BufferHt);
+        xlRect rect(0,0,buffer.BufferWi,buffer.BufferHt);
         switch (dir)
         {
             case TEXTDIR_VECTOR: {
@@ -1055,12 +1072,12 @@ wxImage *TextEffect::RenderTextLine(RenderBuffer &buffer,
         if (colors.size() == 0) {
             colors.push_back(xlWHITE);
         }
-        CachedTextInfo inf(msg.ToStdString(), fontString, colors, rect);
+        CachedTextInfo inf(msg, fontString, colors, rect);
         wxImage *img = GetCache(buffer,id)->GetImage(inf);
         if (img == nullptr) {
             dc->Clear();
             SetFont(dc, fontString, colors[0]);
-            DrawLabel(dc, msg, rect, wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, GetCache(buffer,id), fontString, colors, perWord);
+            DrawLabel(dc, msg, rect, TEXT_ALIGN_CENTER_HORIZONTAL|TEXT_ALIGN_CENTER_VERTICAL, GetCache(buffer,id), fontString, colors, perWord);
             wxImage *i2 = dc->FlushAndGetImage();
             img = new wxImage(i2->GetSize());
             *img = i2->Copy();
@@ -1127,19 +1144,16 @@ wxImage *TextEffect::RenderTextLine(RenderBuffer &buffer,
     return buffer.GetTextDrawingContext()->FlushAndGetImage();
 }
 
-void TextEffect::FormatCountdown(int Countdown, int state, wxString& Line, RenderBuffer &buffer, wxString& msg, wxString Line_orig) const
+void TextEffect::FormatCountdown(int Countdown, int state, std::string& Line, RenderBuffer &buffer, std::string& msg, std::string Line_orig) const
 {
     long longsecs;
     int framesPerSec = 1000 / buffer.frameTimeInMs;
     int minutes,seconds;
 
-    wxDateTime dt;
-    wxTimeSpan ts;
-    wxString::const_iterator end;
-    wxString fmt = Line_orig;
-    wxString prepend = Line_orig;   //for prepended/appended text to countdown
-    wxString append = Line_orig;   //for prepended/appended text to countdown
-    wxString timePart = Line_orig;
+    std::string fmt = Line_orig;
+    std::string prepend = Line_orig;   //for prepended/appended text to countdown
+    std::string append = Line_orig;   //for prepended/appended text to countdown
+    std::string timePart = Line_orig;
 
     switch (Countdown)
     {
@@ -1148,23 +1162,22 @@ void TextEffect::FormatCountdown(int Countdown, int state, wxString& Line, Rende
                 // countdown seconds
                 if (state == 0)
                 {
-                    long tempLong;
-                    if (!Line.ToLong(&tempLong)) tempLong = 0;
+                    long tempLong = std::strtol(Line.c_str(), nullptr, 10);
                     GetCache(buffer, id)->timer_countdown = buffer.curPeriod + tempLong*framesPerSec + framesPerSec - 1;  // capture 0 period
                 }
                 seconds = (GetCache(buffer, id)->timer_countdown - buffer.curPeriod) / framesPerSec;
                 if (seconds < 0) seconds = 0;
-                msg = wxString(std::format("{}", seconds));
+                msg = std::format("{}", seconds);
             }
             break;
 //jwylie - 2016-11-01  -- enhancement: add minute seconds countdown
         case COUNTDOWN_MINUTES_SECONDS:
         {
-            if (timePart.Find('/') != -1)
+            if (timePart.find('/') != std::string::npos)
             {
-                timePart = timePart.AfterFirst('/').BeforeLast('/');
-                prepend = prepend.BeforeFirst('/');
-                append = append.AfterLast('/');
+                timePart = BeforeLast(AfterFirst(timePart, '/'), '/');
+                prepend = BeforeFirst(prepend, '/');
+                append = AfterLast(append, '/');
             }
             else
             {
@@ -1180,11 +1193,11 @@ void TextEffect::FormatCountdown(int Countdown, int state, wxString& Line, Rende
             {
                 minutes = std::strtol(minSec[0].c_str(), nullptr, 10);
                 seconds = (minutes * 60) + std::strtol(minSec[1].c_str(), nullptr, 10);
-                //MessageBoxA(NULL, "total seconds: " + wxString::Format("%i", seconds), "message", MB_ICONINFORMATION | MB_OK | MB_DEFBUTTON2);
+
             }
             else //invalid format
             {
-                msg = _T("Invalid Format");
+                msg = "Invalid Format";
                 break;
             }
             if (state == 0)
@@ -1204,7 +1217,7 @@ void TextEffect::FormatCountdown(int Countdown, int state, wxString& Line, Rende
             if (tempSeconds.size() == 1)
                 tempSeconds = "0" + tempSeconds;
 
-            msg = prepend + ' ' + wxString(std::format("{}", minutes)) + " : " + tempSeconds + append;
+            msg = prepend + ' ' + std::format("{}", minutes) + " : " + tempSeconds + append;
             }
            break;
 
@@ -1262,13 +1275,13 @@ void TextEffect::FormatCountdown(int Countdown, int state, wxString& Line, Rende
                 //time_local = time.Format(wxT("%T"), wxDateTime::A_EST).c_str();
                 if (Line.size() >= 4)
                 {
-                    wxChar delim = Line[0]; //use first char as date delimiter; date and format string follows that, separated by delimiter
-                    Line.Remove(0, 1); //.erase(Line.begin(), Line.begin() + 1); //remove leading delim
-                    //            Line.RemoveLast(); //remove delimiter
-                    fmt = Line.After(delim);
-                    Line.Truncate(Line.find(delim)); //remove fmt string, leaving only count down date
+                    char delim = Line[0]; //use first char as date delimiter; date and format string follows that, separated by delimiter
+                    Line.erase(0, 1); //remove leading delim
+                    fmt = AfterFirst(Line, delim);
+                    auto delimPos = Line.find(delim);
+                    if (delimPos != std::string::npos) Line.resize(delimPos); //remove fmt string, leaving only count down date
                 }
-                else fmt.Empty();
+                else fmt.clear();
             //CAUTION: fall thru here
         case COUNTDOWN_D_H_M_S:
         case COUNTDOWN_H_M_S:
@@ -1278,15 +1291,33 @@ void TextEffect::FormatCountdown(int Countdown, int state, wxString& Line, Rende
             // countdown to date
             if (state%framesPerSec == 0)   //1x/sec
             {
-                //            if ( dt.ParseDateTime(Line, &end) ) { //broken, force RFC822 for now -DJ
-                if (dt.ParseRfc822Date(Line, &end))
+                // Parse RFC822 date string (e.g. "Wed, 02 Oct 2015 15:00:00 +0200")
+                std::tm tmbuf = {};
+                std::istringstream iss(Line);
+                iss >> std::get_time(&tmbuf, "%a, %d %b %Y %H:%M:%S");
+                if (!iss.fail())
                 {
-                    // dt is (at least partially) valid, so calc # of seconds until then
-                    ts = dt.Subtract(wxDateTime::Now());
-                    wxLongLong ll = ts.GetSeconds();
-                    if (ll > LONG_MAX) ll = LONG_MAX;
-                    if (ll < 0) ll = 0;
-                    longsecs = ll.ToLong();
+                    // Parse timezone offset if present (e.g. "+0200" or "-0500")
+                    int tzOffsetSecs = 0;
+                    std::string tzStr;
+                    iss >> tzStr;
+                    if (!tzStr.empty() && (tzStr[0] == '+' || tzStr[0] == '-')) {
+                        int sign = (tzStr[0] == '+') ? 1 : -1;
+                        int tzVal = (int)std::strtol(tzStr.c_str() + 1, nullptr, 10);
+                        tzOffsetSecs = sign * ((tzVal / 100) * 3600 + (tzVal % 100) * 60);
+                    }
+                    // Convert parsed time to UTC time_t, then adjust for timezone
+#ifdef _MSC_VER
+                    std::time_t targetTime = _mkgmtime(&tmbuf) - tzOffsetSecs;
+#else
+                    std::time_t targetTime = timegm(&tmbuf) - tzOffsetSecs;
+#endif
+                    auto now = std::chrono::system_clock::now();
+                    auto nowTime = std::chrono::system_clock::to_time_t(now);
+                    int64_t diffSecs = static_cast<int64_t>(difftime(targetTime, nowTime));
+                    if (diffSecs > LONG_MAX) diffSecs = LONG_MAX;
+                    if (diffSecs < 0) diffSecs = 0;
+                    longsecs = static_cast<long>(diffSecs);
                 }
                 else
                 {
@@ -1298,11 +1329,10 @@ void TextEffect::FormatCountdown(int Countdown, int state, wxString& Line, Rende
             else
             {
                 longsecs = GetCache(buffer, id)->timer_countdown;
-                ts = wxTimeSpan(0, 0, longsecs, 0); //reconstruct wxTimeSpan so we can call .Format method -DJ
             }
             if (!longsecs)
             {
-                msg = _T("invalid date");    //show when invalid -DJ
+                msg = "invalid date";    //show when invalid -DJ
                 break;
             }
             int days = longsecs / 60 / 60 / 24;
@@ -1310,31 +1340,56 @@ void TextEffect::FormatCountdown(int Countdown, int state, wxString& Line, Rende
             minutes = (longsecs / 60) % 60;
             seconds = longsecs % 60;
             if (Countdown == COUNTDOWN_D_H_M_S)
-                msg = wxString(std::format("{}d {}h {}m {}s", days, hours, minutes, seconds));
+                msg = std::format("{}d {}h {}m {}s", days, hours, minutes, seconds);
             else if (Countdown == COUNTDOWN_H_M_S)
-                msg = wxString(std::format("{} : {} : {}", hours, minutes, seconds));
+                msg = std::format("{} : {} : {}", hours, minutes, seconds);
             else if (Countdown == COUNTDOWN_S)
-                msg = wxString(std::format("{}", 60 * 60 * hours + 60 * minutes + seconds));
+                msg = std::format("{}", 60 * 60 * hours + 60 * minutes + seconds);
             else if (Countdown == COUNTDOWN_FREEFMT)
                 //            msg = _T("%%") + Line + _T("%%") + fmt + _T("%%");
-                if (fmt == "" || (fmt.EndsWith("%") && !fmt.EndsWith("%%")))
+                if (fmt == "" || (EndsWith(fmt, "%") && !EndsWith(fmt, "%%")))
                 {
-                    msg = _T("invalid format");
+                    msg = "invalid format";
                 }
                 else
                 {
-                    msg = ts.Format(fmt); //dt.Format(fmt)
+                    // Format timespan using wxTimeSpan-compatible format specifiers:
+                    // %H=hours, %M=minutes, %S=seconds, %l=milliseconds, %D=days, %E=weeks, %%=literal %
+                    long totalHours = longsecs / 3600;
+                    int fmtMinutes = (longsecs / 60) % 60;
+                    int fmtSeconds = longsecs % 60;
+                    long fmtDays = longsecs / 86400;
+                    long fmtWeeks = longsecs / (7 * 86400);
+                    std::string result;
+                    for (size_t i = 0; i < fmt.length(); i++) {
+                        if (fmt[i] == '%' && i + 1 < fmt.length()) {
+                            i++;
+                            switch (fmt[i]) {
+                                case 'H': result += std::format("{:02}", totalHours); break;
+                                case 'M': result += std::format("{:02}", fmtMinutes); break;
+                                case 'S': result += std::format("{:02}", fmtSeconds); break;
+                                case 'l': result += "000"; break; // no sub-second precision in countdown
+                                case 'D': result += std::format("{}", fmtDays); break;
+                                case 'E': result += std::format("{}", fmtWeeks); break;
+                                case '%': result += '%'; break;
+                                default: result += '%'; result += fmt[i]; break;
+                            }
+                        } else {
+                            result += fmt[i];
+                        }
+                    }
+                    msg = result;
                 }
             else //if (Countdown == COUNTDOWN_M_or_S)
                 if (60 * hours + minutes < 5) //COUNTDOWN_M_or_S: show seconds
-                    msg = wxString(std::format("{}", 60 * 60 * hours + 60 * minutes + seconds));
+                    msg = std::format("{}", 60 * 60 * hours + 60 * minutes + seconds);
                 else //COUNTDOWN_M_or_S: show minutes
-                    msg = wxString(std::format("{} m", 60 * hours + minutes));
+                    msg = std::format("{} m", 60 * hours + minutes);
         }
             break;
         default:
             msg=Line;
-            msg.Replace("\\n", "\n", true); //allow vertical spacing (mainly for up/down) -DJ
+            Replace(msg, "\\n", "\n"); //allow vertical spacing (mainly for up/down) -DJ
             break;
     }
 }
@@ -1342,12 +1397,12 @@ void TextEffect::FormatCountdown(int Countdown, int state, wxString& Line, Rende
 #define msgReplace(a, b, c) \
     do                      \
     {                    \
-       if (a.Contains(b)) { \
-           a.Replace(b, (c)); \
+       if (Contains(a, b)) { \
+           Replace(a, b, (c)); \
        } \
     } while (0)
 
-void TextEffect::ReplaceVaribles(wxString& msg, RenderBuffer& buffer) const
+void TextEffect::ReplaceVaribles(std::string& msg, RenderBuffer& buffer) const
 {
     msgReplace(msg, "${TITLE}", buffer.GetXmlHeaderInfo(HEADER_INFO_TYPES::SONG));
     msgReplace(msg, "${SONG}", buffer.GetXmlHeaderInfo(HEADER_INFO_TYPES::SONG));
@@ -1362,13 +1417,13 @@ void TextEffect::ReplaceVaribles(wxString& msg, RenderBuffer& buffer) const
     msgReplace(msg, "${URL}", buffer.GetXmlHeaderInfo(HEADER_INFO_TYPES::URL));
     msgReplace(msg, "${WEBSITE}", buffer.GetXmlHeaderInfo(HEADER_INFO_TYPES::WEBSITE));
 
-    if (msg.Contains("${UPPER}")) {
-        msg.Replace("${UPPER}", "");
-        msg = msg.Upper();
+    if (Contains(msg, "${UPPER}")) {
+        Replace(msg, "${UPPER}", "");
+        msg = Upper(msg);
     }
-    if (msg.Contains("${LOWER}")) {
-        msg.Replace("${LOWER}", "");
-        msg = msg.Lower();
+    if (Contains(msg, "${LOWER}")) {
+        Replace(msg, "${LOWER}", "");
+        msg = Lower(msg);
     }
 }
 
@@ -1444,28 +1499,32 @@ void TextEffect::RenderXLText(Effect* effect, const SettingsMap& settings, Rende
     }
 
     font_mgr.init();
-    wxString xl_font = settings["CHOICE_Text_Font"];
+    std::string xl_font = settings["CHOICE_Text_Font"];
     xlFont* font = font_mgr.get_font(xl_font);
     wxBitmap* bmp = font->get_bitmap();
     wxImage image = bmp->ConvertToImage();
     int char_width = font->GetWidth();
     int char_height = font->GetHeight();
 
-    wxString text = ToWXString(settings["TEXTCTRL_Text"]);
-    text.Replace("\\n", "\n");
+    std::string text = settings["TEXTCTRL_Text"];
+    Replace(text, "\\n", "\n");
 
-    wxString filename = settings["FILEPICKERCTRL_Text_File"];
-    wxString lyricTrack = settings["CHOICE_Text_LyricTrack"];
+    std::string filename = settings["FILEPICKERCTRL_Text_File"];
+    std::string lyricTrack = settings["CHOICE_Text_LyricTrack"];
 
     if (text == "") {
         if (FileExists(filename)) {
-            wxFile file(filename);
-            if (file.IsOpened()) {
-                wxString fileContent;
-                if (file.ReadAll(&fileContent)) {
+            std::ifstream file(filename, std::ios::in);
+            if (file.is_open()) {
+                std::ostringstream ss;
+                ss << file.rdbuf();
+                std::string fileContent = ss.str();
+                file.close();
+
+                if (!fileContent.empty()) {
                     auto lines = Split(fileContent, '\n');
 
-                    text.Clear();
+                    text.clear();
                     int lineCount = std::min((int)lines.size(), MAXTEXTLINES);
 
                     for (int i = 0; i < lineCount; i++) {
@@ -1475,18 +1534,17 @@ void TextEffect::RenderXLText(Effect* effect, const SettingsMap& settings, Rende
                         text += lines[i];
                     }
 
-                    while (!text.IsEmpty() && text.Last() == '\n') {
-                        text.RemoveLast();
+                    while (!text.empty() && text.back() == '\n') {
+                        text.pop_back();
                     }
                 }
-                file.Close();
             }
         }
         else if (lyricTrack != "") {
             Element* t = nullptr;
             for (int i = 0; i < mSequenceElements->GetElementCount(); i++) {
-                auto lt = lyricTrack.BeforeLast('-');
-                lt = lt.Left(lt.size() - 1);
+                auto lt = BeforeLast(lyricTrack, '-');
+                lt = lt.substr(0, lt.size() - 1);
                 Element* e = mSequenceElements->GetElement(i);
                 if (e->GetEffectLayerCount() > 1 && e->GetType() == ElementType::ELEMENT_TYPE_TIMING && e->GetName() == lt) {
                     t = e;
@@ -1496,7 +1554,7 @@ void TextEffect::RenderXLText(Effect* effect, const SettingsMap& settings, Rende
             if (t != nullptr) {
                 long time = buffer.curPeriod * buffer.frameTimeInMs;
                 EffectLayer* el = nullptr;
-                if (lyricTrack.EndsWith(" - Phrases")) {
+                if (EndsWith(lyricTrack, " - Phrases")) {
                     el = t->GetEffectLayer(0);
                 }
                 else {
@@ -1513,14 +1571,14 @@ void TextEffect::RenderXLText(Effect* effect, const SettingsMap& settings, Rende
         }
     }
 
-    wxString msg = text;
+    std::string msg = text;
     int Countdown = TextCountDownIndex(settings["CHOICE_Text_Count"]);
     if (Countdown > 0) {
         int tspeed = std::strtol(settings.Get("TEXTCTRL_Text_Speed", "10").c_str(), nullptr, 10);
         int state = (buffer.curPeriod - buffer.curEffStartPer) * tspeed * buffer.frameTimeInMs / 50;
-        wxString Line = text;
+        std::string Line = text;
         FormatCountdown(Countdown, state, Line, buffer, msg, text);
-        msg.Replace(" : ", ":");
+        Replace(msg, " : ", ":");
     }
     ReplaceVaribles(msg, buffer);
     text = msg;
@@ -1589,7 +1647,7 @@ void TextEffect::RenderXLText(Effect* effect, const SettingsMap& settings, Rende
     if (!lines.empty()) {
         int curPos = 0;
         for (size_t line_idx = 0; line_idx < lines.size(); line_idx++) {
-            const wxString& line = lines[line_idx];
+            const std::string& line = lines[line_idx];
             int line_offset_left = OffsetLeft - line_lengths[line_idx] / 2;
             if (rotate_90 || vertical) {
                 line_offset_left = OffsetLeft;
@@ -1606,7 +1664,7 @@ void TextEffect::RenderXLText(Effect* effect, const SettingsMap& settings, Rende
                 int y_start_corner = (ascii / 8) * (char_height + 1) + 1;
 
                 int actual_width = font->GetCharWidth(ascii);
-                wxASSERT(actual_width > 0);
+                assert(actual_width > 0);
                 if (rotate_90 && up) {
                     OffsetTop -= actual_width;
                 }

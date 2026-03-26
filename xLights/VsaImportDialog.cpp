@@ -22,11 +22,12 @@
 #include "render/SequenceElements.h"
 #include "xLightsMain.h"
 #include "models/Model.h"
-#include "VSAFile.h"
+#include "import_export/VSAFile.h"
 #include "support/FastComboEditor.h"
 #include "support/GridCellChoiceRenderer.h"
 #include "support/EzGrid.h"
 #include "UtilFunctions.h"
+#include "ui/wxUtilities.h"
 
 //(*IdInit(VsaImportDialog)
 const long VsaImportDialog::ID_STATICTEXT39 = wxNewId();

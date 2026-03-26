@@ -17,6 +17,7 @@
 #include "Shapes.h"
 #include "../support/VectorMath.h"
 #include "UtilFunctions.h"
+#include "ui/wxUtilities.h"
 #include "RulerObject.h"
 
 #include <log.h>
@@ -337,13 +338,13 @@ bool PolyPointScreenLocation::HitTest3D(glm::vec3& ray_origin, glm::vec3& ray_di
     return ret_value;
 }
 
-wxCursor PolyPointScreenLocation::CheckIfOverHandles3D(glm::vec3& ray_origin, glm::vec3& ray_direction, int& handle, float zoom, int scale) const
+CursorType PolyPointScreenLocation::CheckIfOverHandles3D(glm::vec3& ray_origin, glm::vec3& ray_direction, int& handle, float zoom, int scale) const
 {
-    wxCursor return_value = wxCURSOR_DEFAULT;
+    CursorType return_value = CursorType::Default;
     handle = NO_HANDLE;
 
     if (_locked) {
-        return wxCURSOR_DEFAULT;
+        return CursorType::Default;
     }
 
     return_value = CheckIfOverAxisHandles3D(ray_origin, ray_direction, handle, zoom, scale);
@@ -387,7 +388,7 @@ wxCursor PolyPointScreenLocation::CheckIfOverHandles3D(glm::vec3& ray_origin, gl
                         if (intersection_distance < distance) {
                             distance = intersection_distance;
                             handle = ((i == 0) ? s | HANDLE_CP0 : s | HANDLE_CP1);
-                            return_value = wxCURSOR_HAND;
+                            return_value = CursorType::Hand;
                         }
                     }
                 }
@@ -415,7 +416,7 @@ wxCursor PolyPointScreenLocation::CheckIfOverHandles3D(glm::vec3& ray_origin, gl
                 if (intersection_distance < distance) {
                     distance = intersection_distance;
                     handle = i;
-                    return_value = wxCURSOR_HAND;
+                    return_value = CursorType::Hand;
                 }
             }
         }
@@ -431,7 +432,7 @@ wxCursor PolyPointScreenLocation::CheckIfOverHandles3D(glm::vec3& ray_origin, gl
             if (mPos[i].has_curve && mPos[i].curve != nullptr) {
                 if (mPos[i].curve->HitTest3D(ray_origin, ray_direction, intersection_distance)) {
                     handle = i | HANDLE_SEGMENT;
-                    return_value = wxCURSOR_DEFAULT;
+                    return_value = CursorType::Default;
                 }
             }
             else {
@@ -448,7 +449,7 @@ wxCursor PolyPointScreenLocation::CheckIfOverHandles3D(glm::vec3& ray_origin, gl
                         if (distance < intersection_distance) {
                             intersection_distance = distance;
                             handle = i | HANDLE_SEGMENT;
-                            return_value = wxCURSOR_DEFAULT;
+                            return_value = CursorType::Default;
                         }
                     }
                 }
@@ -459,11 +460,11 @@ wxCursor PolyPointScreenLocation::CheckIfOverHandles3D(glm::vec3& ray_origin, gl
     return return_value;
 }
 
-wxCursor PolyPointScreenLocation::CheckIfOverHandles(ModelPreview* preview, int& handle, int x, int y) const
+CursorType PolyPointScreenLocation::CheckIfOverHandles(ModelPreview* preview, int& handle, int x, int y) const
 {
     assert(!preview->Is3D());
 
-    wxCursor return_value = wxCURSOR_DEFAULT;
+    CursorType return_value = CursorType::Default;
 
     if (preview == nullptr) return return_value;
 
@@ -472,7 +473,7 @@ wxCursor PolyPointScreenLocation::CheckIfOverHandles(ModelPreview* preview, int&
     int scale = preview->GetHandleScale();
 
     if (_locked) {
-        return wxCURSOR_DEFAULT;
+        return CursorType::Default;
     }
 
     //Get a world position for the mouse
@@ -518,7 +519,7 @@ wxCursor PolyPointScreenLocation::CheckIfOverHandles(ModelPreview* preview, int&
                         ModelMatrix)
                         ) {
                         handle = ((i == 0) ? s | HANDLE_CP0 : s | HANDLE_CP1);
-                        return_value = wxCURSOR_HAND;
+                        return_value = CursorType::Hand;
                         break;
                     }
                 }
@@ -537,7 +538,7 @@ wxCursor PolyPointScreenLocation::CheckIfOverHandles(ModelPreview* preview, int&
                 ModelMatrix)
                 ) {
                 handle = i;
-                return_value = wxCURSOR_HAND;
+                return_value = CursorType::Hand;
                 break;
             }
         }
@@ -550,7 +551,7 @@ wxCursor PolyPointScreenLocation::CheckIfOverHandles(ModelPreview* preview, int&
                 if (mPos[i].curve->HitTest(ray_origin)) {
                     if (i != selected_segment) {
                         handle = i | HANDLE_SEGMENT;
-                        return_value = wxCURSOR_BULLSEYE;
+                        return_value = CursorType::Bullseye;
                     }
                     break;
                 }
@@ -565,7 +566,7 @@ wxCursor PolyPointScreenLocation::CheckIfOverHandles(ModelPreview* preview, int&
                         ) {
                         if (i != selected_segment) {
                             handle = i | HANDLE_SEGMENT;
-                            return_value = wxCURSOR_BULLSEYE;
+                            return_value = CursorType::Bullseye;
                         }
                         break;
                     }
@@ -593,7 +594,7 @@ wxCursor PolyPointScreenLocation::CheckIfOverHandles(ModelPreview* preview, int&
                 Identity)
                 ) {
                 handle = h;
-                return_value = wxCURSOR_HAND;
+                return_value = CursorType::Hand;
                 break;
             }
         }
@@ -1627,7 +1628,7 @@ void PolyPointScreenLocation::DeleteHandle(int handle) {
     selected_segment = -1;
 }
 
-wxCursor PolyPointScreenLocation::InitializeLocation(int &handle, int x, int y, const std::vector<NodeBaseClassPtr> &Nodes, ModelPreview* preview) {
+CursorType PolyPointScreenLocation::InitializeLocation(int &handle, int x, int y, const std::vector<NodeBaseClassPtr> &Nodes, ModelPreview* preview) {
     float zoom = 1.0;
     int scale = 1;
     if (preview != nullptr) {
@@ -1677,7 +1678,7 @@ wxCursor PolyPointScreenLocation::InitializeLocation(int &handle, int x, int y, 
     handle_aabb_max[2].z = hw;
 
     handle = 2;
-    return wxCURSOR_SIZING;
+    return CursorType::Sizing;
 }
 
 std::string PolyPointScreenLocation::GetDimension(float factor) const

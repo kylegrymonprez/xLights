@@ -9,6 +9,7 @@
  **************************************************************/
 
 #include <algorithm>
+#include <cassert>
 #include <thread>
 #include <vector>
 
@@ -25,6 +26,7 @@
 
 #include <log.h>
 #include "effects/DMXEffect.h"
+#include "../utils/ThreadUtils.h"
 
 std::atomic_int EffectLayer::exclusive_index(0);
 const std::string EffectLayer::NO_NAME("");
@@ -58,7 +60,7 @@ EffectLayer::~EffectLayer()
 // Of course, the best option is to use a Mac where there aren't any
 // main thread rendered effects
 std::unique_lock<std::recursive_mutex> EffectLayer::acquireLockWaitForRender() {
-    if (wxThread::IsMain()) {
+    if (IsMainThread()) {
         std::unique_lock<std::recursive_mutex> locker(lock, std::try_to_lock);
         while (!locker.owns_lock()) {
             // could not get the lock, we'll render any main thread effects
@@ -177,7 +179,7 @@ void EffectLayer::DeleteEffect(int id)
             return;
         }
     }
-    wxASSERT(false);
+    assert(false);
 }
 
 void EffectLayer::RemoveAllEffects(UndoManager *undo_mgr)
@@ -218,7 +220,7 @@ Effect* EffectLayer::AddEffect(int id, const std::string &n, const std::string &
     } else {
         em = &(xLightsApp::GetFrame()->GetEffectManager());
     }
-    wxASSERT(em != nullptr);
+    assert(em != nullptr);
 
     // really dont want to add effects which look invalid - some imports result in this
     if (startTimeMS > endTimeMS) return nullptr;
@@ -247,7 +249,7 @@ Effect* EffectLayer::AddEffect(int id, const std::string &n, const std::string &
     if (startTimeMS < 0) startTimeMS = 0;
 
     Effect* e = new Effect(em, this, id, name, settings, palette, startTimeMS, endTimeMS, Selected, Protected, importing);
-    wxASSERT(e != nullptr);
+    assert(e != nullptr);
     mEffects.push_back(e);
     if (!suppress_sort) {
         SortEffects();
@@ -584,18 +586,6 @@ std::vector<Effect*> EffectLayer::GetAllEffectsByTime(int startTimeMS, int endTi
     return effs;
 }
 
-void EffectLayer::PlayEffect(Effect* effect)
-{
-    EventPlayEffectArgs playArgs;
-    wxCommandEvent eventPlayModelEffect(EVT_PLAY_MODEL_EFFECT);
-    playArgs.element = GetParentElement();
-    playArgs.effect = effect;
-    playArgs.renderEffect = false;
-    eventPlayModelEffect.SetClientData(&playArgs);
-    // Pass it this way to prevent risk of effect being deleted before pointer is used
-    GetParentElement()->GetSequenceElements()->GetXLightsFrame()->GetEventHandler()->ProcessEvent(eventPlayModelEffect);
-}
-
 Effect* EffectLayer::SelectEffectUsingDescription(std::string description)
 {
     for (int i = 0; i < mEffects.size(); i++)
@@ -603,7 +593,6 @@ Effect* EffectLayer::SelectEffectUsingDescription(std::string description)
         if (mEffects[i]->GetDescription() == description)
         {
             mEffects[i]->SetSelected(EFFECT_SELECTED);
-            PlayEffect(mEffects[i]);
             return mEffects[i];
         }
     }
@@ -631,7 +620,6 @@ Effect* EffectLayer::SelectEffectUsingTime(int time)
         if (time >= mEffects[i]->GetStartTimeMS() && time < mEffects[i]->GetEndTimeMS())
         {
             mEffects[i]->SetSelected(EFFECT_SELECTED);
-            PlayEffect(mEffects[i]);
             return mEffects[i];
         }
     }
@@ -1200,14 +1188,14 @@ void EffectLayer::ApplyEffectSettingToSelected(EffectsGrid* grid, UndoManager& u
         if (eff1 == nullptr && effectName != "")
         {
             spdlog::error("Effect not found: '{}'", (const char *)effectName.c_str());
-            wxASSERT(false);
+            assert(false);
         }
         RenderableEffect* eff2 = effectManager.GetEffect(mEffects[i]->GetEffectName());
         if (eff2 == nullptr)
         {
             // this cant happen
             spdlog::error("Effect not found when scanning effects: '{}'", (const char *)mEffects[i]->GetEffectName().c_str());
-            wxASSERT(false);
+            assert(false);
         }
         if ((effectName == "" || eff1 == nullptr || eff1->GetId() == eff2->GetId()) &&
             ((mEffects[i]->GetSelected() == EFFECT_LT_SELECTED) ||
@@ -1231,13 +1219,13 @@ void EffectLayer::ApplyButtonPressToSelected(EffectsGrid* grid, UndoManager& und
         RenderableEffect* eff1 = effectManager.GetEffect(effectName);
         if (eff1 == nullptr && effectName != "") {
             spdlog::error("Effect not found: '{}'", (const char*)effectName.c_str());
-            wxASSERT(false);
+            assert(false);
         }
         RenderableEffect* eff2 = effectManager.GetEffect(mEffects[i]->GetEffectName());
         if (eff2 == nullptr) {
             // this cant happen
             spdlog::error("Effect not found when scanning effects: '{}'", (const char*)mEffects[i]->GetEffectName().c_str());
-            wxASSERT(false);
+            assert(false);
         }
         if ((effectName == "" || eff1 == nullptr || eff2 == nullptr || eff1->GetId() == eff2->GetId()) &&
             ((mEffects[i]->GetSelected() == EFFECT_LT_SELECTED) ||

@@ -35,12 +35,14 @@
 #include <math.h>
 #endif
 
+#include <cassert>
+#include <chrono>
 #include <mutex>
 #include "FX.h"
 
 #ifdef XLIGHTS_FX
 #define boolean bool
-#define GET_MILLIS() ((uint32_t) wxGetLocalTimeMillis().GetLo())
+#define GET_MILLIS() ((uint32_t)(std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count()))
 #define max std::max
 #define min std::min
 
@@ -494,7 +496,7 @@ uint8_t DecodeMode(const std::string& mode)
         i++;
     }
 
-    wxASSERT(false);
+    assert(false);
     return -1;
 }
 
@@ -507,12 +509,12 @@ uint8_t DecodePalette(const std::string& palette)
         std::unique_lock lk(mtx);
 
         if (palettes.size() == 0) {
-            wxString names = JSON_palette_names;
-            names.Replace("\n", "");
-            names.Replace("\"", "");
-            names.Replace("[", "");
-            names.Replace("]", "");
-            palettes = Split(names.ToStdString(), ',');
+            std::string names = JSON_palette_names;
+            std::erase(names, '\n');
+            std::erase(names, '"');
+            std::erase(names, '[');
+            std::erase(names, ']');
+            palettes = Split(names, ',');
         }
     }
 
@@ -523,7 +525,7 @@ uint8_t DecodePalette(const std::string& palette)
         i++;
     }
 
-    wxASSERT(false);
+    assert(false);
     return 0;
 }
 
@@ -566,7 +568,7 @@ uint16_t random16(uint16_t limit = 0xFFFF)
 
 uint32_t WS2812FX::millis() const
 {
-    wxASSERT(_buffer != nullptr);
+    assert(_buffer != nullptr);
     return (_buffer->curPeriod - _buffer->curEffStartPer) * _buffer->frameTimeInMs;
 }
 
@@ -1313,7 +1315,7 @@ void WS2812FX::fade_out(uint8_t rate, uint32_t toColour)
 
 uint32_t WS2812FX::getPixelColor(uint16_t n)
 {
-    wxASSERT(_buffer != nullptr);
+    assert(_buffer != nullptr);
     return _buffer->GetTempPixel(n, 0).GetRGB(false);
 }
 

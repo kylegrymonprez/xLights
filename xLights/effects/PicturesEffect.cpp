@@ -12,11 +12,6 @@
 #include <filesystem>
 #include <format>
 
-#include <wx/regex.h>
-#include <wx/tokenzr.h>
-#include <wx/gifdecod.h>
-#include <wx/image.h>
-
 #include "../../include/pictures-16.xpm"
 #include "../../include/pictures-24.xpm"
 #include "../../include/pictures-32.xpm"
@@ -31,6 +26,7 @@
 #include "../render/SequenceFile.h"
 #include "../models/Model.h"
 #include "../UtilFunctions.h"
+#include "../ui/wxUtilities.h"
 #include "../ExternalHooks.h"
 #include "../xLightsMain.h"
 #include "../utils/xlPoint.h"
@@ -78,8 +74,8 @@ std::list<std::string> PicturesEffect::CheckEffectSettings(const SettingsMap& se
             }
 
             if (!renderCache) {
-                int ih = img->GetImageSize().GetHeight();
-                int iw = img->GetImageSize().GetWidth();
+                int ih = img->GetImageHeight();
+                int iw = img->GetImageWidth();
 
 #define IMAGESIZETHRESHOLD 10
                 if (ih > IMAGESIZETHRESHOLD * model->GetDefaultBufferHt() || iw > IMAGESIZETHRESHOLD * model->GetDefaultBufferWi()) {
@@ -127,15 +123,15 @@ void PicturesEffect::adjustSettings(const std::string &version, Effect *effect, 
         if (!std::filesystem::path(file).is_absolute()) {
             // relative path: just let GetImage() resolve it below
         } else if (!FileExists(file, false)) {
-            wxString fixed = FixFile("", file);
+            std::string fixed = FixFile("", file);
             // If the resolved path is inside a show/media directory, store as
             // relative so the sequence is portable across machines.
-            wxString rel = MakeRelativeFile(fixed);
-            settings["E_TEXTCTRL_Pictures_Filename"] = rel.IsEmpty() ? fixed : rel;
+            std::string rel = MakeRelativeFile(fixed);
+            settings["E_TEXTCTRL_Pictures_Filename"] = rel.empty() ? fixed : rel;
         } else {
             // File exists at its absolute path — still prefer relative storage
-            wxString rel = MakeRelativeFile(file);
-            if (!rel.IsEmpty())
+            std::string rel = MakeRelativeFile(file);
+            if (!rel.empty())
                 settings["E_TEXTCTRL_Pictures_Filename"] = rel;
         }
         std::string NewPictureName = settings["E_TEXTCTRL_Pictures_Filename"];
@@ -305,9 +301,9 @@ std::list<std::string> PicturesEffect::GetFileReferences(Model* model, const Set
     if (!file.empty()) {
         // Relative paths must be resolved to absolute so callers can locate the file.
         if (!std::filesystem::path(file).is_absolute()) {
-            wxString resolved = FixFile("", file);
-            if (!resolved.IsEmpty() && FileExists(resolved))
-                res.push_back(resolved.ToStdString());
+            std::string resolved = FixFile("", file);
+            if (!resolved.empty() && FileExists(resolved))
+                res.push_back(resolved);
         } else if (FileExists(file)) {
             res.push_back(file);
         }
@@ -448,13 +444,14 @@ void PicturesEffect::Render(RenderBuffer& buffer,
         scale_image = true;
     }
 
-    wxSize imageSize = cache->imageCache->GetImageSize();
-    int imgwidth = imageSize.GetWidth();
-    int imght = imageSize.GetHeight();
+    int imageWidth = cache->imageCache->GetImageWidth();
+    int imageHeight = cache->imageCache->GetImageHeight();
+    int imgwidth = imageWidth;
+    int imght = imageHeight;
     int yoffset = (BufferHt + imght) / 2; //centered if sizes don't match
     int xoffset = (imgwidth - BufferWi) / 2; //centered if sizes don't match
 
-    std::shared_ptr<wxImage> image;
+    std::shared_ptr<xlImage> image;
 
 
     if (scale_to_fit == "Scale To Fit" && (BufferWi != imgwidth || BufferHt != imght)) {
@@ -465,14 +462,14 @@ void PicturesEffect::Render(RenderBuffer& buffer,
         yoffset = (BufferHt + imght) / 2; //centered if sizes don't match
         xoffset = (imgwidth - BufferWi) / 2; //centered if sizes don't match
     } else if (scale_to_fit == "Scale Keep Aspect Ratio" || scale_to_fit == "Scale Keep Aspect Ratio Crop") {
-        float xr = (float)BufferWi / (float)imageSize.GetWidth();
-        float yr = (float)BufferHt / (float)imageSize.GetHeight();
+        float xr = (float)BufferWi / (float)imageWidth;
+        float yr = (float)BufferHt / (float)imageHeight;
         float sc = std::min(xr, yr);
         if (scale_to_fit.find("Crop") != std::string::npos) {
             sc = std::max(xr, yr);
         }
-        float newWid = sc * (float)imageSize.GetWidth();
-        float newHi = sc * (float)imageSize.GetHeight();
+        float newWid = sc * (float)imageWidth;
+        float newHi = sc * (float)imageHeight;
         image = cache->imageCache->GetScaledImage(cache->frame, newWid, newHi, suppressGIFBackground);
 
         imgwidth = image->GetWidth();
@@ -483,8 +480,8 @@ void PicturesEffect::Render(RenderBuffer& buffer,
         if ((start_scale != 100 || end_scale != 100) && scale_image) {
             int delta_scale = end_scale - start_scale;
             int current_scale = start_scale + delta_scale * position;
-            imgwidth = (imageSize.GetWidth() * current_scale) / 100;
-            imght = (imageSize.GetHeight() * current_scale) / 100;
+            imgwidth = (imageWidth * current_scale) / 100;
+            imght = (imageHeight * current_scale) / 100;
             imgwidth = std::max(imgwidth, 1);
             imght = std::max(imght, 1);
             image = cache->imageCache->GetScaledImage(cache->frame, imgwidth, imght, suppressGIFBackground);
@@ -560,7 +557,7 @@ void PicturesEffect::Render(RenderBuffer& buffer,
     }
     // copy image to buffer
     xlColor c;
-    const wxImage &img = *image.get();
+    const xlImage &img = *image.get();
     if (!img.IsOk()) {
         return;
     }

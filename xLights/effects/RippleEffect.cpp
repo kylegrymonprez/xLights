@@ -14,6 +14,7 @@
 
 #include "../utils/string_utils.h"
 
+#include <cassert>
 #include <filesystem>
 #include <format>
 
@@ -21,10 +22,11 @@
 #include "../render/RenderBuffer.h"
 #include "../UtilClasses.h"
 #include "../ExternalHooks.h"
+#include "../ui/wxUtilities.h"
 #include "../models/Model.h"
 #include "../xLightsMain.h"
 
-#include "nanosvg/src/nanosvg.h"
+#include "../utils/nanosvg_xl.h"
 
 #include "../../include/ripple-16.xpm"
 #include "../../include/ripple-24.xpm"
@@ -1112,7 +1114,7 @@ void RippleEffect::Render(Effect* effect, const SettingsMap& SettingsMap, Render
         Drawpresent(buffer, Movement, xc, yc, radius, hsv, Ripple_Thickness, CheckBox_Ripple3D);
         break;
     default:
-        wxASSERT(false);
+        assert(false);
         break;
     }
 }
@@ -1237,7 +1239,7 @@ void RippleEffect::Drawstar(RenderBuffer& buffer, int Movement, int xc, int yc, 
         offsetangle = 90.0 - 360.0 / 8;
         break;
     default:
-        wxASSERT(false);
+        assert(false);
         break;
     }
 

@@ -17,6 +17,7 @@
 
 #include "../../../ExternalHooks.h"
 #include "../../../UtilFunctions.h"
+#include "../../wxUtilities.h"
 #include "../../../render/SequenceMedia.h"
 #include "../../../ManageMediaPanel.h"
 #include "../../../xLightsMain.h"
@@ -24,6 +25,7 @@
 #include "../../../render/EffectLayer.h"
 #include "../../../render/Element.h"
 #include "../../../render/SequenceElements.h"
+#include "../../wxUtilities.h"
 
 static const wxString strSupportedImageTypes = "Image files|*.png;*.bmp;*.jpg;*.gif;*.jpeg"
                                                ";*.webp"
@@ -105,7 +107,7 @@ void xlGridCanvasPictures::LoadAndProcessImage()
             if (entry && entry->IsOk()) {
                 auto frame = entry->GetFrame(0, false);
                 if (frame && frame->IsOk()) {
-                    image = *frame;
+                    image = xlImageToWxImage(*frame);
                     imageCount = entry->GetImageCount();
                     imageIndex = 0;
                     loadedFromMedia = true;
@@ -228,7 +230,7 @@ void xlGridCanvasPictures::SaveAsImage()
             newName += ".png";
 
         std::string nameStr = newName.ToStdString();
-        mSequenceMedia->AddEmbeddedImage(nameStr, image);
+        mSequenceMedia->AddEmbeddedImage(nameStr, wxImageToXlImage(image));
         PictureName = newName;
         UpdateRenderedImage();
         mModified = true;
@@ -382,7 +384,7 @@ void xlGridCanvasPictures::SaveImageToMedia()
 {
     // Overwrite the existing embedded entry with the current image data
     if (mSequenceMedia == nullptr) return;
-    mSequenceMedia->AddEmbeddedImage(PictureName.ToStdString(), image);
+    mSequenceMedia->AddEmbeddedImage(PictureName.ToStdString(), wxImageToXlImage(image));
     UpdateRenderedImage();
 }
 

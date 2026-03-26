@@ -11,6 +11,7 @@
 #include "ShapeEffect.h"
 
 #include "../utils/xlPoint.h"
+#include <cassert>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -22,12 +23,12 @@
 #include "../models/Model.h"
 #include "../render/SequenceElements.h"
 #include "UtilFunctions.h"
+#include "ui/wxUtilities.h"
 #include "AudioManager.h"
 #include "../ExternalHooks.h"
 #include "../xLightsMain.h" 
 
-#include "nanosvg/src/nanosvg.h"
-#include "nanosvg/src/nanosvgrast.h"
+#include "../utils/nanosvg_xl.h"
 #include "nanosvgrast_impl.h"
 
 #include <regex>
@@ -687,7 +688,7 @@ void ShapeEffect::Render(Effect *effect, const SettingsMap &SettingsMap, RenderB
 			Drawellipse(buffer, it->_centre.x, it->_centre.y, it->_size, points, color, thickness, rotation);
 			break;
         default:
-            wxASSERT(false);
+            assert(false);
             break;
         }
 
@@ -1178,13 +1179,14 @@ void ShapeEffect::Drawemoji(RenderBuffer& buffer, int xc, int yc, double radius,
         wxUniChar ch2 = emojiTone;
         text.Append(wxString(ch2));
     }
+    std::string textStr = text.ToStdString();
 
     double width;
     double height;
-    context->GetTextExtent(text, &width, &height);
+    context->GetTextExtent(textStr, &width, &height);
 
     context->SetOverlayMode(true);
-    context->DrawText(text, std::round((float)xc - width / 2.0), std::round((float)(buffer.BufferHt - yc) - height / 2.0));
+    context->DrawText(textStr, std::round((float)xc - width / 2.0), std::round((float)(buffer.BufferHt - yc) - height / 2.0));
     context->SetOverlayMode(false);
 }
 

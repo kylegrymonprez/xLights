@@ -19,6 +19,7 @@
 #include "SequencePackage.h"
 #include "xLightsMain.h"
 #include "ExternalHooks.h"
+#include "ui/wxUtilities.h"
 
 #include <log.h>
 
@@ -212,6 +213,7 @@ void SequencePackage::Extract()
                     spdlog::error("Could not create sequence file at '{}'", (const char*)fnOutput.GetFullName().c_str());
                 } else {
                     zis.Read(fos);
+                    fos.Close();
                     wxString ext = fnOutput.GetExt();
 
                     if (ext == "xsq") {
@@ -242,7 +244,6 @@ void SequencePackage::Extract()
                         _media[fnOutput.GetFullName()] = fnOutput;
                     }
                 }
-                fos.Close();
             }
         }
 

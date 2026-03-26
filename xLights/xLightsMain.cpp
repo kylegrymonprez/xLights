@@ -58,6 +58,12 @@
 #include "ExternalHooks.h"
 #include "FindDataPanel.h"
 #include "render/GPURenderUtils.h"
+#include "render/SequenceMedia.h"
+#include "ui/wxUtilities.h"
+#include "utils/xlImage.h"
+#include <wx/mstream.h>
+#include <wx/gifdecod.h>
+#include <wx/anidecod.h>
 #include "GenerateCustomModelDialog.h"
 #include "GenerateLyricsDialog.h"
 #include "HousePreviewPanel.h"
@@ -84,6 +90,7 @@
 #include "TraceLog.h"
 #include "UpdaterDialog.h"
 #include "UtilFunctions.h"
+#include "ui/wxUtilities.h"
 #include "ui/ValueCurveButton.h"
 #include "ui/ValueCurvesPanel.h"
 #include "VendorModelDialog.h"
@@ -99,6 +106,7 @@
 #include "controllers/FPPConnectDialog.h"
 #include "controllers/Falcon.h"
 #include "controllers/HinksPixExportDialog.h"
+#include "ui/effectpanels/EffectIconCache.h"
 #include "effects/FacesEffect.h"
 #include "effects/RenderableEffect.h"
 #include "effects/ShaderEffect.h"
@@ -1974,6 +1982,147 @@ xLightsFrame::xLightsFrame(wxWindow* parent, int ab, wxWindowID id, bool renderO
     wxImage::AddHandler(new wxGIFHandler);
     wxImage::AddHandler(new wxWEBPHandler);
 
+    // Helper lambda: convert wxImage to xlImage (handles both alpha and mask transparency)
+    auto wxToXl = [](const wxImage& img) -> xlImage {
+        return wxImageToXlImage(img);
+    };
+
+    // Register GIF animation loader (uses wxGIFDecoder for proper frame compositing)
+    ImageCacheEntry::SetGIFLoader([wxToXl](const uint8_t* data, size_t len, const std::string& filename) -> AnimatedImageData {
+        AnimatedImageData result;
+        wxMemoryInputStream stream(data, len);
+        wxGIFDecoder decoder;
+        if (decoder.LoadGIF(stream) != wxGIF_OK) return result;
+
+        auto bgColour = decoder.GetBackgroundColour();
+        if (bgColour.IsOk()) {
+            result.backgroundColor = xlColor(bgColour.Red(), bgColour.Green(), bgColour.Blue());
+        }
+
+        int frameCount = decoder.GetFrameCount();
+        // Compute overall GIF size from frame sizes + offsets
+        int gifW = 0, gifH = 0;
+        for (unsigned int i = 0; i < frameCount; i++) {
+            wxSize fs = decoder.GetFrameSize(i);
+            wxPoint fo = decoder.GetFramePosition(i);
+            gifW = std::max(gifW, fs.GetWidth() + fo.x);
+            gifH = std::max(gifH, fs.GetHeight() + fo.y);
+        }
+        result.width = gifW;
+        result.height = gifH;
+
+        // Read frame times
+        long totalTime = 0;
+        std::vector<long> frameTimes;
+        for (unsigned int i = 0; i < frameCount; i++) {
+            long ft = decoder.GetDelay(i);
+            frameTimes.push_back(ft);
+            totalTime += ft;
+        }
+        if (totalTime == 0) {
+            frameTimes.clear();
+            for (unsigned int i = 0; i < frameCount; i++) frameTimes.push_back(100);
+        }
+        result.frameTimes = frameTimes;
+
+        // Helper: overlay rawFrame onto image at offset
+        auto overlayFrame = [](xlImage& image, const xlImage& rawFrame, wxPoint offset, bool clearTransparent) {
+            int tox = std::min(rawFrame.GetWidth(), image.GetWidth() - offset.x);
+            int toy = std::min(rawFrame.GetHeight(), image.GetHeight() - offset.y);
+            for (int y = 0; y < toy; y++) {
+                for (int x = 0; x < tox; x++) {
+                    if (!rawFrame.IsTransparent(x, y)) {
+                        image.SetAlpha(x + offset.x, y + offset.y, 255);
+                        image.SetRGB(x + offset.x, y + offset.y,
+                                     rawFrame.GetRed(x, y), rawFrame.GetGreen(x, y), rawFrame.GetBlue(x, y));
+                    } else if (clearTransparent) {
+                        image.SetAlpha(x + offset.x, y + offset.y, 0);
+                    }
+                }
+            }
+        };
+
+        // Composite TWO sets: with BG color filled, and with transparent BG
+        // This matches the old GIFImage two-pass approach
+        auto compositePass = [&](bool suppressBG) -> std::vector<xlImage> {
+            std::vector<xlImage> composited(frameCount);
+            std::vector<wxAnimationDisposal> disposals(frameCount);
+            wxAnimationDisposal lastDispose = wxANIM_TOBACKGROUND;
+
+            for (unsigned int i = 0; i < frameCount; i++) {
+                int startframe = i;
+                while (startframe >= 0 && !composited[startframe].IsOk()) --startframe;
+
+                xlImage image;
+                if (startframe >= 0) {
+                    image = composited[startframe];
+                    lastDispose = disposals[startframe];
+                } else {
+                    image.Create(gifW, gifH);
+                }
+                startframe++;
+
+                for (unsigned int f = startframe; f <= i; f++) {
+                    wxSize fsize = decoder.GetFrameSize(f);
+                    wxImage wxFrame(fsize);
+                    decoder.ConvertToImage(f, &wxFrame);
+                    xlImage rawFrame = wxToXl(wxFrame);
+
+                    wxAnimationDisposal dispose = decoder.GetDisposalMethod(f);
+                    wxPoint offset = decoder.GetFramePosition(f);
+
+                    if (suppressBG && (f == 0 || lastDispose == wxANIM_TOBACKGROUND)) {
+                        image.Clear();
+                        overlayFrame(image, rawFrame, offset, true);
+                    } else if (f == 0 || lastDispose == wxANIM_TOBACKGROUND) {
+                        unsigned char bgR = result.backgroundColor.Red();
+                        unsigned char bgG = result.backgroundColor.Green();
+                        unsigned char bgB = result.backgroundColor.Blue();
+                        for (int y = 0; y < image.GetHeight(); y++) {
+                            for (int x = 0; x < image.GetWidth(); x++) {
+                                image.SetRGB(x, y, bgR, bgG, bgB);
+                                image.SetAlpha(x, y, 255);
+                            }
+                        }
+                        overlayFrame(image, rawFrame, offset, true);
+                    } else if (lastDispose == wxANIM_DONOTREMOVE) {
+                        overlayFrame(image, rawFrame, offset, false);
+                    } else {
+                        overlayFrame(image, rawFrame, offset, false);
+                    }
+                    composited[f] = image;
+                    disposals[f] = dispose;
+                    lastDispose = dispose;
+                }
+            }
+            return composited;
+        };
+
+        result.frames = compositePass(false);      // with BG color
+        result.framesNoBG = compositePass(true);    // transparent BG
+        return result;
+    });
+
+    // Register WebP animation loader
+    ImageCacheEntry::SetWebPLoader([wxToXl](const uint8_t* data, size_t len, const std::string&) -> AnimatedImageData {
+        AnimatedImageData result;
+        wxMemoryInputStream stream(data, len);
+        std::vector<wxWebPAnimationFrame> frames;
+        wxWEBPHandler handler;
+        if (handler.LoadAnimation(frames, stream)) {
+            for (const auto& frame : frames) {
+                result.frames.push_back(wxToXl(frame.image));
+                result.frameTimes.push_back(frame.duration);
+            }
+            if (!frames.empty()) {
+                result.width = frames[0].image.GetWidth();
+                result.height = frames[0].image.GetHeight();
+                result.backgroundColor = xlColor(frames[0].bgColour.Red(), frames[0].bgColour.Green(), frames[0].bgColour.Blue());
+            }
+        }
+        return result;
+    });
+
     config->Read("xLightse131Sync", &me131Sync, false);
     _outputManager.SetSyncEnabled(me131Sync);
     spdlog::debug("Sync: {}.", toStr(me131Sync));
@@ -2160,6 +2309,7 @@ xLightsFrame::~xLightsFrame()
     OutputTimer.Stop();
     RenderStatusTimer.Stop();
     TextDrawingContext::CleanUp();
+    EffectIconCache::Clear();
 
     if (_pingTimer != nullptr) {
         _pingTimer->Stop();
@@ -3724,6 +3874,9 @@ void xLightsFrame::UpdateEffectAssistWindow(Effect* effect, RenderableEffect* re
 
 void xLightsFrame::CheckUnsavedChanges()
 {
+    if (readOnlyMode) {
+        return;
+    }
     if (UnsavedRgbEffectsChanges) {
         // This is not necessary but it shows the user that the save button is red which I am hoping makes it clearer
         // to the user what this prompt is for
@@ -4565,314 +4718,6 @@ void xLightsFrame::OnmAltBackupMenuItemSelected(wxCommandEvent& event)
     SaveWorking();
 
     DoAltBackup();
-}
-
-void xLightsFrame::ExportModels(wxString const& filename)
-{
-    // make sure everything is up to date
-    if (Notebook1->GetSelection() != LAYOUTTAB) {
-        layoutPanel->UnSelectAllModels();
-    }
-    RecalcModels();
-
-    constexpr double FACTOR = 1.3;
-
-    uint32_t minchannel = 99999999;
-    int32_t maxchannel = -1;
-
-    lxw_workbook* workbook = workbook_new(filename.c_str());
-    lxw_worksheet* modelsheet = workbook_add_worksheet(workbook, "Models");
-    lxw_worksheet* groupsheet = workbook_add_worksheet(workbook, "Groups");
-    lxw_worksheet* controllersheet = workbook_add_worksheet(workbook, "Controllers");
-    lxw_worksheet* totalsheet = workbook_add_worksheet(workbook, "Totals");
-
-    lxw_format* header_format = workbook_add_format(workbook);
-    format_set_border(header_format, LXW_BORDER_MEDIUM);
-    format_set_bold(header_format);
-
-    lxw_format* format = workbook_add_format(workbook);
-    format_set_border(format, LXW_BORDER_THIN);
-
-    auto write_worksheet_string = [FACTOR](lxw_worksheet* sheet, int row, int col, std::string text, lxw_format* format, std::map<int, double>& col_widths) {
-        worksheet_write_string(sheet, row, col, text.c_str(), format);
-        col_widths[col] = std::max(text.size() + FACTOR, col_widths[col]);
-    };
-
-    RulerObject* ruler = RulerObject::GetRuler();
-
-    std::vector<std::string> model_header_cols{ "Model Name", "Shadowing", "Description", "Display As", "Dimensions", "String Type", "String Count", "Node Count", "Light Count", "Est Current (Amps)", "Channels Per Node", "Channel Count", "Start Channel", "Start Channel No", "#Universe(or id):Start Channel", "End Channel No", "Default Buffer W x H", "Preview", "Controller Ports", "Connection Protocol", "Connection Attributes", "Controller Name", "Controller Type", "Protocol", "Controller Description", "IP", "Baud", "Universe/Id", "Universe Channel", "Controller Channel", "Active"};
-    if (ruler != nullptr) {
-        std::string unitDescription = ruler->GetUnitDescription();
-        model_header_cols.push_back("Location X (" + unitDescription + ")");
-        model_header_cols.push_back("Location Y (" + unitDescription + ")");
-        model_header_cols.push_back("Location Z (" + unitDescription + ")");
-    }
-    model_header_cols.push_back("Aliases");
-
-    std::map<int, double> _model_col_widths;
-    for (int i = 0; i < model_header_cols.size(); i++) {
-        worksheet_write_string(modelsheet, 0, i, model_header_cols[i].c_str(), header_format);
-        _model_col_widths[i] = model_header_cols[i].size() + FACTOR; // estimate column width
-    }
-    worksheet_freeze_panes(modelsheet, 1, 0);
-
-    int modelCount = 0;
-    int row = 1;
-    // models
-    for (auto const& m : AllModels) {
-        Model* model = m.second;
-        if (model->GetDisplayAs() != DisplayAsType::ModelGroup) {
-            modelCount++;
-            wxString const stch = model->GetModelStartChannel();
-            uint32_t ch = model->GetFirstChannel() + 1;
-            std::string type, description, ip, universe, inactive, baud, protocol, controllername;
-            int32_t channeloffset;
-            int stu = 0;
-            int stuc = 0;
-            GetControllerDetailsForChannel(ch, controllername, type, protocol, description, channeloffset, ip, universe, inactive, baud, stu, stuc);
-
-            std::string current;
-
-            wxString const stype = wxString(model->GetStringType());
-
-            int32_t lightcount = (long)(model->GetNodeCount() * model->GetLightsPerNode());
-            if (!stype.Contains("Node")) {
-                if (model->GetNodeCount() == 1) {
-                    lightcount = model->GetCoordCount(0);
-                } else {
-                    lightcount = model->NodesPerString() * model->GetLightsPerNode();
-                }
-            }
-
-            if (stype.Contains("Node") || stype.Contains("Channel RGB")) {
-                current = wxString::Format("%0.2f", (float)lightcount * AMPS_PER_PIXEL).ToStdString();
-            }
-
-            int w, h;
-            model->GetBufferSize("Default", "2D", "None", w, h, 0);
-            write_worksheet_string(modelsheet, row, 0, model->name, format, _model_col_widths);
-            write_worksheet_string(modelsheet, row, 1, model->GetShadowModelFor(), format, _model_col_widths);
-            write_worksheet_string(modelsheet, row, 2, model->description, format, _model_col_widths);
-            write_worksheet_string(modelsheet, row, 3, DisplayAsTypeToString(model->GetDisplayAs()), format, _model_col_widths);
-            write_worksheet_string(modelsheet, row, 4, model->GetDimension(), format, _model_col_widths);
-            write_worksheet_string(modelsheet, row, 5, model->GetStringType(), format, _model_col_widths);
-            worksheet_write_number(modelsheet, row, 6, model->GetNumPhysicalStrings(), format);
-            worksheet_write_number(modelsheet, row, 7, model->GetNodeCount(), format);
-            worksheet_write_number(modelsheet, row, 8, lightcount, format);
-            worksheet_write_number(modelsheet, row, 9, (float)lightcount * AMPS_PER_PIXEL, format);
-            worksheet_write_number(modelsheet, row, 10, model->GetChanCountPerNode(), format);
-            worksheet_write_number(modelsheet, row, 11, model->GetActChanCount(), format);
-            write_worksheet_string(modelsheet, row, 12, stch, format, _model_col_widths);
-            worksheet_write_number(modelsheet, row, 13, ch, format);
-            write_worksheet_string(modelsheet, row, 14, wxString::Format("#%i:%i", stu, stuc), format, _model_col_widths);
-            worksheet_write_number(modelsheet, row, 15, model->GetLastChannel() + 1, format);
-            write_worksheet_string(modelsheet, row, 16, wxString::Format("%i x %i", w, h), format, _model_col_widths);
-
-            write_worksheet_string(modelsheet, row, 17, model->GetLayoutGroup(), format, _model_col_widths);
-            write_worksheet_string(modelsheet, row, 18, model->GetControllerConnectionPortRangeString(), format, _model_col_widths);
-            write_worksheet_string(modelsheet, row, 19, model->GetControllerProtocol(), format, _model_col_widths);
-            wxString con_attributes = model->GetControllerConnectionAttributeString();
-            con_attributes.Replace(":", ",");
-            if (con_attributes.StartsWith(",")) {
-                con_attributes.Remove(0, 1);
-            }
-            write_worksheet_string(modelsheet, row, 20, con_attributes, format, _model_col_widths);
-            write_worksheet_string(modelsheet, row, 21, controllername, format, _model_col_widths);
-            write_worksheet_string(modelsheet, row, 22, type, format, _model_col_widths);
-            write_worksheet_string(modelsheet, row, 23, protocol, format, _model_col_widths);
-            write_worksheet_string(modelsheet, row, 24, description, format, _model_col_widths);
-            write_worksheet_string(modelsheet, row, 25, ip, format, _model_col_widths);
-            write_worksheet_string(modelsheet, row, 26, baud, format, _model_col_widths);
-            write_worksheet_string(modelsheet, row, 27, universe, format, _model_col_widths);
-            worksheet_write_number(modelsheet, row, 28, stuc, format);
-            worksheet_write_number(modelsheet, row, 29, channeloffset, format);
-            write_worksheet_string(modelsheet, row, 30, inactive, format, _model_col_widths);
-
-            glm::vec3 position = model->GetBaseObjectScreenLocation().GetWorldPosition();
-            if (ruler != nullptr) {
-                worksheet_write_number(modelsheet, row, 31, ruler->Measure(position.x), format);
-                worksheet_write_number(modelsheet, row, 32, ruler->Measure(position.y), format);
-                worksheet_write_number(modelsheet, row, 33, ruler->Measure(position.z), format);
-            }
-            std::list<std::string> aliases = model->GetAliases();
-            if (!aliases.empty()) {
-                auto it = aliases.begin();
-                std::string initial = *it;
-                ++it;
-                std::string separator = ", ";
-                std::string a = (std::accumulate(it, aliases.end(), initial, [&separator](const std::string& a, const std::string& b) { return a + separator + b; }));
-                write_worksheet_string(modelsheet, row, 34, a, format, _model_col_widths);
-            };
-
-            ++row;
-
-            if (ch < minchannel) {
-                minchannel = ch;
-            }
-            int32_t lastch = model->GetLastChannel() + 1;
-            if (lastch > maxchannel) {
-                maxchannel = lastch;
-            }
-        }
-    }
-    // set column widths
-    for (auto const& [col, width] : _model_col_widths) {
-        worksheet_set_column(modelsheet, col, col, width, NULL);
-    }
-
-    std::map<int, double> _group_col_widths;
-    const std::vector<std::string> groupHeader{ "Group Name", "Models", "Models Count", "Default Buffer W x H", "Preview", "Aliases" };
-    for (int i = 0; i < groupHeader.size(); i++) {
-        worksheet_write_string(groupsheet, 0, i, groupHeader[i].c_str(), header_format);
-        _group_col_widths[i] = groupHeader[i].size() + FACTOR; // estimate column width
-    }
-    worksheet_freeze_panes(groupsheet, 1, 0);
-    int groupCount = 0;
-    row = 1;
-    for (auto const& m : AllModels) {
-        Model* model = m.second;
-        if (model->GetDisplayAs() == DisplayAsType::ModelGroup) {
-            groupCount++;
-            ModelGroup* mg = static_cast<ModelGroup*>(model);
-            std::string models;
-            for (const auto& it : mg->ModelNames()) {
-                if (models.empty()) {
-                    models = it;
-                } else {
-                    models += ", " + it;
-                }
-            }
-            int w, h;
-            model->GetBufferSize("Default", "2D", "None", w, h, 0);
-
-            write_worksheet_string(groupsheet, row, 0, model->name, format, _group_col_widths);
-            write_worksheet_string(groupsheet, row, 1, models, format, _group_col_widths);
-            worksheet_write_number(groupsheet, row, 2, mg->ModelNames().size(), format);
-            write_worksheet_string(groupsheet, row, 3, wxString::Format("%d x %d", w, h), format, _group_col_widths);
-            write_worksheet_string(groupsheet, row, 4, model->GetLayoutGroup(), format, _group_col_widths);
-            std::list<std::string> aliases = model->GetAliases();
-            if (!aliases.empty()) {
-                auto it = aliases.begin();
-                std::string initial = *it;
-                ++it;
-                std::string separator = ", ";
-                std::string a = (std::accumulate(it, aliases.end(), initial,[&separator](const std::string& a, const std::string& b) { return a + separator + b; }));
-                write_worksheet_string(groupsheet, row, 5, a, format, _group_col_widths);
-            };
-            ++row;
-        }
-    }
-    for (auto const& [col, width] : _group_col_widths) {
-        worksheet_set_column(groupsheet, col, col, width, NULL);
-    }
-
-    row = 1;
-    std::map<int, double> _controller_col_widths;
-
-    auto control_cols = OutputManager::GetExportHeaders();
-
-    for (int i = 0; i < control_cols.size(); i++) {
-        worksheet_write_string(controllersheet, 0, i, control_cols[i].c_str(), header_format);
-        _controller_col_widths[i] = control_cols[i].size() + FACTOR; // estimate column width
-    }
-    worksheet_freeze_panes(controllersheet, 1, 0);
-
-    for (const auto& it : _outputManager.GetControllers()) {
-        auto scolumns = it->GetExport();
-        auto columns = wxSplit(scolumns, ',');
-        for (int j = 0; j < columns.size(); j++) {
-            write_worksheet_string(controllersheet, row, j, columns[j], format, _controller_col_widths);
-        }
-        ++row;
-        for (auto it2 : it->GetOutputs()) {
-            auto s = it2->GetExport();
-            if (!s.empty()) {
-                auto scolumns2 = it2->GetExport();
-                auto columns2 = wxSplit(scolumns2, ',');
-                for (int k = 0; k < columns2.size(); k++) {
-                    write_worksheet_string(controllersheet, row, k, columns2[k], format, _controller_col_widths);
-                }
-                row++;
-            }
-        }
-    }
-    for (auto const& [col, width] : _controller_col_widths) {
-        worksheet_set_column(controllersheet, col, col, width, NULL);
-    }
-
-    uint32_t bulbs = 0;
-    uint32_t usedchannels = 0;
-    if (minchannel == 99999999) {
-        // No channels so we dont do this
-        minchannel = 0;
-        maxchannel = 0;
-    } else {
-        int* chused = (int*)malloc((maxchannel - minchannel + 1) * sizeof(int));
-        memset(chused, 0x00, (maxchannel - minchannel + 1) * sizeof(int));
-
-        for (auto const& m : AllModels) {
-            Model* model = m.second;
-            if (model->GetDisplayAs() != DisplayAsType::ModelGroup) {
-                int ch = model->GetFirstChannel() + 1;
-                int endch = model->GetLastChannel() + 1;
-
-                int uniquechannels = 0;
-                for (int i = ch; i <= endch; i++) {
-                    wxASSERT(i - minchannel < maxchannel - minchannel + 1);
-                    if (chused[i - minchannel] == 0) {
-                        uniquechannels++;
-                    }
-                    chused[i - minchannel]++;
-                }
-
-                if (wxString(model->GetStringType()).StartsWith("Single Color")) {
-                    bulbs += uniquechannels * model->GetCoordCount(0);
-                } else if (wxString(model->GetStringType()).StartsWith("3 Channel")) {
-                    bulbs += uniquechannels * model->GetNodeCount() / 3 * model->GetCoordCount(0);
-                } else if (wxString(model->GetStringType()).StartsWith("4 Channel")) {
-                    bulbs += uniquechannels * model->GetNodeCount() / 4 * model->GetCoordCount(0);
-                } else if (wxString(model->GetStringType()).StartsWith("Strobes")) {
-                    bulbs += uniquechannels * model->GetNodeCount() * model->GetCoordCount(0);
-                } else if (model->GetStringType() == "Node Single Color") {
-                    bulbs += uniquechannels * model->GetNodeCount() * model->GetCoordCount(0);
-                } else {
-                    int den = model->GetChanCountPerNode();
-                    if (den == 0) {
-                        den = 1;
-                    }
-                    bulbs += uniquechannels / den * model->GetLightsPerNode();
-                }
-            }
-        }
-
-        for (long i = 0; i < (long)(maxchannel - minchannel + 1); i++) {
-            if (chused[i] > 0) {
-                usedchannels++;
-            }
-        }
-
-        free(chused);
-    }
-
-    worksheet_write_string(totalsheet, 0, 0, "Model Count", format);
-    worksheet_write_number(totalsheet, 0, 1, modelCount, format);
-    worksheet_write_string(totalsheet, 1, 0, "Group Count", format);
-    worksheet_write_number(totalsheet, 1, 1, groupCount, format);
-    worksheet_write_string(totalsheet, 2, 0, "First Used Channel", format);
-    worksheet_write_number(totalsheet, 2, 1, minchannel, format);
-    worksheet_write_string(totalsheet, 3, 0, "Last Used Channel", format);
-    worksheet_write_number(totalsheet, 3, 1, maxchannel, format);
-    worksheet_write_string(totalsheet, 4, 0, "Actual Used Channel", format);
-    worksheet_write_number(totalsheet, 4, 1, usedchannels, format);
-    worksheet_write_string(totalsheet, 5, 0, "Bulbs", format);
-    worksheet_write_number(totalsheet, 5, 1, bulbs, format);
-
-    worksheet_set_column(totalsheet, 0, 0, 25, NULL);
-
-    lxw_error error = workbook_close(workbook);
-    if (error) {
-        DisplayError(wxString::Format("Unable to create Spreadsheet, Error %d = %s\n", error, lxw_strerror(error)).ToStdString());
-    }
 }
 
 void xLightsFrame::OnmExportModelsMenuItemSelected(wxCommandEvent& event)
@@ -7211,67 +7056,6 @@ void xLightsFrame::OnMenuItem_ExportEffectsSelected(wxCommandEvent& event)
 
     ExportEffects(filename);
     SetStatusText("Effects CSV saved at " + filename);
-}
-
-void xLightsFrame::ExportEffects(wxString const& filename)
-{
-    wxFile f(filename);
-
-    if (!f.Create(filename, true) || !f.IsOpened()) {
-        DisplayError(wxString::Format("Unable to create file %s. Error %d\n", filename, f.GetLastError()).ToStdString(), this);
-        return;
-    }
-
-    std::map<std::string, int> effectfrequency;
-    std::map<std::string, int> effecttotaltime;
-
-    int effects = 0;
-    f.Write(_("Effect Name,StartTime,EndTime,Duration,Description,Element,ElementType,Files\n"));
-
-    std::list<std::string> files;
-
-    for (size_t i = 0; i < _sequenceElements.GetElementCount(0); i++) {
-        Element* e = _sequenceElements.GetElement(i);
-        effects += ExportElement(f, e, effectfrequency, effecttotaltime, files);
-
-        if (dynamic_cast<ModelElement*>(e) != nullptr) {
-            for (size_t s = 0; s < dynamic_cast<ModelElement*>(e)->GetSubModelAndStrandCount(); s++) {
-                SubModelElement* se = dynamic_cast<ModelElement*>(e)->GetSubModel(s);
-                effects += ExportElement(f, se, effectfrequency, effecttotaltime, files);
-            }
-            for (size_t s = 0; s < dynamic_cast<ModelElement*>(e)->GetStrandCount(); s++) {
-                StrandElement* se = dynamic_cast<ModelElement*>(e)->GetStrand(s);
-                int node = 0;
-                for (size_t n = 0; n < se->GetNodeLayerCount(); n++) {
-                    NodeLayer* nl = se->GetNodeLayer(n);
-                    effects += ExportNodes(f, se, nl, node++, effectfrequency, effecttotaltime, files);
-                }
-            }
-        }
-    }
-    f.Write(wxString::Format("\"Effect Count\",%d\n", effects));
-    f.Write(_("\n"));
-    f.Write(_("Effect Usage Summary\n"));
-    f.Write(_("Effect Name,Occurences,TotalTime\n"));
-    for (auto it = effectfrequency.begin(); it != effectfrequency.end(); ++it) {
-        int tt = effecttotaltime[it->first];
-        f.Write(wxString::Format("\"%s\",%d,%02d:%02d.%03d\n",
-                                 (const char*)it->first.c_str(),
-                                 it->second,
-                                 tt / 60000,
-                                 (tt % 60000) / 1000,
-                                 tt % 1000));
-    }
-    f.Write(_("\n"));
-    f.Write(_("Summary of files used\n"));
-
-    files.sort();
-    files.unique();
-    for (auto it = files.begin(); it != files.end(); ++it) {
-        f.Write(wxString::Format("%s\n", *it));
-    }
-
-    f.Close();
 }
 
 void xLightsFrame::OnMenuItemShiftEffectsAndTimingSelected(wxCommandEvent& event)

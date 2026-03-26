@@ -19,6 +19,7 @@
 #include "../ModelPreview.h"
 #include "../support/VectorMath.h"
 #include "UtilFunctions.h"
+#include "ui/wxUtilities.h"
 #include "RulerObject.h"
 
 #include <log.h>
@@ -39,7 +40,7 @@ ThreePointScreenLocation::ThreePointScreenLocation()
 ThreePointScreenLocation::~ThreePointScreenLocation() {
 }
 
-wxCursor ThreePointScreenLocation::InitializeLocation(int &handle, int x, int y, const std::vector<NodeBaseClassPtr> &Nodes, ModelPreview* preview) {
+CursorType ThreePointScreenLocation::InitializeLocation(int &handle, int x, int y, const std::vector<NodeBaseClassPtr> &Nodes, ModelPreview* preview) {
     if (preview != nullptr) {
         FindPlaneIntersection( x, y, preview );
         if( preview->Is3D() ) {
@@ -51,15 +52,11 @@ wxCursor ThreePointScreenLocation::InitializeLocation(int &handle, int x, int y,
     }
     x2 = y2 = z2 = 0.0f;
     handle = END_HANDLE;
-    return wxCURSOR_SIZING;
+    return CursorType::Sizing;
 }
 
 void ThreePointScreenLocation::Init() {
     TwoPointScreenLocation::Init();
-    /*height = wxAtof(node->GetAttribute("Height", std::to_string(height)));
-    angle = wxAtoi(node->GetAttribute("Angle", "0"));
-    shear = wxAtof(node->GetAttribute("Shear", "0.0"));
-    rotatex = wxAtof(node->GetAttribute("RotateX", "0"));*/
 }
 
 std::string ThreePointScreenLocation::GetDimension(float factor) const

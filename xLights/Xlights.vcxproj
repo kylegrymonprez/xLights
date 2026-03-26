@@ -156,19 +156,19 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include;..\include\ffmpeg-6\include;$(ProjectDir);$(ProjectDir)render;..\include\zlib;..\dependencies\libxlsxwriter\include;..\dependencies\lua\src;..\include\sol2-3.5.0\;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include</IncludePath>
+    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include;..\include\ffmpeg-6\include;$(ProjectDir);$(ProjectDir)render;..\include\zlib;..\dependencies;..\dependencies\libxlsxwriter\include;..\dependencies\lua\src;..\include\sol2-3.5.0\;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include</IncludePath>
     <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(NETFXKitsDir)Lib\um\x64;..\..\wxWidgets\lib\vc_x64_lib;$(WXWIDGETS_ROOT)\lib\vc_x64_lib;..\lib\windows64;GL;..\lib\windows;./ffmpeg-dev/lib;$(VCToolsInstallDir)lib\x64;..\dependencies\lua\src;$(Python_ROOT_DIR)\libs</LibraryPath>
     <EnableClangTidyCodeAnalysis>true</EnableClangTidyCodeAnalysis>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64EC'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include;..\include\ffmpeg-6\include;$(ProjectDir);$(ProjectDir)render;..\include\zlib;..\dependencies\libxlsxwriter\include;..\dependencies\lua\src;..\include\sol2-3.5.0\;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include</IncludePath>
+    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include;..\include\ffmpeg-6\include;$(ProjectDir);$(ProjectDir)render;..\include\zlib;..\dependencies;..\dependencies\libxlsxwriter\include;..\dependencies\lua\src;..\include\sol2-3.5.0\;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include</IncludePath>
     <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(NETFXKitsDir)Lib\um\x64;..\..\wxWidgets\lib\vc_x64_lib;$(WXWIDGETS_ROOT)\lib\vc_x64_lib;..\lib\windows64;GL;..\lib\windows;./ffmpeg-dev/lib;$(VCToolsInstallDir)lib\x64;..\dependencies\lua\src;$(Python_ROOT_DIR)\libs</LibraryPath>
     <EnableClangTidyCodeAnalysis>true</EnableClangTidyCodeAnalysis>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include;..\include\ffmpeg-6\include;$(ProjectDir);$(ProjectDir)render;..\include\zlib;..\dependencies\libxlsxwriter\include;..\dependencies\lua\src;..\include\sol2-3.5.0\;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include</IncludePath>
+    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include;..\include\ffmpeg-6\include;$(ProjectDir);$(ProjectDir)render;..\include\zlib;..\dependencies;..\dependencies\libxlsxwriter\include;..\dependencies\lua\src;..\include\sol2-3.5.0\;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include</IncludePath>
     <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(NETFXKitsDir)Lib\um\x64;..\..\wxWidgets\lib\vc_x64_lib;$(WXWIDGETS_ROOT)\lib\vc_x64_lib;..\lib\windows64;GL;..\lib\windows;./ffmpeg-dev/lib;$(VCToolsInstallDir)lib\x64;..\dependencies\lua\src;$(Python_ROOT_DIR)\libs</LibraryPath>
     <EnableClangTidyCodeAnalysis>true</EnableClangTidyCodeAnalysis>
   </PropertyGroup>
@@ -179,17 +179,17 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include\ffmpeg-6\include;..\include;$(ProjectDir);$(ProjectDir)render;..\include\zlib;..\dependencies\libxlsxwriter\include;..\include\sol2-3.5.0\;..\dependencies\lua\src;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include</IncludePath>
+    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include\ffmpeg-6\include;..\include;$(ProjectDir);$(ProjectDir)render;..\include\zlib;..\dependencies;..\dependencies\libxlsxwriter\include;..\include\sol2-3.5.0\;..\dependencies\lua\src;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include</IncludePath>
     <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(NETFXKitsDir)Lib\um\x64;..\..\wxWidgets\lib\vc_x64_lib;$(WXWIDGETS_ROOT)\lib\vc_x64_lib;..\lib\windows64;GL;..\dependencies\lua\src;$(Python_ROOT_DIR)\libs</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64EC'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include\ffmpeg-6\include;..\include;$(ProjectDir);$(ProjectDir)render;..\include\zlib;..\dependencies\libxlsxwriter\include;..\include\sol2-3.5.0\;..\dependencies\lua\src;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include</IncludePath>
+    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include\ffmpeg-6\include;..\include;$(ProjectDir);$(ProjectDir)render;..\include\zlib;..\dependencies;..\dependencies\libxlsxwriter\include;..\include\sol2-3.5.0\;..\dependencies\lua\src;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include</IncludePath>
     <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(NETFXKitsDir)Lib\um\x64;..\..\wxWidgets\lib\vc_x64_lib;$(WXWIDGETS_ROOT)\lib\vc_x64_lib;..\lib\windows64;GL;..\dependencies\lua\src;$(Python_ROOT_DIR)\libs</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include\ffmpeg-6\include;..\include;$(ProjectDir);$(ProjectDir)render;..\include\zlib;..\dependencies\libxlsxwriter\include;..\include\sol2-3.5.0\;..\dependencies\lua\src;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include</IncludePath>
+    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include\ffmpeg-6\include;..\include;$(ProjectDir);$(ProjectDir)render;..\include\zlib;..\dependencies;..\dependencies\libxlsxwriter\include;..\include\sol2-3.5.0\;..\dependencies\lua\src;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include</IncludePath>
     <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(NETFXKitsDir)Lib\um\x64;..\..\wxWidgets\lib\vc_x64_lib;$(WXWIDGETS_ROOT)\lib\vc_x64_lib;..\lib\windows64;GL;..\dependencies\lua\src;$(Python_ROOT_DIR)\libs</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Label="Vcpkg">
@@ -562,6 +562,9 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="DuplicateDialog.cpp" />
     <ClCompile Include="EditAliasesDialog.cpp" />
     <ClCompile Include="EditSubmodelAliasesDialog.cpp" />
+    <ClCompile Include="import_export\ExportEffects.cpp" />
+    <ClCompile Include="import_export\ImportEffects.cpp" />
+    <ClCompile Include="import_export\TimingImport.cpp" />
     <ClCompile Include="effects\AdjustEffect.cpp" />
     <ClCompile Include="ui\effectpanels\AdjustPanel.cpp" />
     <ClCompile Include="ui\effectpanels\assist\SketchAssistPanel.cpp" />
@@ -597,7 +600,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="EffectTimingDialog.cpp" />
     <ClCompile Include="effects\CandleEffect.cpp" />
     <ClCompile Include="ui\effectpanels\CandlePanel.cpp" />
-    <ClCompile Include="effects\GIFImage.cpp" />
+    <ClCompile Include="utils\AnimatedImage.cpp" />
     <ClCompile Include="effects\LiquidEffect.cpp" />
     <ClCompile Include="ui\effectpanels\LiquidPanel.cpp" />
     <ClCompile Include="effects\ServoEffect.cpp" />
@@ -679,7 +682,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="LayerSelectDialog.cpp" />
     <ClCompile Include="LayoutUtils.cpp" />
     <ClCompile Include="LinkJukeboxButtonDialog.cpp" />
-    <ClCompile Include="LOREdit.cpp" />
+    <ClCompile Include="import_export\LOREdit.cpp" />
     <ClCompile Include="LORPreview.cpp" />
     <ClCompile Include="LyricUserDictDialog.cpp" />
     <ClCompile Include="MatrixFaceDownloadDialog.cpp" />
@@ -853,7 +856,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="EffectPresetManager.cpp" />
     <ClCompile Include="EffectTreeDialog.cpp" />
     <ClCompile Include="ExportModelSelect.cpp" />
-    <ClCompile Include="FileConverter.cpp" />
+    <ClCompile Include="import_export\FileConverter.cpp" />
     <ClCompile Include="FlickerFreeBitmapButton.cpp" />
     <ClCompile Include="GenerateCustomModelDialog.cpp" />
     <ClCompile Include="JobPool.cpp" />
@@ -973,6 +976,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="sequencer\EffectsGrid.cpp" />
     <ClCompile Include="render\Element.cpp" />
     <ClCompile Include="sequencer\MainSequencer.cpp" />
+    <ClCompile Include="sequencer\LyricBreakdown.cpp" />
     <ClCompile Include="sequencer\RowHeading.cpp" />
     <ClCompile Include="render\SequenceElements.cpp" />
     <ClCompile Include="render\SequenceMedia.cpp" />
@@ -1036,8 +1040,8 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="ViewpointDialog.cpp" />
     <ClCompile Include="ViewpointMgr.cpp" />
     <ClCompile Include="ViewsModelsPanel.cpp" />
-    <ClCompile Include="Vixen3.cpp" />
-    <ClCompile Include="VSAFile.cpp" />
+    <ClCompile Include="import_export\Vixen3.cpp" />
+    <ClCompile Include="import_export\VSAFile.cpp" />
     <ClCompile Include="VsaImportDialog.cpp" />
     <ClCompile Include="WindowsHardwareVideoReader.cpp" />
     <ClCompile Include="WiringDialog.cpp" />
@@ -1047,6 +1051,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="xlColorPicker.cpp" />
     <ClCompile Include="xlColorPickerFields.cpp" />
     <ClCompile Include="xlColourData.cpp" />
+    <ClCompile Include="utils\xlImage.cpp" />
     <ClCompile Include="xlGridCanvas.cpp" />
     <ClCompile Include="xLightsApp.cpp" />
     <ClCompile Include="xLightsImportChannelMapDialog.cpp" />
@@ -1239,7 +1244,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClInclude Include="KeyBindingEditDialog.h" />
     <ClInclude Include="LayerSelectDialog.h" />
     <ClInclude Include="LinkJukeboxButtonDialog.h" />
-    <ClInclude Include="LOREdit.h" />
+    <ClInclude Include="import_export\LOREdit.h" />
     <ClInclude Include="LyricUserDictDialog.h" />
     <ClInclude Include="MatrixFaceDownloadDialog.h" />
     <ClInclude Include="MediaImportOptionsDialog.h" />
@@ -1287,7 +1292,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClInclude Include="CustomTimingDialog.h" />
     <ClInclude Include="effects\CandleEffect.h" />
     <ClInclude Include="ui\effectpanels\CandlePanel.h" />
-    <ClInclude Include="effects\GIFImage.h" />
+    <ClInclude Include="utils\AnimatedImage.h" />
     <ClInclude Include="effects\LiquidEffect.h" />
     <ClInclude Include="ui\effectpanels\LiquidPanel.h" />
     <ClInclude Include="effects\ServoEffect.h" />
@@ -1416,7 +1421,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClInclude Include="EffectPresetManager.h" />
     <ClInclude Include="EffectTreeDialog.h" />
     <ClInclude Include="ExportModelSelect.h" />
-    <ClInclude Include="FileConverter.h" />
+    <ClInclude Include="import_export\FileConverter.h" />
     <ClInclude Include="FlickerFreeBitmapButton.h" />
     <ClInclude Include="GenerateCustomModelDialog.h" />
     <ClInclude Include="Images_png.h" />
@@ -1534,6 +1539,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClInclude Include="render\Element.h" />
     <ClInclude Include="sequencer\ElementLayers.h" />
     <ClInclude Include="sequencer\MainSequencer.h" />
+    <ClInclude Include="sequencer\LyricBreakdown.h" />
     <ClInclude Include="sequencer\RowHeading.h" />
     <ClInclude Include="render\SequenceElements.h" />
     <ClInclude Include="render\SequenceMedia.h" />
@@ -1550,6 +1556,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClInclude Include="StartChannelDialog.h" />
     <ClInclude Include="StrandNodeNamesDialog.h" />
     <ClInclude Include="utils\string_utils.h" />
+    <ClInclude Include="utils\ThreadUtils.h" />
     <ClInclude Include="utils\xlPoint.h" />
     <ClInclude Include="SubBufferPanel.h" />
     <ClInclude Include="SubModelGenerateDialog.h" />
@@ -1602,8 +1609,8 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClInclude Include="ViewpointDialog.h" />
     <ClInclude Include="ViewpointMgr.h" />
     <ClInclude Include="ViewsModelsPanel.h" />
-    <ClInclude Include="Vixen3.h" />
-    <ClInclude Include="VSAFile.h" />
+    <ClInclude Include="import_export\Vixen3.h" />
+    <ClInclude Include="import_export\VSAFile.h" />
     <ClInclude Include="VsaImportDialog.h" />
     <ClInclude Include="WindowsHardwareVideoReader.h" />
     <ClInclude Include="WiringDialog.h" />
@@ -1613,6 +1620,8 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClInclude Include="xlColorPicker.h" />
     <ClInclude Include="xlColorPickerFields.h" />
     <ClInclude Include="xlColourData.h" />
+    <ClInclude Include="utils\xlImage.h" />
+    <ClInclude Include="utils\Base64.h" />
     <ClInclude Include="xlCustomControl.h" />
     <ClInclude Include="xlGridCanvas.h" />
     <ClInclude Include="xLightsApp.h" />

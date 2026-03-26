@@ -18,6 +18,7 @@
 #include <format>
 
 #include "VideoEffect.h"
+#include "../ui/wxUtilities.h"
 #include "../AudioManager.h"
 #include "../ui/effectpanels/VideoPanel.h"
 #include "../VideoReader.h"
@@ -153,8 +154,6 @@ void VideoEffect::adjustSettings(const std::string &version, Effect *effect, boo
 
     if (settings.Contains("E_SLIDER_Video_Starttime")) {
         settings.erase("E_SLIDER_Video_Starttime");
-        //long st = wxAtol(settings["E_SLIDER_Video_Starttime"]);
-        //settings["E_SLIDER_Video_Starttime"] = wxString::Format(wxT("%i"), st / 10);
     }
 }
 
@@ -455,9 +454,6 @@ void VideoEffect::Render(RenderBuffer &buffer, std::string filename,
                     int startx = (buffer.BufferWi - _videoreader->GetWidth() * (cropRight - cropLeft) / 100) / 2;
                     int starty = (buffer.BufferHt - _videoreader->GetHeight() * (cropTop - cropBottom) / 100) / 2;
 
-                    // wxASSERT(xoffset + xtail + buffer.BufferWi == _videoreader->GetWidth());
-                    // wxASSERT(yoffset + ytail + buffer.BufferHt == _videoreader->GetHeight());
-
                     ispc::VideoData rdata;
                     rdata.width = _videoreader->GetWidth() - xoffset - xtail;
                     rdata.height = _videoreader->GetHeight() - yoffset - ytail;
@@ -503,9 +499,6 @@ void VideoEffect::Render(RenderBuffer &buffer, std::string filename,
                     int yoffset = cropBottom * _videoreader->GetHeight() / 100;
                     int xtail = (100 - cropRight) * _videoreader->GetWidth() / 100;
                     int ytail = (100 - cropTop) * _videoreader->GetHeight() / 100;
-
-                    // wxASSERT(xoffset + xtail + buffer.BufferWi == _videoreader->GetWidth());
-                    // wxASSERT(yoffset + ytail + buffer.BufferHt == _videoreader->GetHeight());
 
                     ispc::VideoData rdata;
                     rdata.width = buffer.BufferWi;

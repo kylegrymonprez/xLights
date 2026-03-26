@@ -29,11 +29,13 @@
 #include <time.h>       /* time */
 #include <thread>
 #include <iomanip>
+#include "utils/ThreadUtils.h"
 #include <curl/curl.h>
 
 #include "xLightsApp.h"
 #include "xLightsVersion.h"
 #include "UtilFunctions.h"
+#include "ui/wxUtilities.h"
 #include "TraceLog.h"
 #include "ExternalHooks.h"
 #include "BitmapCache.h"
@@ -464,6 +466,7 @@ void xLightsApp::MacOpenFiles(const wxArrayString &fileNames) {
 
 bool xLightsApp::OnInit()
 {
+    SetMainThreadId();
     InitialiseLogging(false);
     spdlog::info("******* OnInit: XLights started.");
 #ifdef __WXMSW__
@@ -480,6 +483,8 @@ bool xLightsApp::OnInit()
 #endif
 
     wxTheApp->SetAppName("xLights");
+    SetIsxLights(true);
+    GetResourcesDirectory(); // bootstrap GetResourcesDir() with wx-dependent path lookup
     DumpConfig();
 
     int id = (int)wxThread::GetCurrentId();
@@ -679,8 +684,20 @@ bool xLightsApp::OnInit()
             // temporarily set the show folder
             showDir = xsqPkg.GetTempShowFolder();
 
-            // save the folder and we will remove it when we shutdown
-            cleanupDir = showDir;
+            spdlog::info("xsqz IsPkg={} IsValid={} tempShowFolder='{}' tempDir='{}' xsqFile='{}'",
+                xsqPkg.IsPkg(), xsqPkg.IsValid(),
+                showDir.ToStdString(),
+                xsqPkg.GetTempDir(),
+                xsqFile.GetFullPath().ToStdString());
+
+            // if the package includes xlights_rgbeffects.xml, point the frame constructor
+            // at the extracted show folder so it loads it directly (avoids a second SetDir)
+            if (!showDir.IsEmpty()) {
+                xLightsApp::showDir = showDir;
+            }
+
+            // save the temp dir root so it gets cleaned up on shutdown
+            cleanupDir = xsqPkg.GetTempDir();
 
         } else {
             spdlog::debug("Zip file did not contain sequence.");
@@ -711,6 +728,8 @@ bool xLightsApp::OnInit()
     }
 
     if (readOnlyZipFile != "") {
+        spdlog::info("xsqz: CurrentDir='{}' after construction", topFrame->CurrentDir.ToStdString());
+
         // tell xlights not to allow saving ... at least as much as possible
         topFrame->SetReadOnlyMode(true);
 

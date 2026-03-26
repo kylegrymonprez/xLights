@@ -13,6 +13,7 @@
 #include "XmlSerializeFunctions.h"
 #include "../DimmingCurve.h"
 #include "../UtilFunctions.h"
+#include "../ui/wxUtilities.h"
 #include "../models/ArchesModel.h"
 #include "../models/CandyCaneModel.h"
 #include "../models/ChannelBlockModel.h"
@@ -1062,7 +1063,7 @@ void XmlDeserializingModelFactory::DeserializeDimmerAbility(DmxModel* model, pug
 }
 
 void XmlDeserializingModelFactory::DeserializeDmxImage(DmxImage* img, pugi::xml_node node) {
-    img->SetImageFile(FixFile("", node.attribute(XmlNodeKeys::ImageAttribute).as_string("")));
+    img->SetImageFile(FixFile(std::string(""), std::string(node.attribute(XmlNodeKeys::ImageAttribute).as_string(""))));
     img->SetScaleX(node.attribute(XmlNodeKeys::ScaleXAttribute).as_float(1.0f));
     img->SetScaleY(node.attribute(XmlNodeKeys::ScaleYAttribute).as_float(1.0f));
     img->SetScaleZ(node.attribute(XmlNodeKeys::ScaleZAttribute).as_float(1.0f));
@@ -1088,7 +1089,7 @@ void XmlDeserializingModelFactory::DeserializeDmxMotor(DmxMotor* motor, pugi::xm
 }
 
 void XmlDeserializingModelFactory::DeserializeMesh(Mesh* mesh, pugi::xml_node node) {
-    mesh->SetObjFile(FixFile("", node.attribute(XmlNodeKeys::ObjFileAttribute).as_string("")));
+    mesh->SetObjFile(FixFile(std::string(""), std::string(node.attribute(XmlNodeKeys::ObjFileAttribute).as_string(""))));
     mesh->SetRenderWidth(node.attribute(XmlNodeKeys::WidthAttribute).as_float(1.0f));
     mesh->SetRenderHeight(node.attribute(XmlNodeKeys::HeightAttribute).as_float(1.0f));
     mesh->SetRenderDepth(node.attribute(XmlNodeKeys::DepthAttribute).as_float(1.0f));

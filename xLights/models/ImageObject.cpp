@@ -11,7 +11,9 @@
 #include <filesystem>
 #include <format>
 #include "ImageObject.h"
+#include "../utils/xlImage.h"
 #include "UtilFunctions.h"
+#include "ui/wxUtilities.h"
 #include "ModelPreview.h"
 #include "xLightsMain.h"
 #include "../ExternalHooks.h"
@@ -63,8 +65,8 @@ bool ImageObject::Draw(ModelPreview* preview, xlGraphicsContext *ctx, xlGraphics
                 (const char *)GetName().c_str(),
                 (const char *)_imageFile.c_str(),
                 (const char *)preview->GetName().c_str());
-            wxImage image(_imageFile);
-            if (image.IsOk()) {
+            xlImage image;
+            if (image.LoadFromFile(_imageFile)) {
                 xlTexture *t = ctx->createTexture(image, GetName(), true);
                 _images[preview->GetName().ToStdString()] = t;
                 width = image.GetWidth();
@@ -152,7 +154,7 @@ std::list<std::string> ImageObject::CheckModelSettings()
 
     if (_imageFile == "" || !FileExists(_imageFile)) {
         res.push_back(std::format("    ERR: Image object '{}' cant find image file '{}'", GetName(), _imageFile));
-    } else if (!wxIsReadable(_imageFile) || !wxImage::CanRead(_imageFile)) {
+    } else if (xlImage testImg; !testImg.LoadFromFile(_imageFile)) {
         res.push_back(std::format("    ERR: Image object '{}' cant load image file '{}'", GetName(), _imageFile));
     } else {
         if (!IsFileInShowDir(xLightsFrame::CurrentDir, _imageFile)) {

@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <ClCompile Include="import_export\ExportEffects.cpp" />
+    <ClCompile Include="import_export\ImportEffects.cpp" />
+    <ClCompile Include="import_export\TimingImport.cpp" />
     <ClCompile Include="BatchRenderDialog.cpp" />
     <ClCompile Include="BulkEditControls.cpp" />
     <ClCompile Include="BulkEditSliderDialog.cpp" />
@@ -8,7 +11,7 @@
     <ClCompile Include="ColorManager.cpp" />
     <ClCompile Include="CustomTimingDialog.cpp" />
     <ClCompile Include="EffectTimingDialog.cpp" />
-    <ClCompile Include="effects\GIFImage.cpp" />
+    <ClCompile Include="utils\AnimatedImage.cpp" />
     <ClCompile Include="FontManager.cpp" />
     <ClCompile Include="GenerateLyricsDialog.cpp" />
     <ClCompile Include="HousePreviewPanel.cpp" />
@@ -36,7 +39,7 @@
     <ClCompile Include="EffectPresetManager.cpp" />
     <ClCompile Include="EffectTreeDialog.cpp" />
     <ClCompile Include="ExportModelSelect.cpp" />
-    <ClCompile Include="FileConverter.cpp" />
+    <ClCompile Include="import_export\FileConverter.cpp" />
     <ClCompile Include="FlickerFreeBitmapButton.cpp" />
     <ClCompile Include="GenerateCustomModelDialog.cpp" />
     <ClCompile Include="JobPool.cpp" />
@@ -100,7 +103,7 @@
     <ClCompile Include="VendorModelDialog.cpp" />
     <ClCompile Include="VideoReader.cpp" />
     <ClCompile Include="ViewsModelsPanel.cpp" />
-    <ClCompile Include="VSAFile.cpp" />
+    <ClCompile Include="import_export\VSAFile.cpp" />
     <ClCompile Include="VsaImportDialog.cpp" />
     <ClCompile Include="WiringDialog.cpp" />
     <ClCompile Include="wxCheckedListCtrl.cpp" />
@@ -148,7 +151,7 @@
     </ClCompile>
     <ClCompile Include="PathGenerationDialog.cpp" />
     <ClCompile Include="RemapDMXChannelsDialog.cpp" />
-    <ClCompile Include="LOREdit.cpp" />
+    <ClCompile Include="import_export\LOREdit.cpp" />
     <ClCompile Include="AlignmentDialog.cpp" />
     <ClCompile Include="CharMapDialog.cpp" />
     <ClCompile Include="models\ArchesModel.cpp">
@@ -349,7 +352,7 @@
     <ClCompile Include="effects\MorphEffect.cpp">
       <Filter>Effects</Filter>
     </ClCompile>
-    <ClCompile Include="Vixen3.cpp" />
+    <ClCompile Include="import_export\Vixen3.cpp" />
     <ClCompile Include="effects\MusicEffect.cpp">
       <Filter>Effects</Filter>
     </ClCompile>
@@ -663,6 +666,9 @@
     <ClCompile Include="sequencer\MainSequencer.cpp">
       <Filter>sequencer</Filter>
     </ClCompile>
+    <ClCompile Include="sequencer\LyricBreakdown.cpp">
+      <Filter>sequencer</Filter>
+    </ClCompile>
     <ClCompile Include="sequencer\RowHeading.cpp">
       <Filter>sequencer</Filter>
     </ClCompile>
@@ -967,6 +973,7 @@
     </ClCompile>
     <ClCompile Include="TempFileManager.cpp" />
     <ClCompile Include="xlColourData.cpp" />
+    <ClCompile Include="utils\xlImage.cpp" />
     <ClCompile Include="effects\MovingHeadEffect.cpp">
       <Filter>Effects</Filter>
     </ClCompile>
@@ -1408,7 +1415,7 @@
     <ClInclude Include="HousePreviewPanel.h" />
     <ClInclude Include="MatrixFaceDownloadDialog.h" />
     <ClInclude Include="CustomTimingDialog.h" />
-    <ClInclude Include="effects\GIFImage.h" />
+    <ClInclude Include="utils\AnimatedImage.h" />
     <ClInclude Include="IPEntryDialog.h" />
     <ClInclude Include="AudioManager.h" />
     <ClInclude Include="BitmapCache.h" />
@@ -1432,7 +1439,7 @@
     <ClInclude Include="EffectPresetManager.h" />
     <ClInclude Include="EffectTreeDialog.h" />
     <ClInclude Include="ExportModelSelect.h" />
-    <ClInclude Include="FileConverter.h" />
+    <ClInclude Include="import_export\FileConverter.h" />
     <ClInclude Include="FlickerFreeBitmapButton.h" />
     <ClInclude Include="GenerateCustomModelDialog.h" />
     <ClInclude Include="Images_png.h" />
@@ -1492,7 +1499,7 @@
     <ClInclude Include="VendorModelDialog.h" />
     <ClInclude Include="VideoReader.h" />
     <ClInclude Include="ViewsModelsPanel.h" />
-    <ClInclude Include="VSAFile.h" />
+    <ClInclude Include="import_export\VSAFile.h" />
     <ClInclude Include="VsaImportDialog.h" />
     <ClInclude Include="WiringDialog.h" />
     <ClInclude Include="wxCheckedListCtrl.h" />
@@ -1545,7 +1552,7 @@
     </ClInclude>
     <ClInclude Include="PathGenerationDialog.h" />
     <ClInclude Include="RemapDMXChannelsDialog.h" />
-    <ClInclude Include="LOREdit.h" />
+    <ClInclude Include="import_export\LOREdit.h" />
     <ClInclude Include="..\include\globals.h" />
     <ClInclude Include="AlignmentDialog.h" />
     <ClInclude Include="CharMapDialog.h" />
@@ -1753,7 +1760,7 @@
     <ClInclude Include="controllers\ControllerUploadData.h">
       <Filter>Controllers</Filter>
     </ClInclude>
-    <ClInclude Include="Vixen3.h" />
+    <ClInclude Include="import_export\Vixen3.h" />
     <ClInclude Include="effects\MorphEffect.h">
       <Filter>Effects</Filter>
     </ClInclude>
@@ -2068,6 +2075,9 @@
     <ClInclude Include="sequencer\MainSequencer.h">
       <Filter>sequencer</Filter>
     </ClInclude>
+    <ClInclude Include="sequencer\LyricBreakdown.h">
+      <Filter>sequencer</Filter>
+    </ClInclude>
     <ClInclude Include="sequencer\RowHeading.h">
       <Filter>sequencer</Filter>
     </ClInclude>
@@ -2217,6 +2227,9 @@
     </ClInclude>
     <ClInclude Include="BulkEditComboDialog.h" />
     <ClInclude Include="utils\string_utils.h">
+      <Filter>utils</Filter>
+    </ClInclude>
+    <ClInclude Include="utils\ThreadUtils.h">
       <Filter>utils</Filter>
     </ClInclude>
     <ClInclude Include="utils\xlPoint.h">
@@ -2386,6 +2399,8 @@
     </ClInclude>
     <ClInclude Include="TempFileManager.h" />
     <ClInclude Include="xlColourData.h" />
+    <ClInclude Include="utils\xlImage.h" />
+    <ClInclude Include="utils\Base64.h" />
     <ClInclude Include="EditSubmodelAliasesDialog.h" />
     <ClInclude Include="models\DMX\DmxDimmerAbility.h">
       <Filter>Models\DMX</Filter>
