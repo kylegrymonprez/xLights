@@ -547,6 +547,42 @@ class SequencerViewModel {
         return defaultValue
     }
 
+    /// Resolve a JSON metadata `dynamicOptions` source to an option list.
+    /// Mirrors desktop's JsonEffectPanel repopulate lambdas. Returns [] if
+    /// no effect is selected (state/face/node sources need the effect's
+    /// parent element's model) or if the source is unknown.
+    /// `propertyId` is only consulted for `source == "effect"`, where it
+    /// becomes the setting id passed to `RenderableEffect::GetSettingOptions`.
+    func dynamicOptions(source: String, propertyId: String) -> [String] {
+        switch source {
+        case "timingTracks":
+            return (document.timingTrackNames() as? [String]) ?? []
+        case "lyricTimingTracks":
+            return (document.lyricTimingTrackNames() as? [String]) ?? []
+        default:
+            break
+        }
+
+        guard let sel = selectedEffect else { return [] }
+        let row = Int32(sel.rowIndex)
+        let idx = Int32(sel.effectIndex)
+        switch source {
+        case "states":
+            return (document.states(forRow: row, at: idx) as? [String]) ?? []
+        case "faces":
+            return (document.faces(forRow: row, at: idx) as? [String]) ?? []
+        case "modelNodeNames":
+            return (document.modelNodeNames(forRow: row, at: idx) as? [String]) ?? []
+        case "effect":
+            return (document.effectSettingOptions(forRow: row,
+                                                   at: idx,
+                                                   settingId: propertyId)
+                    as? [String]) ?? []
+        default:
+            return []
+        }
+    }
+
     /// range if the value actually changed. When `suppressIfDefault` is
     /// non-nil and the new value equals that default, the settings map
     /// entry is removed instead of written — matches the desktop

@@ -19,6 +19,7 @@
 #include "media/AudioManager.h"
 #include "models/Model.h"
 #include "models/ModelManager.h"
+#include "models/ModelGroup.h"
 #include "utils/FileUtils.h"
 #include "utils/ExternalHooks.h"
 
@@ -363,6 +364,106 @@
         }
     }
     return names;
+}
+
+// MARK: - dynamicOptions sources
+
+- (NSArray<NSString*>*)_timingTrackNamesWithLayerCount:(int)wantLayerCount
+                                       acceptLessThan:(BOOL)acceptLessThan {
+    // Mirrors JsonEffectPanel::RepopulateTimingTrackChoices. If
+    // acceptLessThan is YES the filter is `layers <= wantLayerCount`
+    // (the desktop "not lyric" path); otherwise exact match.
+    auto& se = _context->GetSequenceElements();
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    for (int i = 0; i < se.GetElementCount(); i++) {
+        Element* el = se.GetElement(i);
+        if (!el || el->GetType() != ElementType::ELEMENT_TYPE_TIMING) continue;
+        int layers = (int)el->GetEffectLayerCount();
+        bool match = acceptLessThan ? (layers <= wantLayerCount)
+                                    : (layers == wantLayerCount);
+        if (!match) continue;
+        [out addObject:[NSString stringWithUTF8String:el->GetName().c_str()]];
+    }
+    return out;
+}
+
+- (NSArray<NSString*>*)timingTrackNames {
+    return [self _timingTrackNamesWithLayerCount:1 acceptLessThan:YES];
+}
+
+- (NSArray<NSString*>*)lyricTimingTrackNames {
+    return [self _timingTrackNamesWithLayerCount:3 acceptLessThan:NO];
+}
+
+/// Resolve the target Model for a row's effect, unwrapping ModelGroups
+/// the same way desktop does (JsonEffectPanel.cpp:1815-1818). Returns
+/// nullptr on any lookup failure.
+- (Model*)_targetModelForRow:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return nullptr;
+    const std::string& modelName = row->element->GetModelName();
+    Model* m = _context->GetModelManager()[modelName];
+    if (!m) return nullptr;
+    if (m->GetDisplayAs() == DisplayAsType::ModelGroup) {
+        auto* mg = dynamic_cast<ModelGroup*>(m);
+        if (mg) m = mg->GetFirstModel();
+    }
+    return m;
+}
+
+- (NSArray<NSString*>*)_keysOfFaceStateData:(const FaceStateData&)map {
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    for (const auto& pair : map) {
+        [out addObject:[NSString stringWithUTF8String:pair.first.c_str()]];
+    }
+    return out;
+}
+
+- (NSArray<NSString*>*)statesForRow:(int)rowIndex atIndex:(int)effectIndex {
+    (void)effectIndex;  // state list is model-scoped, not effect-scoped
+    Model* m = [self _targetModelForRow:rowIndex];
+    if (!m) return @[];
+    return [self _keysOfFaceStateData:m->GetStateInfo()];
+}
+
+- (NSArray<NSString*>*)facesForRow:(int)rowIndex atIndex:(int)effectIndex {
+    (void)effectIndex;
+    Model* m = [self _targetModelForRow:rowIndex];
+    if (!m) return @[];
+    return [self _keysOfFaceStateData:m->GetFaceInfo()];
+}
+
+- (NSArray<NSString*>*)modelNodeNamesForRow:(int)rowIndex atIndex:(int)effectIndex {
+    (void)effectIndex;
+    Model* m = [self _targetModelForRow:rowIndex];
+    if (!m) return @[];
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    uint32_t n = m->GetNumChannels();
+    for (uint32_t i = 0; i < n; i++) {
+        std::string name = m->GetNodeName((size_t)i, /*def*/ false);
+        if (name.empty()) continue;
+        if (!name.empty() && name[0] == '-') continue;  // desktop skips "-..." names
+        [out addObject:[NSString stringWithUTF8String:name.c_str()]];
+    }
+    return out;
+}
+
+- (NSArray<NSString*>*)effectSettingOptionsForRow:(int)rowIndex
+                                          atIndex:(int)effectIndex
+                                         settingId:(NSString*)settingId {
+    auto* layer = [self effectLayerForRow:rowIndex];
+    if (!layer || effectIndex < 0 || effectIndex >= layer->GetEffectCount()) return @[];
+    Effect* e = layer->GetEffect(effectIndex);
+    if (!e) return @[];
+    auto& em = _context->GetEffectManager();
+    RenderableEffect* re = em.GetEffect(e->GetEffectName());
+    if (!re) return @[];
+    auto options = re->GetSettingOptions(std::string([settingId UTF8String]));
+    NSMutableArray<NSString*>* out = [NSMutableArray arrayWithCapacity:options.size()];
+    for (const auto& s : options) {
+        [out addObject:[NSString stringWithUTF8String:s.c_str()]];
+    }
+    return out;
 }
 
 - (NSDictionary<NSString*, NSString*>*)effectSettingsForRow:(int)rowIndex atIndex:(int)effectIndex {

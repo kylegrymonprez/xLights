@@ -351,13 +351,33 @@ struct ValueCurveEditorSheet: View {
                     }
                 }
 
-                // Timing track / audio track / filter fields — surfaced for
-                // curves that consume them. Until C-4 lands the dynamicOptions
-                // bridge, the text fields are free-entry to match desktop's
-                // fallback behaviour when the track name isn't in the list.
+                // Timing track / audio track / filter fields — surfaced
+                // for curves that consume them. Timing track uses the
+                // dynamicOptions bridge (C-4) so the picker lists actual
+                // timing elements in the sequence.
                 if typeUsesTimingTrack(vc.type) {
                     Section("Timing Track") {
-                        TextField("Track name", text: $vc.timingTrack)
+                        let tracks = viewModel.dynamicOptions(
+                            source: "timingTracks", propertyId: "")
+                        if tracks.isEmpty {
+                            TextField("Track name", text: $vc.timingTrack)
+                        } else {
+                            Picker("Track", selection: $vc.timingTrack) {
+                                Text("(none)").tag("")
+                                ForEach(tracks, id: \.self) { t in
+                                    Text(t).tag(t)
+                                }
+                                // Keep any stale stored value selectable
+                                // when the sequence no longer has that
+                                // track (avoids silent drop on reload).
+                                if !vc.timingTrack.isEmpty
+                                    && !tracks.contains(vc.timingTrack) {
+                                    Text("\(vc.timingTrack) (missing)")
+                                        .tag(vc.timingTrack)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
                     }
                 }
                 if typeUsesAudioTrack(vc.type) {

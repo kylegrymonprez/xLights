@@ -42,6 +42,15 @@ struct EffectPropertyView: View {
             spinView
         case "text":
             textView
+        case "filepicker":
+            FilepickerPropertyView(property: property,
+                                    currentPath: rawValue,
+                                    onChoose: { writeValue($0) },
+                                    onClear: { writeValue("") })
+        case "fontpicker":
+            FontpickerPropertyView(property: property,
+                                    currentDesc: rawValue,
+                                    onChange: { writeValue($0) })
         case "custom":
             customView
         default:
@@ -52,12 +61,37 @@ struct EffectPropertyView: View {
     // MARK: - Custom property dispatcher
 
     // Route known custom property ids to their bespoke implementations.
-    // Unknown custom rows show a neutral placeholder.
+    // Unknown custom rows show a neutral placeholder. C-6 fills this out
+    // effect-by-effect in priority order.
     @ViewBuilder
     private var customView: some View {
         switch property.id {
         case "PaletteHeaderRow":
             ColorPaletteView()
+        case "Pictures_FilenameBlock":
+            EffectFilenameBlockView(label: "Image",
+                                     settingKey: "E_TEXTCTRL_Pictures_Filename",
+                                     fileFilter: "Images (*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp)|*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp")
+        case "Video_FilenameBlock":
+            EffectFilenameBlockView(label: "Video",
+                                     settingKey: "E_FILEPICKERCTRL_Video_Filename",
+                                     fileFilter: "Videos (*.mp4;*.mov;*.m4v;*.avi;*.webm;*.mkv)|*.mp4;*.mov;*.m4v;*.avi;*.webm;*.mkv")
+        case "Shader_FilenameBlock":
+            EffectFilenameBlockView(label: "Shader",
+                                     settingKey: "E_0FILEPICKERCTRL_IFS",
+                                     fileFilter: "Shader (*.fs)|*.fs")
+        case "Pictures_TransparentBlackRow":
+            TransparentBlackRowView(effectKeyStem: "Pictures")
+        case "Video_TransparentBlackRow":
+            TransparentBlackRowView(effectKeyStem: "Video")
+        case "Faces_TransparentBlackRow":
+            TransparentBlackRowView(effectKeyStem: "Faces")
+        case "Text_File_Row":
+            EffectFilenameBlockView(label: "From File",
+                                     settingKey: "E_FILEPICKERCTRL_Text_File",
+                                     fileFilter: "Text (*.txt)|*.txt")
+        case "Morph_Swap":
+            MorphSwapRowView()
         default:
             customPlaceholder
         }
@@ -142,8 +176,26 @@ struct EffectPropertyView: View {
 
     // MARK: - Choice / Combobox
 
+    /// Resolves the option list for this choice. `dynamicOptions` takes
+    /// precedence over the metadata's static `options` array — matches
+    /// desktop's JsonEffectPanel (settings re-populated per selection
+    /// change). If the dynamic source returns empty the list degrades to
+    /// just the current value so the menu isn't blank.
+    private var choiceOptions: [String] {
+        if let source = property.dynamicOptions, !source.isEmpty {
+            let dyn = viewModel.dynamicOptions(source: source,
+                                                propertyId: property.id)
+            if !dyn.isEmpty { return dyn }
+            // Keep the current value selectable even when the source is
+            // empty (e.g. a model with no states yet).
+            let v = rawValue.isEmpty ? defaultValueString : rawValue
+            return v.isEmpty ? [] : [v]
+        }
+        return property.options ?? []
+    }
+
     private var choiceView: some View {
-        let options = property.options ?? []
+        let options = choiceOptions
         let binding = Binding<String>(
             get: { rawValue.isEmpty ? defaultValueString : rawValue },
             set: { writeValue($0) }

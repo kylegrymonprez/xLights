@@ -726,13 +726,13 @@ each row is addressed in the sub-phases below.
 
 | Schema feature | Desktop uses | Status |
 |---|---|---|
-| `controlType: filepicker` | 2 props (Glediator, VUMeter file) | not rendered |
-| `controlType: fontpicker` | 1 prop (Text_Font) | not rendered |
-| `controlType: custom` beyond PaletteHeaderRow | 38 props, 15 effects | placeholder "(custom)" |
+| `controlType: filepicker` | 2 props (Glediator, VUMeter file) | **landed (C-2)** — `FilepickerPropertyView`: `.fileImporter` sheet filtered by UTTypes parsed from `fileFilter`; stores absolute path + registers security-scoped bookmark via `obtainAccessToPath:` |
+| `controlType: fontpicker` | 1 prop (Text_Font) | **landed (C-2)** — `FontpickerPropertyView` sheet over `UIFont.familyNames` + size stepper + bold/italic; stores wx `NativeFontInfo` user-desc (e.g. `"bold Arial 26 utf-8"`) that the Phase A-2 `ParseFontString` already round-trips |
+| `controlType: custom` beyond PaletteHeaderRow | 38 props, 15 effects | **in progress (C-6)** — 8 custom ids landed (Pictures/Video/Shader FilenameBlocks, Pictures/Video/Faces TransparentBlackRows, Text_File_Row, Morph_Swap); rest pending |
 | `separator: true` | 3 uses | **landed (C-2)** — `Divider` inserted before property |
 | `suppressIfDefault: true` | 35 uses | **landed (C-2)** — write equal-to-default removes the key via bridge `removeEffectSettingForKey:` |
 | `lockable: true` | 261 uses | no lock UI |
-| `dynamicOptions` | 11 uses (timingTracks, states, faces, modelNodeNames, lyricTimingTracks, effect) | empty option list |
+| `dynamicOptions` | 11 uses (timingTracks, states, faces, modelNodeNames, lyricTimingTracks, effect) | **landed (C-4)** — all six sources wired via XLSequenceDocument |
 | visibility: `notEquals`/`notOneOf`/`greaterThan`/`startsWith`/`any` | several | **landed (C-3)** — full engine evaluates all operators |
 | `group.type: xyCenter` | 6 props (Pictures, Marquee, Pinwheel, Text, Shader) | **landed (C-2)** — `XYCenterPadView` with draggable handle + optional wrap toggles |
 | `valueCurve: true` | 238 uses, 45 effects | **landed (C-5)** — VC button next to every flagged slider; editor sheet covers all 23 curve types, P1-P4, min/max, wrap / real-values / time-offset, timing / audio / filter fields, live preview strip, custom-point touch canvas; base slider dimmed+disabled while curve is active |
@@ -789,8 +789,9 @@ tab they were on, not always "Effect" (persist in
    is name-agnostic so `sharedMetadataJsonNamed:"Blending"` just
    works; `SequencerViewModel.timingMetadata` renamed to
    `blendingMetadata`.**]**
-2. **C-2 Schema-feature coverage.** **[partially landed.** `separator`,
-   `suppressIfDefault`, and the `xyCenter` group are in.
+2. **C-2 Schema-feature coverage.** **[landed.** `separator`,
+   `suppressIfDefault`, `xyCenter`, `filepicker`, and `fontpicker`
+   are in.
    `EffectMetadataPanel` inserts a `Divider()` before any property
    whose metadata has `separator: true` (applied in the flat layout,
    section groups, and tab groups). `SequencerViewModel.setSettingValue`
@@ -809,10 +810,17 @@ tab they were on, not always "Effect" (persist in
    `group.wrapY`. Mapping uses bottom-up Y so higher values render
    upward, matching desktop. `EffectMetadataPanel.groupView`
    recognises `type: "xyCenter"` and hands off to the pad; member
-   properties are already hidden from the flat layout. Still
-   pending: `filepicker` (2 props), `fontpicker` (1 prop),
-   `radiobutton` (0 real uses but schema-allowed). `lockable`
-   deferred to C-7.**]**
+   properties are already hidden from the flat layout.
+   `FilepickerPropertyView` uses SwiftUI's `.fileImporter` with
+   `UTType`s parsed from the JSON `fileFilter` glob list; on
+   selection it calls `XLSequenceDocument.obtainAccessToPath:` so
+   the security-scoped bookmark persists across launches.
+   `FontpickerPropertyView` opens a sheet over `UIFont.familyNames`
+   with size stepper + bold / italic toggles; commits a wx
+   `NativeFontInfo` user-desc (e.g. `"bold Arial 26 utf-8"`) that
+   the Phase A-2 `ParseFontString` already round-trips.
+   `radiobutton` (0 real uses but schema-allowed) still pending;
+   `lockable` deferred to C-7.**]**
 3. **C-3 Full visibility engine.** **[landed.**
    `VisibilityRuleMetadata.WhenCondition` grew `notOneOf`,
    `greaterThan`, and `startsWith` fields (alongside existing
@@ -828,14 +836,32 @@ tab they were on, not always "Effect" (persist in
    `any` (Circles, Fireworks) and `startsWith` (SingleStrand); the
    other operators land anyway so future JSON authors don't need
    parallel iPad work.**]**
-4. **C-4 `dynamicOptions`.** Expose the option sources the desktop
-   pulls from: `timingTracks` (names of timing elements in the
-   sequence), `lyricTimingTracks` (subset with lyric data),
-   `states` / `faces` (definitions on the effect's model),
-   `modelNodeNames`, `effect` (list of other effect types). Bridge
-   methods on `XLSequenceDocument` returning `NSArray<NSString*>`
-   for each; `EffectPropertyView` branches on `prop.dynamicOptions`
-   when building a `choice`.
+4. **C-4 `dynamicOptions`.** **[landed.** Six new bridge methods on
+   `XLSequenceDocument`: `timingTrackNames` (all timing elements with
+   `<= 1` layer, matching desktop's non-lyric filter),
+   `lyricTimingTrackNames` (exactly 3 layers — phrase/word/phoneme),
+   `statesForRow:atIndex:` + `facesForRow:atIndex:` (keys of the
+   target model's `GetStateInfo()` / `GetFaceInfo()`),
+   `modelNodeNamesForRow:atIndex:` (per-channel `GetNodeName`,
+   skipping empty names and names starting with `-` to match
+   `JsonEffectPanel.cpp:1855-1872`), and
+   `effectSettingOptionsForRow:atIndex:settingId:` which calls
+   `RenderableEffect::GetSettingOptions(settingId)` on the effect's
+   `RenderableEffect` (currently only SingleStrand overrides, for
+   WLED FX/palette names). Model lookup unwraps `ModelGroup` via
+   `GetFirstModel()` (desktop parity). Swift side:
+   `SequencerViewModel.dynamicOptions(source:propertyId:)` dispatches
+   on the source string; `EffectPropertyView.choiceView` consults
+   `property.dynamicOptions` before falling back to the static
+   `options` array and degrades to a one-entry list of the current
+   value when the dynamic source returns empty (e.g. a model with no
+   states yet), so the Picker is never blank. The VC editor's Timing
+   Track field switched from free-text to a `Picker` populated via
+   the new source; stale track names still render as
+   `"<name> (missing)"` so a round-tripped sequence that references a
+   removed timing element doesn't silently drop the link. Audio
+   Track and Filter Label remain free-text — desktop doesn't
+   populate those from a list either.**]**
 5. **C-5 Value curves -- desktop parity.** **[landed.** If a user can
    create a curve on desktop, they can edit and create the same curve
    on iPad. New ObjC++ bridge class `XLValueCurve`
@@ -874,22 +900,40 @@ tab they were on, not always "Effect" (persist in
    equivalent) deferred; extracting `ValueCurveRendering` into a
    platform-neutral helper in `src-core/` is optional polish since
    the Swift Canvas impl is already a straight port.**]**
-6. **C-6 Custom controls, effect-by-effect.** 39 properties across 15
-   effects, in priority order (by likely user traffic):
-   - **Pictures** -- `Pictures_FilenameBlock` (file picker + animated
-     thumbnail + filename label, swapping
-     `E_FILEPICKER_Pictures_Filename`),
-     `Pictures_TransparentBlackRow` (enable + threshold slider).
-   - **Shader** -- `Shader_FilenameBlock`, `Shader_SpeedRow` (speed
-     slider + VC on an f/100 divisor), `Shader_DynamicParams` (UI
-     rebuilt from the selected shader's `.fs` uniforms -- reads
-     uniform metadata via the existing `FragmentShader::parse` path,
-     produces sliders / checks / color pickers on the fly).
-   - **Video** -- `Video_FilenameBlock`, `Video_DurationRow`,
-     `Video_TransparentBlackRow`.
-   - **Text** -- `Text_File_Row` (inline-text vs file toggle),
-     `Text_Font_XL_Row` (font picker routed through the CG font
-     lookup from Phase A-2).
+6. **C-6 Custom controls, effect-by-effect.** **[partially landed.**
+   39 properties across 15 effects, in priority order (by likely user
+   traffic). Two reusable compound-row components landed in this
+   pass: `EffectFilenameBlockView` (filename label + `.fileImporter`
+   sheet filtered by wx-format `fileFilter`, registers a
+   security-scoped bookmark via `obtainAccessToPath:` on selection,
+   writes the absolute path to a configurable setting key), and
+   `TransparentBlackRowView` (enable Toggle + 0..300 threshold
+   Slider, key stem parameterised for the three effects that use it).
+   Dispatch in `EffectPropertyView.customView` routes the custom ids
+   to these shared views or to bespoke ones:
+   - **Pictures** -- `Pictures_FilenameBlock` ✅ (keyed to
+     `E_TEXTCTRL_Pictures_Filename`),
+     `Pictures_TransparentBlackRow` ✅.
+   - **Shader** -- `Shader_FilenameBlock` ✅ (keyed to
+     `E_0FILEPICKERCTRL_IFS`). `Shader_SpeedRow` pending (likely
+     passes through the standard slider path with f/100 divisor).
+     `Shader_DynamicParams` pending -- needs a new iPad path to
+     parse `.fs` uniform metadata and render sliders / checks /
+     colour pickers dynamically.
+   - **Video** -- `Video_FilenameBlock` ✅ (keyed to
+     `E_FILEPICKERCTRL_Video_Filename`),
+     `Video_TransparentBlackRow` ✅. `Video_DurationRow` pending.
+   - **Text** -- `Text_File_Row` ✅ (reuses `EffectFilenameBlockView`
+     on `E_FILEPICKERCTRL_Text_File`). `Text_Font_XL_Row` pending
+     -- needs a bridge listing the xLights-bundled bitmap fonts.
+   - **Faces** -- `Faces_TransparentBlackRow` ✅.
+     `Faces_MouthMovements` pending -- phoneme vs timing-track
+     radio with different backing settings per branch.
+   - **Morph** -- `Morph_Swap` ✅ (action button in
+     `MorphSwapRowView.swift` — swaps Start↔End X1/Y1/X2/Y2 pairs
+     and matching `E_VALUECURVE_*` entries, mirroring
+     `MorphPanel::OnSwapClick`). `Morph_QuickSet` preset grid
+     pending.
    - **Faces** -- `Faces_MouthMovements` (phoneme timing-track
      picker), `Faces_TransparentBlackRow`.
    - **Morph** -- `Morph_QuickSet` (preset sweep grid), `Morph_Swap`.

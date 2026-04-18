@@ -59,6 +59,31 @@
 - (int)currentViewIndex;
 - (void)setCurrentViewIndex:(int)viewIndex;
 
+// dynamicOptions sources for JSON `choice` properties. Mirrors the desktop
+// repopulate lambdas in JsonEffectPanel (file:1777-1884). Empty arrays on
+// lookup failure — never nil. See EffectPropertyView for dispatch.
+
+// All timing tracks in the sequence with <= 1 effect layer (i.e. not lyric).
+- (NSArray<NSString*>*)timingTrackNames;
+// Timing tracks with exactly 3 layers (phrase / word / phoneme).
+- (NSArray<NSString*>*)lyricTimingTrackNames;
+
+// Model-scoped sources. Uses the effect's parent element's ModelName to
+// resolve a Model; ModelGroups are unwrapped to their first contained
+// model, matching desktop (JsonEffectPanel.cpp:1815-1818). Empty on
+// unresolvable model.
+- (NSArray<NSString*>*)statesForRow:(int)rowIndex atIndex:(int)effectIndex;
+- (NSArray<NSString*>*)facesForRow:(int)rowIndex atIndex:(int)effectIndex;
+- (NSArray<NSString*>*)modelNodeNamesForRow:(int)rowIndex atIndex:(int)effectIndex;
+
+// Effect-scoped: RenderableEffect::GetSettingOptions(settingId). Returns
+// {} for most effects; SingleStrand overrides it to return the WLED FX /
+// palette name lists (SingleStrandEffect.cpp:100-131). Matches desktop's
+// "effect" dynamicOptions source.
+- (NSArray<NSString*>*)effectSettingOptionsForRow:(int)rowIndex
+                                          atIndex:(int)effectIndex
+                                         settingId:(NSString*)settingId;
+
 // Effects for a given row
 - (int)effectCountForRow:(int)rowIndex;
 

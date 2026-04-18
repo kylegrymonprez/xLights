@@ -14,6 +14,10 @@ struct XYCenterPadView: View {
     let wrapX: PropertyMetadata?
     let wrapY: PropertyMetadata?
     let prefix: String
+    /// Header label — resolved from the enclosing `tabs` group's tab
+    /// label when the x/yProperty appears in one (e.g. "Start Position" /
+    /// "End Position" for Pictures, Text, etc.). Falls back to "Position".
+    let label: String
 
     private var xKey: String { xProp.settingKey(prefix: prefix) }
     private var yKey: String { yProp.settingKey(prefix: prefix) }
@@ -54,10 +58,7 @@ struct XYCenterPadView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            // Group title — desktop uses a static-box labeled with the first
-            // property's generic prefix. "Position" is the most common
-            // reading; we keep it neutral so any xyCenter user is happy.
-            Text("Position")
+            Text(label)
                 .font(.caption)
                 .fontWeight(.medium)
                 .foregroundStyle(.secondary)

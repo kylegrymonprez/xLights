@@ -322,11 +322,30 @@ struct EffectMetadataPanel: View {
                                 yProp: yProp,
                                 wrapX: group.wrapX.flatMap { propsById[$0] },
                                 wrapY: group.wrapY.flatMap { propsById[$0] },
-                                prefix: metadata.settingKeyPrefix)
+                                prefix: metadata.settingKeyPrefix,
+                                label: xyCenterLabel(for: group))
             }
         default:
             EmptyView()
         }
+    }
+
+    /// Resolve an xyCenter group's header label from the enclosing
+    /// `tabs` group's tab label when its xProperty appears in one.
+    /// Effects like Pictures declare separate "Start Position" /
+    /// "End Position" tabs but reference the same xyCenter pad -- we
+    /// want the pad to pick up the tab's label rather than all
+    /// collapsing to a generic "Position".
+    private func xyCenterLabel(for group: GroupMetadata) -> String {
+        guard let xId = group.xProperty else { return "Position" }
+        for g in (metadata.groups ?? []) where g.type == "tabs" {
+            for tab in (g.tabs ?? []) {
+                if tab.properties.contains(xId) {
+                    return tab.label
+                }
+            }
+        }
+        return group.label?.isEmpty == false ? group.label! : "Position"
     }
 
     /// Visibility-rule evaluation mirroring the desktop engine at
