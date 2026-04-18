@@ -275,23 +275,14 @@ struct EffectMetadataPanel: View {
 
         switch group.type {
         case "tabs":
-            if let tabs = group.tabs {
-                ForEach(Array(tabs.enumerated()), id: \.offset) { _, tab in
-                    DisclosureGroup(tab.label) {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(tab.properties, id: \.self) { propId in
-                                if let prop = propsById[propId], isPropertyVisible(prop) {
-                                    if prop.separator == true {
-                                        Divider().padding(.vertical, 2)
-                                    }
-                                    EffectPropertyView(property: prop,
-                                                       metadataPrefix: metadata.settingKeyPrefix)
-                                }
-                            }
-                        }
-                    }
-                    .font(.caption)
-                }
+            if let tabs = group.tabs, !tabs.isEmpty {
+                NotebookTabsView(
+                    tabs: tabs,
+                    settingKey: group.settingKey,
+                    metadataPrefix: metadata.settingKeyPrefix,
+                    propsById: propsById,
+                    isVisible: isPropertyVisible
+                )
             }
         case "section":
             let label = group.label ?? ""
