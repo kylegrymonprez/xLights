@@ -124,6 +124,49 @@ struct SequencerView: View {
                 }
                 .keyboardShortcut("v", modifiers: [.command])
                 .disabled(!viewModel.hasClipboard)
+
+                Button("Duplicate") { viewModel.duplicateSelectedEffect() }
+                    .keyboardShortcut("d", modifiers: [.command])
+                    .disabled(viewModel.selectedEffect == nil)
+
+                // Arrow-key navigation: Left/Right cycles within the
+                // current row, Up/Down steps between model rows and
+                // picks the effect whose time range best overlaps.
+                Button("Previous Effect") { viewModel.selectPreviousEffect() }
+                    .keyboardShortcut(.leftArrow, modifiers: [])
+                    .disabled(viewModel.selectedEffect == nil)
+                Button("Next Effect") { viewModel.selectNextEffect() }
+                    .keyboardShortcut(.rightArrow, modifiers: [])
+                    .disabled(viewModel.selectedEffect == nil)
+                Button("Effect Above") { viewModel.selectEffectAbove() }
+                    .keyboardShortcut(.upArrow, modifiers: [])
+                    .disabled(viewModel.selectedEffect == nil)
+                Button("Effect Below") { viewModel.selectEffectBelow() }
+                    .keyboardShortcut(.downArrow, modifiers: [])
+                    .disabled(viewModel.selectedEffect == nil)
+
+                // Escape cancels the current selection / context, so
+                // arrow-key drill-down doesn't strand the user inside
+                // a row they can't get out of with the keyboard.
+                Button("Clear Selection") { viewModel.clearSelection() }
+                    .keyboardShortcut(.escape, modifiers: [])
+
+                // Home / End seek to sequence start / end. Frame-step
+                // with ',' and '.' nudges `playPositionMS` by exactly
+                // one frame interval — useful for precise scrub
+                // without touching the ruler.
+                Button("Seek Start") { viewModel.seekTo(ms: 0) }
+                    .keyboardShortcut(.home, modifiers: [])
+                Button("Seek End") { viewModel.seekTo(ms: viewModel.sequenceDurationMS) }
+                    .keyboardShortcut(.end, modifiers: [])
+                Button("Frame Back") {
+                    viewModel.seekTo(ms: viewModel.playPositionMS - viewModel.frameIntervalMS)
+                }
+                .keyboardShortcut(",", modifiers: [])
+                Button("Frame Forward") {
+                    viewModel.seekTo(ms: viewModel.playPositionMS + viewModel.frameIntervalMS)
+                }
+                .keyboardShortcut(".", modifiers: [])
             }
             .frame(width: 0, height: 0)
             .opacity(0)
@@ -154,11 +197,13 @@ struct SequencerView: View {
                 }) {
                     Image(systemName: "minus.magnifyingglass")
                 }
+                .keyboardShortcut("-", modifiers: [.command])
                 Button(action: {
                     timeline.pixelsPerMS = min(2.0, timeline.pixelsPerMS * 1.5)
                 }) {
                     Image(systemName: "plus.magnifyingglass")
                 }
+                .keyboardShortcut("=", modifiers: [.command])
             }
 
             if viewModel.hasAudio {

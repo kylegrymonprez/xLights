@@ -202,6 +202,14 @@ struct SequencerGridV2View: View {
             .onChange(of: timeline.pixelsPerMS) { _, newPPMS in
                 viewModel.refreshWaveformForZoom(pixelsPerMS: newPPMS)
             }
+            .onChange(of: viewModel.selectedEffect) { _, sel in
+                scrollSelectionIntoView(
+                    sel,
+                    viewportWidth: geo.size.width - metrics.rowHeaderWidth,
+                    availableGridH: availableGridH,
+                    modelRows: modelRows,
+                    timingBandH: timingBandH)
+            }
         }
         .confirmationDialog(
             "Effect",
@@ -321,6 +329,50 @@ struct SequencerGridV2View: View {
         }
     }
 
+    /// Ensure the newly-selected effect is visible: adjust horizontal
+    /// scroll so the effect's x-range sits inside the viewport, and
+    /// vertical scroll so its row is on-screen. Runs on any selection
+    /// change — clicked effects already hit the viewport, but arrow-
+    /// key navigation can land on off-screen effects.
+    private func scrollSelectionIntoView(
+        _ sel: SequencerViewModel.EffectSelection?,
+        viewportWidth: CGFloat,
+        availableGridH: CGFloat,
+        modelRows: [SequencerViewModel.RowInfo],
+        timingBandH: CGFloat
+    ) {
+        guard let sel = sel, viewportWidth > 0 else { return }
+        // Horizontal: center the effect in the viewport if it's
+        // fully off-screen; otherwise nudge the closest edge into
+        // view with a bit of padding.
+        let x1 = CGFloat(sel.startTimeMS) * timeline.pixelsPerMS
+        let x2 = CGFloat(sel.endTimeMS)   * timeline.pixelsPerMS
+        let curOffset = timeline.hScrollOffsetPx
+        let pad: CGFloat = 24
+        if x2 < curOffset + pad {
+            timeline.hScrollOffsetPx = max(0, x1 - pad)
+        } else if x1 > curOffset + viewportWidth - pad {
+            timeline.hScrollOffsetPx = max(0, x2 - viewportWidth + pad)
+        }
+
+        // Vertical: only applies to the model-rows scroll area.
+        guard let rowIdx = modelRows.firstIndex(where: { $0.id == sel.rowIndex })
+        else { return }
+        var rowTop: CGFloat = 0
+        for i in 0..<rowIdx {
+            rowTop += (modelRows[i].id == sel.rowIndex)
+                ? metrics.selectedRowHeight : metrics.rowHeight
+        }
+        let rowH = metrics.selectedRowHeight
+        let visibleH = max(0, availableGridH - timingBandH)
+        let curV = rowsScroll.vScrollOffsetPx
+        if rowTop < curV + pad {
+            rowsScroll.vScrollOffsetPx = max(0, rowTop - pad)
+        } else if rowTop + rowH > curV + visibleH - pad {
+            rowsScroll.vScrollOffsetPx = max(0, rowTop + rowH - visibleH + pad)
+        }
+    }
+
     /// Zoom out so the full sequence duration fits inside the available
     /// horizontal content width. Runs once per sequence load (tracked by
     /// `fitDurationMS`) so later user zoom isn't clobbered.
@@ -355,6 +407,9 @@ struct SequencerGridV2View: View {
     ) -> some View {
         var actions = EffectCanvasActions()
         actions.onPinchZoom = pinchZoomAction
+        actions.onSeekToMS = { ms in
+            viewModel.seekTo(ms: ms)
+        }
         return TimingEffectsCanvas(
             rows: timingRows,
             rowHeight: metrics.timingRowHeight,
@@ -513,17 +568,48 @@ private struct PlayPositionMarker: View {
     let gridWidth: CGFloat
     let gridHeight: CGFloat
 
+    private static let flagHalf: CGFloat = 10
+    private static let flagHeight: CGFloat = 10
+
     var body: some View {
         let active = viewModel.isPlaying || viewModel.isPaused
         let worldX = CGFloat(viewModel.playPositionMS) * timeline.pixelsPerMS
         let visibleX = worldX - timeline.hScrollOffsetPx
         let availableW = gridWidth - rowHeaderWidth
         if active, visibleX >= 0, visibleX <= availableW {
-            Rectangle()
-                .fill(Color.red.opacity(0.85))
-                .frame(width: 2, height: gridHeight)
-                .offset(x: rowHeaderWidth + visibleX, y: 0)
+            // Both the line and the triangle are drawn by a single
+            // Shape so their x centers align automatically — nothing
+            // to offset mismatch. The shape's width is 2*flagHalf;
+            // the outer offset places the shape's center exactly on
+            // the play line's world position.
+            PlayheadShape(flagHalf: Self.flagHalf,
+                           flagHeight: Self.flagHeight)
+                .fill(Color.red)
+                .frame(width: Self.flagHalf * 2, height: gridHeight)
+                .offset(x: rowHeaderWidth + visibleX - Self.flagHalf, y: 0)
+                .allowsHitTesting(false)
         }
+    }
+}
+
+/// Single shape that combines the play-head triangle flag at the top
+/// and the full-height vertical line, both centered on the shape's
+/// midX so there's no sub-pixel offset between them.
+private struct PlayheadShape: Shape {
+    let flagHalf: CGFloat
+    let flagHeight: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let cx = rect.midX
+        // Triangle flag (apex pointing down).
+        p.move(to: CGPoint(x: cx - flagHalf, y: 0))
+        p.addLine(to: CGPoint(x: cx + flagHalf, y: 0))
+        p.addLine(to: CGPoint(x: cx, y: flagHeight))
+        p.closeSubpath()
+        // Full-height line.
+        p.addRect(CGRect(x: cx - 1, y: 0, width: 2, height: rect.height))
+        return p
     }
 }
 

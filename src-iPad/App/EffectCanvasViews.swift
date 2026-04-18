@@ -432,6 +432,7 @@ final class EffectsCanvasUIView: UIView {
     // stops moving but stays near the edge.
     private var autoScrollLink: CADisplayLink?
     private var autoScrollSpeedX: CGFloat = 0
+    private var autoScrollSpeedY: CGFloat = 0
     private var lastDragLocationInSelf: CGPoint = .zero
 
     override var intrinsicContentSize: CGSize { totalSize }
@@ -510,6 +511,10 @@ final class EffectsCanvasUIView: UIView {
                            x1: x1, x2: x2, top: top, bottom: bottom, mid: mid,
                            effect: effect, isSelected: isSelected,
                            rowIndex: row.id, effectIndex: eIdx)
+                if isDragged, let d = drag {
+                    drawDragFeedback(cg: cg, x1: x1, x2: x2, top: top,
+                                     effect: effect, d: d)
+                }
             }
         }
 
@@ -549,8 +554,86 @@ final class EffectsCanvasUIView: UIView {
                                     width: max(1, x2 - x1),
                                     height: bottom - top))
                 }
+                drawDragFeedback(cg: cg, x1: x1, x2: x2, top: top,
+                                 effect: effect, d: d)
             }
         }
+    }
+
+    /// Short floating label that shows the value being changed during
+    /// a live drag — the new start time for a move/resize-left, the
+    /// new end time for resize-right, or the fade duration for fade
+    /// drags. Positioned just above the effect rect; draws with a
+    /// semi-transparent black pill so it's legible against any
+    /// background color the grid is using.
+    private func drawDragFeedback(cg: CGContext,
+                                   x1: CGFloat, x2: CGFloat, top: CGFloat,
+                                   effect: SequencerViewModel.EffectInfo,
+                                   d: DragState) {
+        let labelText: String
+        switch d.kind {
+        case .move:
+            let s = liveStartMS ?? effect.startTimeMS
+            let e = liveEndMS   ?? effect.endTimeMS
+            labelText = "\(Self.formatTimeMS(s)) – \(Self.formatTimeMS(e))"
+        case .resizeLeft:
+            let s = liveStartMS ?? effect.startTimeMS
+            let e = liveEndMS   ?? effect.endTimeMS
+            labelText = "\(Self.formatTimeMS(s)) (\(Self.formatDurMS(e - s)))"
+        case .resizeRight:
+            let s = liveStartMS ?? effect.startTimeMS
+            let e = liveEndMS   ?? effect.endTimeMS
+            labelText = "\(Self.formatTimeMS(e)) (\(Self.formatDurMS(e - s)))"
+        case .fadeIn:
+            labelText = "fade in: \(Self.formatFade(liveFadeInSec ?? 0))"
+        case .fadeOut:
+            labelText = "fade out: \(Self.formatFade(liveFadeOutSec ?? 0))"
+        }
+
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 10, weight: .medium),
+            .foregroundColor: UIColor.white,
+        ]
+        let textSize = (labelText as NSString).size(withAttributes: attrs)
+        let padX: CGFloat = 5
+        let padY: CGFloat = 2
+        let w = textSize.width + padX * 2
+        let h = textSize.height + padY * 2
+        // Prefer placing above the effect; flip below if we'd clip
+        // off the top of the canvas.
+        let effectCenterX = (x1 + x2) / 2
+        let pillX = max(2, min(totalSize.width - w - 2, effectCenterX - w / 2))
+        let pillY = top - h - 2 >= 0 ? top - h - 2 : top + 2
+        let pillRect = CGRect(x: pillX, y: pillY, width: w, height: h)
+        let path = CGPath(roundedRect: pillRect,
+                           cornerWidth: 3, cornerHeight: 3, transform: nil)
+        cg.addPath(path)
+        cg.setFillColor(UIColor.black.withAlphaComponent(0.75).cgColor)
+        cg.fillPath()
+        (labelText as NSString).draw(
+            at: CGPoint(x: pillX + padX, y: pillY + padY),
+            withAttributes: attrs)
+    }
+
+    /// Format a millisecond timestamp as m:ss.mmm, mirroring the
+    /// ruler labels so the user sees consistent time values.
+    private static func formatTimeMS(_ ms: Int) -> String {
+        let sign = ms < 0 ? "-" : ""
+        let m = abs(ms)
+        return String(format: "%@%d:%02d.%03d",
+                      sign, m / 60000, (m / 1000) % 60, m % 1000)
+    }
+
+    private static func formatDurMS(_ ms: Int) -> String {
+        let seconds = Double(ms) / 1000.0
+        if seconds >= 10 {
+            return String(format: "%.1fs", seconds)
+        }
+        return String(format: "%.2fs", seconds)
+    }
+
+    private static func formatFade(_ seconds: Float) -> String {
+        return String(format: "%.2fs", seconds)
     }
 
     private func drawEffect(cg: CGContext,
@@ -598,10 +681,29 @@ final class EffectsCanvasUIView: UIView {
 
         cg.setStrokeColor(strokeColor.cgColor)
         cg.setLineWidth(1)
+        // Precompute where the optional name label will sit so the
+        // right-hand centerline stops short of it instead of drawing
+        // under the glyphs.
+        let nameAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.systemFont(ofSize: 10, weight: .medium),
+            .foregroundColor: strokeColor.withAlphaComponent(0.95),
+        ]
+        let nameSize = (effect.name as NSString).size(withAttributes: nameAttrs)
+        let nameStartX = iconRight + 4
+        let nameMaxX = x2 - 3
+        let showName = !effect.name.isEmpty
+            && width > 70
+            && (nameMaxX - nameStartX) > 14
+        let nameEndX: CGFloat = showName
+            ? min(nameStartX + nameSize.width, nameMaxX)
+            : iconRight
+
         if hasIconRoom {
             cg.move(to: CGPoint(x: x1, y: mid + 0.5))
             cg.addLine(to: CGPoint(x: iconLeft, y: mid + 0.5))
-            cg.move(to: CGPoint(x: iconRight, y: mid + 0.5))
+            // Start centerline after the name label (if any) so the
+            // stroke doesn't bleed through the text.
+            cg.move(to: CGPoint(x: nameEndX + 2, y: mid + 0.5))
             cg.addLine(to: CGPoint(x: x2, y: mid + 0.5))
             cg.strokePath()
 
@@ -634,6 +736,18 @@ final class EffectsCanvasUIView: UIView {
                                       width: textSize.width,
                                       height: textSize.height)
                 (label as NSString).draw(in: textRect, withAttributes: attrs)
+            }
+
+            // Effect name label, drawn to the right of the icon when
+            // there's comfortable room for it. Clips at the right
+            // edge; no manual truncation needed.
+            if showName {
+                let textRect = CGRect(x: nameStartX,
+                                       y: mid - nameSize.height / 2,
+                                       width: nameMaxX - nameStartX,
+                                       height: nameSize.height)
+                (effect.name as NSString).draw(in: textRect,
+                                                withAttributes: nameAttrs)
             }
         } else {
             // Dash through center.
@@ -711,24 +825,24 @@ final class EffectsCanvasUIView: UIView {
         addGestureRecognizer(pinch)
 
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(onLongPress(_:)))
-        longPress.minimumPressDuration = 0.45
-        longPress.allowableMovement = 10
+        // Slightly more grace time before long-press wins so users
+        // have room to transition from "tap to select" into a drag
+        // without accidentally summoning the context menu. The low
+        // `allowableMovement` keeps the long-press from hijacking a
+        // drag that clearly began moving.
+        longPress.minimumPressDuration = 0.6
+        longPress.allowableMovement = 4
         longPress.delegate = gestureDelegate
         addGestureRecognizer(longPress)
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
-        // Now that the canvas is attached to the view hierarchy, tell
-        // the enclosing UIScrollView's pan to wait for our pan to fail
-        // before scrolling. When our pan.shouldBegin returns true (a
-        // drag target is under the finger), the scroll view's pan is
-        // blocked and the grid stays still during the drag; when we
-        // return false, the scroll view's pan takes over normally.
-        guard window != nil,
-              let ourPan = ownPanRecognizer,
-              let sv = findEnclosingScrollView() else { return }
-        sv.panGestureRecognizer.require(toFail: ourPan)
+        // Scroll-vs-drag fight is resolved via the enable/disable
+        // dance on `pan.began` below — no `require(toFail:)` is set
+        // here. Earlier attempts to set it at view-attach time proved
+        // brittle against the SyncedScrollView's host lifecycle and
+        // occasionally left the scroll view's pan stuck waiting.
     }
 
     @objc private func onLongPress(_ g: UILongPressGestureRecognizer) {
@@ -1078,16 +1192,28 @@ final class EffectsCanvasUIView: UIView {
             _ = prevStart; _ = prevEnd
             if let ls = liveStartMS { dragMinMS = min(dragMinMS, ls) }
             if let le = liveEndMS   { dragMaxMS = max(dragMaxMS, le) }
-            let slop: CGFloat = 16
+            // Wider slop during drag so the floating time/fade
+            // feedback label (which can be ~160 px wide and is
+            // centered on the effect) doesn't leave trails when the
+            // effect itself is narrow.
+            let slop: CGFloat = 100
             let x1 = CGFloat(dragMinMS) * pixelsPerMS - slop
             let x2 = CGFloat(dragMaxMS) * pixelsPerMS + slop
             invalidate(xRanges: [x1...x2])
         case .ended, .cancelled, .failed:
-            guard let d = drag else { drag = nil; return }
+            // Always restore the scroll view's pan first so a bail-out
+            // below doesn't leave the grid unscrollable.
+            suppressedScrollView?.panGestureRecognizer.isEnabled = true
+            suppressedScrollView = nil
+            guard let d = drag else {
+                drag = nil
+                stopAutoScroll()
+                return
+            }
             _ = d
             if let ls = liveStartMS { dragMinMS = min(dragMinMS, ls) }
             if let le = liveEndMS   { dragMaxMS = max(dragMaxMS, le) }
-            let endSlop: CGFloat = 16
+            let endSlop: CGFloat = 100
             let x1 = CGFloat(dragMinMS) * pixelsPerMS - endSlop
             let x2 = CGFloat(dragMaxMS) * pixelsPerMS + endSlop
             switch d.kind {
@@ -1132,10 +1258,6 @@ final class EffectsCanvasUIView: UIView {
             liveDropInvalid = false
             stopAutoScroll()
             invalidate(xRanges: [x1...x2])
-            // Re-enable the host UIScrollView's pan now that the drag
-            // is settled; the next touch can scroll normally again.
-            suppressedScrollView?.panGestureRecognizer.isEnabled = true
-            suppressedScrollView = nil
         default:
             break
         }
@@ -1173,20 +1295,32 @@ final class EffectsCanvasUIView: UIView {
         // view's visible rect (bounds within its own coordinate space).
         let inSV = convert(lastDragLocationInSelf, to: sv)
         let visibleW = sv.bounds.width
-        let distLeft = inSV.x - 0
+        let visibleH = sv.bounds.height
+        let distLeft = inSV.x
         let distRight = visibleW - inSV.x
+        let distTop = inSV.y
+        let distBottom = visibleH - inSV.y
         let margin = Self.autoScrollMargin
 
-        var speed: CGFloat = 0
+        var speedX: CGFloat = 0
         if distLeft < margin {
             let t = max(0, min(1, (margin - distLeft) / margin))
-            speed = -t * Self.autoScrollMaxPxPerFrame
+            speedX = -t * Self.autoScrollMaxPxPerFrame
         } else if distRight < margin {
             let t = max(0, min(1, (margin - distRight) / margin))
-            speed = t * Self.autoScrollMaxPxPerFrame
+            speedX = t * Self.autoScrollMaxPxPerFrame
         }
-        autoScrollSpeedX = speed
-        if speed == 0 {
+        var speedY: CGFloat = 0
+        if distTop < margin {
+            let t = max(0, min(1, (margin - distTop) / margin))
+            speedY = -t * Self.autoScrollMaxPxPerFrame
+        } else if distBottom < margin {
+            let t = max(0, min(1, (margin - distBottom) / margin))
+            speedY = t * Self.autoScrollMaxPxPerFrame
+        }
+        autoScrollSpeedX = speedX
+        autoScrollSpeedY = speedY
+        if speedX == 0 && speedY == 0 {
             stopAutoScroll()
         } else if autoScrollLink == nil {
             let link = CADisplayLink(target: self, selector: #selector(autoScrollTick))
@@ -1206,34 +1340,42 @@ final class EffectsCanvasUIView: UIView {
             stopAutoScroll(); return
         }
         let maxX = max(0, sv.contentSize.width - sv.bounds.width)
+        let maxY = max(0, sv.contentSize.height - sv.bounds.height)
         let newX = max(0, min(maxX, sv.contentOffset.x + autoScrollSpeedX))
-        if newX == sv.contentOffset.x {
-            // Hit a viewport edge — further scroll is a no-op.
+        let newY = max(0, min(maxY, sv.contentOffset.y + autoScrollSpeedY))
+        if newX == sv.contentOffset.x && newY == sv.contentOffset.y {
             return
         }
-        sv.contentOffset = CGPoint(x: newX, y: sv.contentOffset.y)
+        let dx = newX - sv.contentOffset.x
+        let dy = newY - sv.contentOffset.y
+        sv.contentOffset = CGPoint(x: newX, y: newY)
         // Re-run live drag math with the scrolled-updated location.
-        // Finger's self-coord x shifts by the scroll delta, so using
-        // the latest `g.location(in: self)` would be ideal — but we
-        // don't have a live gesture ref here. Approximate by updating
-        // lastDragLocationInSelf by the scroll delta.
-        lastDragLocationInSelf.x = convertFingerLocationAfterScroll(
-            previous: lastDragLocationInSelf, scrollView: sv,
-            scrollDeltaX: autoScrollSpeedX)
-        // Synthesize an update of the drag state using the new finger
-        // location. Computes a virtual translation derived from where
-        // the finger would sit relative to the drag's origin.
+        lastDragLocationInSelf.x += dx
+        lastDragLocationInSelf.y += dy
+        // Re-evaluate cross-row hover using the new Y (for .move
+        // drags) so the ghost snaps to a newly-visible row.
+        if d.kind == .move {
+            let (tops, heights) = rowLayout()
+            var hoverId: Int? = nil
+            for i in 0..<rows.count {
+                if lastDragLocationInSelf.y >= tops[i]
+                    && lastDragLocationInSelf.y < tops[i] + heights[i] {
+                    hoverId = rows[i].id
+                    break
+                }
+            }
+            if let h = hoverId,
+               let r = rows.first(where: { $0.id == h }),
+               r.timing != nil {
+                hoverId = nil
+            }
+            let newLive = (hoverId == d.rowIndex) ? nil : hoverId
+            if newLive != liveRowId {
+                liveRowId = newLive
+                setNeedsDisplay()
+            }
+        }
         applyDragUpdateForCurrentFingerLocation(d: d)
-    }
-
-    private func convertFingerLocationAfterScroll(previous: CGPoint,
-                                                   scrollView: UIScrollView,
-                                                   scrollDeltaX: CGFloat) -> CGFloat {
-        // Finger's visible-screen position hasn't changed, so its
-        // x-in-self advances by the same amount the content offset
-        // moved — mirroring what would happen on the next finger-move
-        // gesture tick.
-        return previous.x + scrollDeltaX
     }
 
     /// Replays the drag's `.changed` math from the current
@@ -1296,6 +1438,7 @@ final class EffectsCanvasUIView: UIView {
         autoScrollLink?.invalidate()
         autoScrollLink = nil
         autoScrollSpeedX = 0
+        autoScrollSpeedY = 0
     }
 
     private var pinchAnchorX: CGFloat = 0
@@ -1335,6 +1478,18 @@ final class EffectsCanvasUIView: UIView {
             || hit.zone == .fadeIn
             || hit.zone == .fadeOut
     }
+
+    /// Attach `ourPan` to the enclosing UIScrollView's pan recognizer
+    /// as a required-failure dependency, so the scroll view's pan
+    /// can't fire while our pan is live. Called from the delegate's
+    /// `shouldBegin` every time our pan wants to start, so the
+    /// relationship stays attached to whatever scroll view currently
+    /// wraps us (view switches / host rebuilds can swap it out).
+    /// Setting the same requirement repeatedly is idempotent.
+    func ensureScrollViewRequiresFailure(of ourPan: UIPanGestureRecognizer) {
+        guard let sv = findEnclosingScrollView() else { return }
+        sv.panGestureRecognizer.require(toFail: ourPan)
+    }
 }
 
 /// Keeps the outer UIScrollView's own gestures from fighting with our
@@ -1351,15 +1506,23 @@ final class CanvasGestureDelegate: NSObject, UIGestureRecognizerDelegate {
         }
         if let pan = g as? UIPanGestureRecognizer {
             let p = pan.location(in: view)
-            return view.canvasHasDragCandidate(at: p)
+            let hasCandidate = view.canvasHasDragCandidate(at: p)
+            if hasCandidate {
+                // Re-assert require-to-fail against the current
+                // enclosing scroll view every time our pan intends
+                // to begin. Cheap if already set (UIKit stores these
+                // in a set), correct if the scroll view was swapped.
+                view.ensureScrollViewRequiresFailure(of: pan)
+            }
+            return hasCandidate
         }
         return true
     }
 
-    // Pan-vs-pan: if our pan wants to recognize, don't let the
-    // surrounding UIScrollView's pan run at the same time — otherwise
-    // the grid scrolls along with an effect drag/resize. Other gesture
-    // pairings (pinch + pan for zoom during scroll) still simulcast.
+    // Pan-vs-pan: block the enclosing UIScrollView's pan from
+    // running at the same time as ours. Our `shouldBegin` already
+    // filters based on drag-candidate, so the scroll view still
+    // takes over cleanly when the touch has no effect under it.
     func gestureRecognizer(_ g: UIGestureRecognizer,
                            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
         if g is UIPanGestureRecognizer && other is UIPanGestureRecognizer {
@@ -1524,6 +1687,11 @@ final class TimingCanvasUIView: UIView {
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(onPinch(_:)))
         pinch.delegate = passthroughDelegate
         addGestureRecognizer(pinch)
+        // Tap anywhere in the timing band to seek — matches the
+        // ruler behavior so any time-axis strip is a seek target.
+        let tap = UITapGestureRecognizer(target: self, action: #selector(onSeekTap(_:)))
+        tap.delegate = passthroughDelegate
+        addGestureRecognizer(tap)
     }
 
     private lazy var passthroughDelegate: PassthroughGestureDelegate = {
@@ -1542,6 +1710,29 @@ final class TimingCanvasUIView: UIView {
         default:
             break
         }
+    }
+
+    @objc private func onSeekTap(_ g: UITapGestureRecognizer) {
+        guard pixelsPerMS > 0 else { return }
+        let p = g.location(in: self)
+        let ms = max(0, Int(p.x / pixelsPerMS))
+        // Snap to the nearest timing-mark edge within 8 px so a
+        // "tap on a mark" lands exactly on the mark's start/end.
+        let thresholdMS = Int(8.0 / pixelsPerMS)
+        var bestMS = ms
+        var bestDist = thresholdMS + 1
+        for row in rows {
+            for e in row.effects {
+                for candidate in [e.startTimeMS, e.endTimeMS] {
+                    let d = abs(candidate - ms)
+                    if d < bestDist {
+                        bestDist = d
+                        bestMS = candidate
+                    }
+                }
+            }
+        }
+        actions.onSeekToMS(bestMS)
     }
 }
 

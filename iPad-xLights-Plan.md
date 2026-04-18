@@ -517,7 +517,19 @@ verifiable on device:
   `timingScroll: RowsScrollState` via `SyncedScrollView`, so
   vertical scroll in either pane keeps them aligned. The "Start
   Output" toolbar button was removed for the MVP -- controller
-  output isn't in scope for initial ship. Canvas virtualization:
+  output isn't in scope for initial ship. View-switch alignment
+  fix: `modelAreaH` used to be
+  `max(modelRowsH, availableGridH - timingBandH)` which
+  over-proposed hosted-content height to the
+  `SyncedScrollView`'s inner UIHostingController; when switching
+  to a view with few model rows and no timing band, SwiftUI's
+  layout of the underfilled VStack on the header side and the
+  canvas UIViewRepresentable on the effects side diverged,
+  pushing headers to the bottom while effects stayed at the
+  top. `modelAreaH` is now just `modelRowsH` (content-only); a
+  trailing `Spacer(minLength: 0)` + `.frame(maxHeight:
+  .infinity, alignment: .top)` on the header VStack is a
+  belt-and-suspenders top-align. Canvas virtualization:
   the ruler+waveform, timing-effects, and model-effects canvases
   would previously blow past Metal's ~16k texture limit at high
   zoom (CoreAnimation logged "Ignoring bogus layer size
@@ -633,15 +645,15 @@ verifiable on device:
   `hitTestEffect`. The Representable adds a selection-row-change
   check to its `fullInvalidate` bit so rows below the selected row
   repaint at their new Y when the selection moves. Scroll-vs-drag
-  fight resolved: `EffectsCanvasUIView.didMoveToWindow` calls
-  `scrollView.panGestureRecognizer.require(toFail: ourPan)` so the
-  enclosing `SyncedScrollView` waits for our pan to resolve — if
-  the touch has no drag target, our pan fails immediately and the
-  scroll view scrolls normally; otherwise scrolling is blocked
-  for the whole drag. A belt-and-suspenders `isEnabled = false`
-  on drag.began cancels any scroll that may have already started
-  during the shouldBegin race, and the delegate also returns
-  `false` from `shouldRecognizeSimultaneouslyWith` for pan-vs-pan.
+  fight resolved by disabling the enclosing UIScrollView's pan
+  recognizer on `pan.began` inside `EffectsCanvasUIView` and
+  re-enabling it on `.ended/.cancelled/.failed` (before any other
+  bail-out so the scroll view can never be left stuck off). An
+  earlier attempt using `require(toFail:)` in `didMoveToWindow`
+  proved brittle against the SyncedScrollView's host lifecycle —
+  after a view switch the require relationship was sometimes
+  attached to a stale recognizer and drag stopped starting, so
+  that path was removed.
   Overlap protection: the canvas's live clamp now respects
   neighbor effect bounds on the same row — `minStartMS` and
   `maxEndMS` are captured on drag.began (from prev/next effects'
@@ -695,7 +707,38 @@ verifiable on device:
   adjusted finger position so `liveStartMS`/`liveEndMS` keep
   tracking the finger as the content shifts under it. Stopped
   automatically when the finger moves away from the edge, on
-  `.ended`, or when the scroll view hits a boundary]** ->
+  `.ended`, or when the scroll view hits a boundary.
+  Drag-time floating feedback: during any drag, a small black
+  pill with white text floats just above the dragged effect
+  showing the current value — `"m:ss.mmm – m:ss.mmm"` for moves,
+  `"m:ss.mmm (1.23s)"` for resizes, `"fade in/out: 0.50s"` for
+  fade drags. Invalidation slop bumped to 100 px during drag so
+  the pill doesn't leave trails when the effect is narrow.
+  Arrow-key navigation: Left/Right cycles effects within the
+  current row (wraps at ends), Up/Down moves to the nearest
+  model row and picks the effect whose time range most overlaps
+  (falls back to closest-in-time). Escape clears selection.
+  Home/End seek to sequence start/end; ',' / '.' step back /
+  forward one frame interval. Cmd+D duplicates the selected
+  effect immediately after its end time (clipboard preserved).
+  Ruler-seek and timing-band seek both snap to the nearest
+  timing-mark edge within 8 px so a tap on a mark lands
+  exactly on the mark's start or end time.
+  `SequencerGridV2View.scrollSelectionIntoView` runs on every
+  `selectedEffect` change to nudge horizontal scroll (pad
+  closest edge or center if fully off-screen) and model-rows
+  vertical scroll so arrow-key navigation off-screen still
+  reveals the result. Play-position marker gained a red
+  triangle "flag" at the top of the ruler in addition to the
+  full-height line. Auto-scroll now covers both axes — a drag
+  whose finger is within 60 px of the top or bottom edge
+  scrolls the model rows vertically, re-evaluating cross-row
+  hover each frame so the ghost snaps to newly-visible rows.
+  Effect rectangles wider than ~70 px now show the effect name
+  to the right of the icon (drawn on top of the centerline,
+  clipped at the right bracket). Cmd+- / Cmd+= map to the
+  zoom-out / zoom-in toolbar buttons so hardware keyboards
+  don't need to reach for the touch targets]** ->
 - B-9 selection-scoped scrub **[landed; `SequencerViewModel.startScrub`
   runs a frame-interval timer that loops `playPositionMS` over the
   selected effect's range. Starts on `selectEffect`, stops on

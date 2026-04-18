@@ -954,6 +954,74 @@ class SequencerViewModel {
     private var clipboard: EffectClipboard?
     var hasClipboard: Bool { clipboard != nil }
 
+    // MARK: - Arrow-key navigation
+
+    /// Move selection to the previous effect in the same row. Wraps
+    /// within the row at the ends so repeated presses cycle.
+    func selectPreviousEffect() {
+        guard let sel = selectedEffect,
+              sel.rowIndex < rows.count else { return }
+        let row = rows[sel.rowIndex]
+        guard !row.effects.isEmpty else { return }
+        let newIdx = sel.effectIndex > 0
+            ? sel.effectIndex - 1
+            : row.effects.count - 1
+        selectEffect(rowIndex: sel.rowIndex, effectIndex: newIdx)
+    }
+
+    /// Move selection to the next effect in the same row. Wraps at
+    /// the end.
+    func selectNextEffect() {
+        guard let sel = selectedEffect,
+              sel.rowIndex < rows.count else { return }
+        let row = rows[sel.rowIndex]
+        guard !row.effects.isEmpty else { return }
+        let newIdx = sel.effectIndex + 1 < row.effects.count
+            ? sel.effectIndex + 1
+            : 0
+        selectEffect(rowIndex: sel.rowIndex, effectIndex: newIdx)
+    }
+
+    /// Move selection to the nearest model row above / below,
+    /// preferring the effect whose time range most overlaps the
+    /// current selection and falling back to the effect whose center
+    /// is closest in time. Timing rows are skipped.
+    func selectEffectAbove() { navigateRow(direction: -1) }
+    func selectEffectBelow() { navigateRow(direction: 1) }
+
+    private func navigateRow(direction: Int) {
+        guard let sel = selectedEffect else { return }
+        let currentRowId = sel.rowIndex
+        let modelRows = rows.filter { $0.timing == nil }
+        guard let curPos = modelRows.firstIndex(where: { $0.id == currentRowId })
+        else { return }
+        let targetPos = curPos + direction
+        guard targetPos >= 0, targetPos < modelRows.count else { return }
+        let targetRow = modelRows[targetPos]
+        let selStart = sel.startTimeMS
+        let selEnd = sel.endTimeMS
+        var bestIdx: Int? = nil
+        var bestOverlap: Int = 0
+        var closestIdx: Int? = nil
+        var closestDist: Int = Int.max
+        for (i, e) in targetRow.effects.enumerated() {
+            let overlap = max(0, min(selEnd, e.endTimeMS) - max(selStart, e.startTimeMS))
+            if overlap > bestOverlap {
+                bestOverlap = overlap
+                bestIdx = i
+            }
+            let mid = (e.startTimeMS + e.endTimeMS) / 2
+            let selMid = (selStart + selEnd) / 2
+            let dist = abs(mid - selMid)
+            if dist < closestDist {
+                closestDist = dist
+                closestIdx = i
+            }
+        }
+        guard let newIdx = bestIdx ?? closestIdx else { return }
+        selectEffect(rowIndex: targetRow.id, effectIndex: newIdx)
+    }
+
     func copySelectedEffect() {
         guard let sel = selectedEffect else { return }
         let name = document.effectName(forRow: Int32(sel.rowIndex), at: Int32(sel.effectIndex)) ?? sel.name
@@ -961,6 +1029,22 @@ class SequencerViewModel {
         let palette = document.effectPaletteString(forRow: Int32(sel.rowIndex), at: Int32(sel.effectIndex)) ?? ""
         clipboard = EffectClipboard(name: name, settings: settings, palette: palette,
                                     durationMS: sel.endTimeMS - sel.startTimeMS)
+    }
+
+    /// Duplicate the selected effect immediately after itself on the
+    /// same row (paste at sel.endTimeMS). Quiet no-op if there isn't
+    /// enough room before the next effect — the bridge's add path
+    /// rejects the overlap.
+    func duplicateSelectedEffect() {
+        guard let sel = selectedEffect else { return }
+        let prevClipboard = clipboard
+        copySelectedEffect()
+        pasteEffect(rowIndex: sel.rowIndex, startMS: sel.endTimeMS)
+        // Restore the clipboard so duplicate doesn't stomp whatever
+        // the user had on the Paste Here buffer from Cmd+C earlier.
+        if let prev = prevClipboard {
+            clipboard = prev
+        }
     }
 
     /// Paste the clipboard onto `rowIndex` starting at `startMS`. Preserves the
