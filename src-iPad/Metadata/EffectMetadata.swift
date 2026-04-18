@@ -215,3 +215,45 @@ func parseEffectMetadata(_ jsonString: String) -> EffectMetadata? {
         return nil
     }
 }
+
+// MARK: - Synthetic PropertyMetadata
+
+extension PropertyMetadata {
+    /// Build a `PropertyMetadata` from raw field values — used by custom
+    /// compound rows that want to delegate rendering of a sub-control
+    /// (slider with VC, for instance) to `EffectPropertyView` without
+    /// reinventing its state wiring. Internally JSON-encodes the dict
+    /// and re-decodes so every Codable-only field gets the same default
+    /// initialisation as a file-loaded property.
+    static func makeSynthetic(id: String,
+                               label: String,
+                               type: String = "float",
+                               controlType: String,
+                               defaultValue: Any? = nil,
+                               min: Double? = nil,
+                               max: Double? = nil,
+                               divisor: Int? = nil,
+                               valueCurve: Bool = false,
+                               vcMin: Double? = nil,
+                               vcMax: Double? = nil,
+                               settingPrefix: String? = nil) -> PropertyMetadata? {
+        var obj: [String: Any] = [
+            "id": id,
+            "label": label,
+            "type": type,
+            "controlType": controlType,
+        ]
+        if let d = defaultValue { obj["default"] = d }
+        if let v = min { obj["min"] = v }
+        if let v = max { obj["max"] = v }
+        if let v = divisor { obj["divisor"] = v }
+        if valueCurve { obj["valueCurve"] = true }
+        if let v = vcMin { obj["vcMin"] = v }
+        if let v = vcMax { obj["vcMax"] = v }
+        if let v = settingPrefix { obj["settingPrefix"] = v }
+        guard let data = try? JSONSerialization.data(withJSONObject: obj) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(PropertyMetadata.self, from: data)
+    }
+}

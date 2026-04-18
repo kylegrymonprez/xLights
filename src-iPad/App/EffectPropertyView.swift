@@ -102,6 +102,41 @@ struct EffectPropertyView: View {
             TransitionHeaderRowView(isIn: true)
         case "Out_Transition_Header":
             TransitionHeaderRowView(isIn: false)
+        case "ChromaKeyRow":
+            ChromaKeyRowView()
+        case "SparklesRow":
+            SparklesRowView()
+        case "Shader_SpeedRow":
+            ShaderSpeedRowView()
+        case "State_StateSource":
+            StateStateSourceRowView()
+        case "Faces_MouthMovements":
+            FacesMouthMovementsRowView()
+        case "Morph_QuickSet":
+            MorphQuickSetRowView()
+        case "Servo_StartEndRow":
+            ServoStartEndRowView()
+        case "Servo_ButtonRow":
+            ServoButtonRowView()
+        case "Shape_Font":
+            ShapeFontRowView()
+        case "Shape_Char":
+            ShapeCharRowView()
+        case "Shape_SkinTone":
+            ShapeSkinToneRowView()
+        case "SVG":
+            ShapeSVGRowView()
+        case "Ripple_SVG":
+            RippleSVGRowView()
+        case "ResetPanelRow":
+            // Desktop's "Reset panel when changing effects" preference
+            // checkbox — persisted to wxConfig (xLightsResetColorPanel /
+            // xLightsResetBufferPanel / xLightsResetBlendingPanel), not
+            // serialized with the effect. iPad doesn't currently reset
+            // panel state on effect change, so the toggle has nothing to
+            // govern. Render nothing (and don't leave a "(custom)"
+            // placeholder) rather than show a dead control.
+            EmptyView()
         default:
             customPlaceholder
         }
@@ -117,9 +152,8 @@ struct EffectPropertyView: View {
         // Derive live values from the observed rawValue on every body eval,
         // so the displayed text updates as the user slides.
         let storedInt = Int(rawValue) ?? 0
-        let displayValue = Double(storedInt) / Double(divisor)
 
-        let binding = Binding<Double>(
+        let sliderBinding = Binding<Double>(
             get: { Double(storedInt) },
             set: { newVal in
                 writeValue(String(Int(newVal)))
@@ -140,30 +174,27 @@ struct EffectPropertyView: View {
                 Text(property.label)
                     .font(.caption)
                 Spacer()
-                Text(divisor > 1
-                     ? String(format: "%.\(divisorDecimals(divisor))f", displayValue)
-                     : "\(storedInt)")
-                    .monospacedDigit()
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                // Editable value field — users can tap to type a precise
+                // value instead of scrubbing the slider (critical for
+                // large ranges and float-divisor sliders). Clamps to
+                // [min, max] on commit; invalid input reverts on blur.
+                EditableNumberField(
+                    storedInt: storedInt,
+                    min: Int(minVal),
+                    max: Int(maxVal),
+                    divisor: divisor,
+                    commit: { newInt in writeValue(String(newInt)) }
+                )
+                .disabled(vcActive)
                 if property.valueCurve == true {
                     ValueCurveButton(property: property, prefix: metadataPrefix)
                 }
             }
-            Slider(value: binding, in: minVal...maxVal, step: 1)
+            Slider(value: sliderBinding, in: minVal...maxVal, step: 1)
                 .opacity(vcActive ? 0.4 : 1.0)
                 .disabled(vcActive)
         }
         .padding(.vertical, 2)
-    }
-
-    private func divisorDecimals(_ divisor: Int) -> Int {
-        switch divisor {
-        case 10: return 1
-        case 100: return 2
-        case 1000: return 3
-        default: return 2
-        }
     }
 
     // MARK: - Checkbox
@@ -229,25 +260,26 @@ struct EffectPropertyView: View {
     private var spinView: some View {
         let minVal = Int(property.min ?? 0)
         let maxVal = Int(property.max ?? 100)
+        let stored = Int(rawValue) ?? Int(defaultValueString) ?? 0
         let binding = Binding<Int>(
-            get: { Int(rawValue) ?? Int(defaultValueString) ?? 0 },
+            get: { stored },
             set: { writeValue(String($0)) }
         )
-        // The value text has to live OUTSIDE the Stepper — when it's
-        // passed as the Stepper's label closure, `.labelsHidden()`
-        // hides it along with the label, leaving just -/+ with no
-        // readout. Keeping it as a sibling in the HStack keeps the
-        // value visible while still compacting the Stepper to just
-        // its buttons.
+        // Editable value field + Stepper. The field is essential for
+        // large default ranges like FreezeEffectAtFrame (default
+        // 999999) — no user is scrolling from 999999 down to 100 via
+        // ±1 taps. Commit on return / blur, clamped to [min, max].
         return HStack {
             Text(property.label)
                 .font(.caption)
             Spacer()
-            Text("\(binding.wrappedValue)")
-                .monospacedDigit()
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .frame(minWidth: 48, alignment: .trailing)
+            EditableNumberField(
+                storedInt: stored,
+                min: minVal,
+                max: maxVal,
+                divisor: 1,
+                commit: { newInt in writeValue(String(newInt)) }
+            )
             Stepper("", value: binding, in: minVal...maxVal)
                 .labelsHidden()
         }

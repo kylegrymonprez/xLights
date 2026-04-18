@@ -773,7 +773,7 @@ each row is addressed in the sub-phases below.
 |---|---|---|
 | `controlType: filepicker` | 2 props (Glediator, VUMeter file) | **landed (C-2)** — `FilepickerPropertyView`: `.fileImporter` sheet filtered by UTTypes parsed from `fileFilter`; stores absolute path + registers security-scoped bookmark via `obtainAccessToPath:` |
 | `controlType: fontpicker` | 1 prop (Text_Font) | **landed (C-2)** — `FontpickerPropertyView` sheet over `UIFont.familyNames` + size stepper + bold/italic; stores wx `NativeFontInfo` user-desc (e.g. `"bold Arial 26 utf-8"`) that the Phase A-2 `ParseFontString` already round-trips |
-| `controlType: custom` beyond PaletteHeaderRow | 38 props, 15 effects | **in progress (C-6)** — 13 custom ids landed (Pictures/Video/Shader FilenameBlocks, Pictures/Video/Faces TransparentBlackRows, Text_File_Row, Morph_Swap, LayerMorphRow, LayerMethodRow, CanvasRow, In/Out_Transition_Header); rest pending |
+| `controlType: custom` beyond PaletteHeaderRow | 38 props, 15 effects | **in progress (C-6)** — 26 custom ids landed + ResetPanelRow hidden (27/38). Pending: DMX_ChannelsNotebook / DMX_ButtonsRow, Sketch_Info / Sketch_DefRow / Sketch_BackgroundRow, Video_DurationRow, Text_Font_XL_Row, Shader_DynamicParams |
 | `separator: true` | 3 uses | **landed (C-2)** — `Divider` inserted before property |
 | `suppressIfDefault: true` | 35 uses | **landed (C-2)** — write equal-to-default removes the key via bridge `removeEffectSettingForKey:` |
 | `lockable: true` | 261 uses | no lock UI |
@@ -983,31 +983,72 @@ tab they were on, not always "Effect" (persist in
    - **Text** -- `Text_File_Row` ✅ (reuses `EffectFilenameBlockView`
      on `E_FILEPICKERCTRL_Text_File`). `Text_Font_XL_Row` pending
      -- needs a bridge listing the xLights-bundled bitmap fonts.
-   - **Faces** -- `Faces_TransparentBlackRow` ✅.
-     `Faces_MouthMovements` pending -- phoneme vs timing-track
-     radio with different backing settings per branch.
-   - **Morph** -- `Morph_Swap` ✅ (action button in
-     `MorphSwapRowView.swift` — swaps Start↔End X1/Y1/X2/Y2 pairs
-     and matching `E_VALUECURVE_*` entries, mirroring
-     `MorphPanel::OnSwapClick`). `Morph_QuickSet` preset grid
-     pending.
-   - **Faces** -- `Faces_MouthMovements` (phoneme timing-track
-     picker), `Faces_TransparentBlackRow`.
-   - **Morph** -- `Morph_QuickSet` (preset sweep grid), `Morph_Swap`.
-   - **Servo** -- `Servo_StartEndRow` (dual sliders+VC with a link
-     toggle), `Servo_ButtonRow`.
+   - **Faces** -- `Faces_TransparentBlackRow` ✅,
+     `Faces_MouthMovements` ✅ (segmented Phoneme/Timing-Track radio;
+     phoneme list from `FacesPanel.cpp:64-74`; timing picker pulls
+     from `lyricTimingTracks` so only 3-layer tracks appear;
+     switching modes clears the unused backing field so the saved
+     effect advertises exactly one source).
+   - **Morph** -- `Morph_Swap` ✅ (`MorphSwapRowView` — swaps
+     Start↔End X1/Y1/X2/Y2 pairs + matching `E_VALUECURVE_*`
+     entries, mirroring `MorphPanel::OnSwapClick`).
+     `Morph_QuickSet` ✅ (`MorphQuickSetRowView` — 8-preset menu:
+     L→R, R→L, T→B, B→T full sweeps, diagonals, left/right single
+     sweeps; writes all eight X/Y keys at once).
+   - **Servo** -- `Servo_StartEndRow` ✅ (dual sliders, Start has a
+     VC button via a synthesized PropertyMetadata — backing
+     `E_TEXTCTRL_Servo` + `E_VALUECURVE_Servo`; End backing
+     `E_TEXTCTRL_EndValue`, no VC per desktop). `Servo_ButtonRow` ✅
+     (Equal copies Start→End, Swap exchanges).
+   - **State** -- `State_StateSource` ✅ (segmented radio between
+     State / Timing Track, each populates via `dynamicOptions`; the
+     unused backing field is cleared on switch).
+   - **Color panel compound rows** -- `ChromaKeyRow` ✅
+     (`ChromaKeyRowView` — enable toggle + sensitivity slider +
+     colour picker, backed by `C_CHECKBOX_Chroma`
+     `C_SLIDER_ChromaSensitivity` `C_COLOURPICKERCTRL_ChromaColour`;
+     slider/picker dim when disabled). `SparklesRow` ✅
+     (`SparklesRowView` — frequency slider + colour + "Reflect music"
+     toggle, backed by `C_SLIDER_SparkleFrequency`,
+     `C_COLOURPICKERCTRL_SparklesColour`, `C_CHECKBOX_MusicSparkles`;
+     VC editor on sparkle frequency is a follow-up). Shared-helper
+     colour conversion (`colorFromHex`/`hexFromColor`) lifted to
+     file-level scope in `ColorPanelCustomRows.swift` so future
+     colour-based customs can reuse it. `ResetPanelRow` skipped —
+     UI-only preference checkbox with no persisted data.
+   - **Shape** -- `Shape_Font` ✅ (reuses `FontpickerPropertyView` via
+     synthesised PropertyMetadata; stores `E_FONTPICKER_Shape_Font`).
+     `Shape_Char` ✅ (`ShapeCharRowView` — Unicode code-point spinner
+     + TextField for direct paste + live emoji glyph preview via
+     `Unicode.Scalar`; stores `E_SPINCTRL_Shape_Char`).
+     `Shape_SkinTone` ✅ (menu picker over the six fixed skin-tone
+     values; stores `E_CHOICE_Shape_SkinTone`).
+     `SVG` ✅ (`ShapeSVGRowView` — reuses `EffectFilenameBlockView`
+     on `E_FILEPICKERCTRL_SVG`).
+   - **Ripple** -- `Ripple_SVG` ✅ (same pattern as `SVG`, keyed to
+     `E_FILEPICKERCTRL_Ripple_SVG`).
    - **DMX** -- `DMX_ChannelsNotebook` (up to 48 channels, each with
-     slider + VC + invert toggle, labels from model),
-     `DMX_ButtonsRow` (Remap / Save As State / Load From State).
-   - **State** -- `State_StateSource` (state-definition vs
-     timing-track radio).
-   - **Shape** -- `Shape_Font`, `Shape_Char`, `Shape_SkinTone`, `SVG`.
+     slider + VC + invert toggle, labels from model) still pending —
+     needs bridge to expose model's per-channel DMX names.
+     `DMX_ButtonsRow` (Remap / Save As State / Load From State) still
+     pending — Save/Load depend on model-state persistence paths not
+     yet wired to iPad.
    - **Sketch** -- `Sketch_Info`, `Sketch_DefRow`,
-     `Sketch_BackgroundRow` (route into a Sketch-assist sheet;
-     lowest priority, can ship read-only first).
-   - **Ripple** -- `Ripple_SVG`.
-   - Color-panel compound rows (`ChromaKeyRow`, `SparklesRow`,
-     `ResetPanelRow`) handled under the Colors tab work.
+     `Sketch_BackgroundRow` still pending (Sketch-assist sheet).
+   - **Video** -- `Video_DurationRow` still pending — needs a bridge
+     that probes the picked file's duration via AVAsset + a
+     "match-effect-length" action.
+   - **Text** -- `Text_Font_XL_Row` still pending — needs a bridge
+     enumerating the xLights-bundled bitmap fonts under `fonts/`.
+   - **Shader** -- `Shader_DynamicParams` still pending — needs an
+     iPad `.fs` uniform parser to build sliders / checks / colour
+     pickers for the selected shader's declared uniforms.
+   - `Video_DurationRow` still pending (needs a bridge for the
+     picked video's total duration + a "match effect length" action).
+   - `Text_Font_XL_Row` still pending (needs bridge enumerating the
+     xLights-bundled bitmap fonts under `fonts/`).
+   - Shader `Shader_DynamicParams` still pending (needs an iPad
+     `.fs` uniform parser).
 7. **C-7 Lockable properties.** Small lock glyph next to each
    `lockable:true` property that writes `LOCK_<id>=1` into the
    effect's settings string. Low priority -- only relevant for
