@@ -706,6 +706,41 @@ class SequencerViewModel {
                                startMS: startMS, endMS: endMS)
     }
 
+    /// Tap-to-add flow from the grid: insert a new effect of the
+    /// currently armed palette type at `atMS`, spanning to the next
+    /// neighbor (or a default 1-second duration, whichever is shorter).
+    /// Clamped against the previous neighbor's end so we never start
+    /// inside another effect.
+    func addEffectFromPaletteTap(rowIndex: Int, atMS: Int) {
+        guard let paletteName = selectedPaletteEffect,
+              rowIndex < rows.count else { return }
+        let row = rows[rowIndex]
+
+        // Scan the row's existing effects for the neighbors around
+        // `atMS`. If the tap landed inside an existing effect, bail
+        // (the user meant to tap that effect — hit-test catches it
+        // normally, but rapid-tap edge cases can slip through).
+        var prevEnd = 0
+        var nextStart = Int.max
+        for e in row.effects {
+            if atMS >= e.startTimeMS && atMS < e.endTimeMS { return }
+            if e.endTimeMS <= atMS {
+                prevEnd = max(prevEnd, e.endTimeMS)
+            } else if e.startTimeMS > atMS {
+                nextStart = min(nextStart, e.startTimeMS)
+            }
+        }
+        let startMS = max(prevEnd, atMS)
+        let defaultLen = 1000
+        let endMS = min(nextStart, startMS + defaultLen)
+        guard endMS > startMS + 10 else { return } // too tight to fit
+
+        addEffectWithSettings(rowIndex: rowIndex,
+                               name: paletteName,
+                               settings: "", palette: "",
+                               startMS: startMS, endMS: endMS)
+    }
+
     /// Add an effect with pre-populated settings/palette (used for paste + undo-of-delete).
     /// Returns the new effect's index, or -1 on failure.
     @discardableResult
@@ -749,6 +784,80 @@ class SequencerViewModel {
             }
             undoManager.setActionName("Move Effect")
         }
+    }
+
+    /// Move an effect from one row to another in a single action. On
+    /// success, the effect is recreated on `dstRowIndex` at the
+    /// requested range with the original settings+palette intact and
+    /// the selection is repointed at the new slot. Registers a single
+    /// undo step that reverses both ends.
+    func moveEffectToRow(srcRowIndex: Int, effectIndex: Int,
+                          dstRowIndex: Int, newStartMS: Int, newEndMS: Int) {
+        guard srcRowIndex != dstRowIndex else {
+            moveEffect(rowIndex: srcRowIndex, effectIndex: effectIndex,
+                       newStartMS: newStartMS, newEndMS: newEndMS)
+            return
+        }
+        guard srcRowIndex < rows.count,
+              effectIndex < rows[srcRowIndex].effects.count,
+              dstRowIndex < rows.count else { return }
+
+        // Snapshot the original effect so we can restore it on undo
+        // and so the add-side preserves settings/palette/name/range.
+        let prev = rows[srcRowIndex].effects[effectIndex]
+        let name = document.effectName(forRow: Int32(srcRowIndex),
+                                        at: Int32(effectIndex)) ?? prev.name
+        let settings = document.effectSettingsString(
+            forRow: Int32(srcRowIndex), at: Int32(effectIndex)) ?? ""
+        let palette = document.effectPaletteString(
+            forRow: Int32(srcRowIndex), at: Int32(effectIndex)) ?? ""
+        let oldStart = prev.startTimeMS
+        let oldEnd = prev.endTimeMS
+
+        // Delete first so the target row has the original effect's
+        // time range free — if the source and destination rows happen
+        // to be the same this would matter, but we already bailed out
+        // above. Then add on the destination row. If the add fails
+        // (overlap in target row), restore the deleted effect so the
+        // user isn't left with a hole.
+        guard document.deleteEffect(inRow: Int32(srcRowIndex),
+                                     at: Int32(effectIndex)) else { return }
+        document.renderRange(forRow: Int32(srcRowIndex),
+                              startMS: Int32(oldStart),
+                              endMS: Int32(oldEnd), clear: true)
+
+        let newIdx = Int(document.addEffect(toRow: Int32(dstRowIndex),
+                                             name: name,
+                                             settings: settings,
+                                             palette: palette,
+                                             startMS: Int32(newStartMS),
+                                             endMS: Int32(newEndMS)))
+        if newIdx < 0 {
+            // Target-row collision: re-insert on the source row so
+            // the effect isn't lost. Same-row add at the old range.
+            _ = document.addEffect(toRow: Int32(srcRowIndex),
+                                    name: name,
+                                    settings: settings,
+                                    palette: palette,
+                                    startMS: Int32(oldStart),
+                                    endMS: Int32(oldEnd))
+            document.renderEffect(forRow: Int32(srcRowIndex),
+                                   at: Int32(effectIndex))
+            reloadRows()
+            return
+        }
+
+        document.renderEffect(forRow: Int32(dstRowIndex), at: Int32(newIdx))
+        reloadRows()
+        selectEffect(rowIndex: dstRowIndex, effectIndex: newIdx)
+        undoManager.registerUndo(withTarget: self) { vm in
+            vm.moveEffectToRow(srcRowIndex: dstRowIndex,
+                                effectIndex: newIdx,
+                                dstRowIndex: srcRowIndex,
+                                newStartMS: oldStart,
+                                newEndMS: oldEnd)
+        }
+        undoManager.setActionName("Move Effect")
     }
 
     /// Commit new fade-in / fade-out seconds for an effect. Either

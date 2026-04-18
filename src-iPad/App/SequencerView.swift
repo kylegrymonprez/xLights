@@ -90,6 +90,44 @@ struct SequencerView: View {
             .keyboardShortcut("z", modifiers: [.command, .shift])
             .disabled(!viewModel.undoManager.canRedo)
 
+            // Hidden buttons that exist purely to publish keyboard
+            // shortcuts. SwiftUI requires the shortcut to live on a
+            // visible control, but .frame(0) + .opacity(0) keeps them
+            // invisible while still reachable by the key event.
+            Group {
+                Button("Delete") {
+                    viewModel.deleteSelectedEffect()
+                }
+                .keyboardShortcut(.delete, modifiers: [])
+                .disabled(viewModel.selectedEffect == nil)
+
+                Button("Delete Forward") {
+                    viewModel.deleteSelectedEffect()
+                }
+                .keyboardShortcut(.deleteForward, modifiers: [])
+                .disabled(viewModel.selectedEffect == nil)
+
+                Button("Copy") { viewModel.copySelectedEffect() }
+                    .keyboardShortcut("c", modifiers: [.command])
+                    .disabled(viewModel.selectedEffect == nil)
+
+                Button("Paste") {
+                    // Paste onto the selected effect's row at the
+                    // current play position; if nothing is selected,
+                    // fall back to the first model row. Silently
+                    // skipped by the view model if no clipboard.
+                    let rowIdx = viewModel.selectedEffect?.rowIndex
+                        ?? viewModel.rows.firstIndex(where: { $0.timing == nil })
+                        ?? 0
+                    viewModel.pasteEffect(rowIndex: rowIdx,
+                                           startMS: viewModel.playPositionMS)
+                }
+                .keyboardShortcut("v", modifiers: [.command])
+                .disabled(!viewModel.hasClipboard)
+            }
+            .frame(width: 0, height: 0)
+            .opacity(0)
+
             Divider().frame(height: 24)
 
             // Inspector toggle

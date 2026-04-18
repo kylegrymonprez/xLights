@@ -650,7 +650,52 @@ verifiable on device:
   `XLSequenceDocument.moveEffectInRow:...` now walks the layer
   and returns `NO` if the new range overlaps any other effect —
   this catches the non-drag paths too (paste, undo, scripted
-  moves)]** ->
+  moves). Cross-row move drags landed: while a `.move` drag is
+  active the canvas hit-tests the finger's Y against
+  `rowLayout()` and, when it crosses into a different model row,
+  stashes the target `rows[i].id` in `liveRowId`. `drawContent`
+  skips the dragged effect's home-row render and draws it at the
+  target row's y instead so it follows the finger vertically.
+  On `.ended` with a non-nil `liveRowId`, `onMoveEffectToRow`
+  fires; `SequencerViewModel.moveEffectToRow` captures the
+  source's settings/palette/name, deletes from the source row,
+  adds on the destination row with the full effect state
+  preserved, re-selects the new slot, and registers a single
+  "Move Effect" undo step that round-trips both sides. Timing
+  rows are rejected as drop targets (`row.timing != nil` check);
+  a target-row overlap on add re-inserts on the source row so
+  the effect is never lost. Palette tap-to-add landed: when an
+  entry in `EffectPaletteView` is armed (`selectedPaletteEffect`
+  non-nil) a tap on empty time in a model row creates a new
+  effect of that type starting at the tap time. The new
+  `onTapEmpty(rowIndex?, ms?)` callback carries the resolved row
+  + time (nil outside any row), and
+  `SequencerViewModel.addEffectFromPaletteTap(rowIndex:atMS:)`
+  scans the row's neighbors to clamp against the previous
+  effect's end and cap duration at the next neighbor's start
+  (default length 1 s). Tapping inside an existing effect or
+  when no palette entry is armed still clears selection.
+  Keyboard shortcuts for external keyboards landed: Delete /
+  Backspace deletes the selected effect, Cmd+C copies it,
+  Cmd+V pastes at the current play position on the selected
+  effect's row (or the first model row if nothing is selected).
+  Implemented as zero-sized hidden buttons in the toolbar so the
+  shortcuts register without extra chrome; disabled states bind
+  to `selectedEffect == nil` / `!hasClipboard`. Ruler-click-to-
+  seek landed: `TopChromeCanvasUIView.installGestures` adds a
+  single-tap recognizer that converts tap x → ms and fires a
+  new `onSeekToMS` action, wired on the grid to
+  `viewModel.seekTo(ms:)` (which drives both `playPositionMS`
+  and `audioSeek(toMS:)` if the sequence has audio). Auto-scroll
+  during drag landed too: `EffectsCanvasUIView` starts a
+  `CADisplayLink` when a drag's finger is within 60 px of the
+  enclosing scroll view's visible edge and pushes
+  `contentOffset` up to 18 px/frame (scaled by distance inside
+  the margin). Each scroll tick replays the drag math with the
+  adjusted finger position so `liveStartMS`/`liveEndMS` keep
+  tracking the finger as the content shifts under it. Stopped
+  automatically when the finger moves away from the edge, on
+  `.ended`, or when the scroll view hits a boundary]** ->
 - B-9 selection-scoped scrub **[landed; `SequencerViewModel.startScrub`
   runs a frame-interval timer that loops `playPositionMS` over the
   selected effect's range. Starts on `selectEffect`, stops on

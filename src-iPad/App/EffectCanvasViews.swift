@@ -109,13 +109,26 @@ private func layoutHorizontalTiles(
 /// place to do precise hit-testing across thousands of effects.
 struct EffectCanvasActions {
     var onTapEffect: (_ row: Int, _ effect: Int) -> Void = { _,_ in }
-    var onTapEmpty: () -> Void = { }
+    /// Fires on any tap that didn't land on an effect. When the tap
+    /// was inside a model row (but on empty time), `rowIndex` and `ms`
+    /// are non-nil so the caller can create an effect there; on an
+    /// outside-rows tap both are nil.
+    var onTapEmpty: (_ rowIndex: Int?, _ ms: Int?) -> Void = { _,_ in }
     var onMoveEffect: (_ row: Int, _ effect: Int, _ newStartMS: Int, _ newEndMS: Int) -> Void = { _,_,_,_ in }
+    /// Move an effect to a *different* row. Fires only when the drag
+    /// ended on a row whose id differs from the effect's home row.
+    /// Source-row effects shift up to fill the gap, target row shifts
+    /// to accommodate.
+    var onMoveEffectToRow: (_ srcRow: Int, _ effect: Int, _ dstRow: Int,
+                             _ newStartMS: Int, _ newEndMS: Int) -> Void = { _,_,_,_,_ in }
     var onResizeEdge: (_ row: Int, _ effect: Int, _ edge: Int, _ newMS: Int) -> Void = { _,_,_,_ in }
     /// Fires when a fade-in or fade-out drag ends. `edge`: 0 = fade-in,
     /// 1 = fade-out. `seconds` is the new committed fade duration.
     var onAdjustFade: (_ row: Int, _ effect: Int, _ edge: Int, _ seconds: Float) -> Void = { _,_,_,_ in }
     var onPinchZoom: (_ scaleDelta: CGFloat, _ anchorX: CGFloat) -> Void = { _,_ in }
+    /// Fires when the user taps the ruler / waveform to set the play
+    /// position. `ms` is the time the tap landed on.
+    var onSeekToMS: (_ ms: Int) -> Void = { _ in }
     /// Fires when a long-press selects an effect. The canvas converts
     /// the touch location into view-space coordinates so the menu can
     /// anchor near the finger.
@@ -373,6 +386,14 @@ final class EffectsCanvasUIView: UIView {
     private var liveEndMS: Int?
     private var liveFadeInSec: Float?
     private var liveFadeOutSec: Float?
+    /// `id` of the row the drag is currently hovering over. nil = same
+    /// as the drag's origin row (no cross-row move). Set only for
+    /// `.move` drags — resizes and fade drags stay in the home row.
+    private var liveRowId: Int?
+    /// True when the current cross-row drop would overlap an effect
+    /// in the target row. The ghost renders in a warning tint and
+    /// `.ended` cancels the move rather than committing it.
+    private var liveDropInvalid: Bool = false
     // High-water-mark extremes of the drag. Monotonically grow from the
     // drag's origin: if the user drags right to 500 ms then back left,
     // these still remember the 500 ms excursion so we can invalidate
@@ -388,6 +409,14 @@ final class EffectsCanvasUIView: UIView {
     // Canvas's own pan recognizer — stored so we can configure the
     // enclosing scroll view to require it to fail before scrolling.
     private weak var ownPanRecognizer: UIPanGestureRecognizer?
+    // Auto-scroll: a CADisplayLink-driven offset push that fires while
+    // the drag finger is hovering near the viewport edge. Pulling one
+    // frame at a time (vs. a one-shot nudge on each .changed call)
+    // keeps the grid scrolling continuously even if the user's finger
+    // stops moving but stays near the edge.
+    private var autoScrollLink: CADisplayLink?
+    private var autoScrollSpeedX: CGFloat = 0
+    private var lastDragLocationInSelf: CGPoint = .zero
 
     override var intrinsicContentSize: CGSize { totalSize }
 
@@ -450,6 +479,11 @@ final class EffectsCanvasUIView: UIView {
 
             for (eIdx, effect) in row.effects.enumerated() {
                 let isDragged = (drag?.rowIndex == row.id && drag?.effectIndex == eIdx)
+                // While a cross-row drag is active, don't draw the
+                // dragged effect at its home row — it's rendered
+                // below at the target row's y so it follows the
+                // finger vertically.
+                if isDragged && liveRowId != nil { continue }
                 let startMS = isDragged ? (liveStartMS ?? effect.startTimeMS) : effect.startTimeMS
                 let endMS   = isDragged ? (liveEndMS   ?? effect.endTimeMS)   : effect.endTimeMS
                 let x1 = CGFloat(startMS) * pixelsPerMS
@@ -460,6 +494,45 @@ final class EffectsCanvasUIView: UIView {
                            x1: x1, x2: x2, top: top, bottom: bottom, mid: mid,
                            effect: effect, isSelected: isSelected,
                            rowIndex: row.id, effectIndex: eIdx)
+            }
+        }
+
+        // Cross-row drag ghost: if the finger is hovering over a
+        // different row, render the dragged effect at that row's y
+        // position instead. On .ended the bridge commits the move —
+        // unless `liveDropInvalid` is set, in which case a red tint
+        // overlays the ghost to signal the drop would collide with
+        // an existing effect and the move will be silently cancelled.
+        if let d = drag,
+           d.kind == .move,
+           let dstRowId = liveRowId,
+           let dstIdx = rows.firstIndex(where: { $0.id == dstRowId }),
+           let srcRow = rows.first(where: { $0.id == d.rowIndex }),
+           d.effectIndex < srcRow.effects.count {
+            let effect = srcRow.effects[d.effectIndex]
+            let y = tops[dstIdx]
+            let h = heights[dstIdx]
+            let top = y + 1
+            let bottom = y + h - 1
+            let mid = (top + bottom) / 2
+            let startMS = liveStartMS ?? effect.startTimeMS
+            let endMS   = liveEndMS   ?? effect.endTimeMS
+            let x1 = CGFloat(startMS) * pixelsPerMS
+            let x2 = CGFloat(endMS) * pixelsPerMS
+            if x2 >= rect.minX && x1 <= rect.maxX {
+                drawEffect(cg: cg,
+                           x1: x1, x2: x2, top: top, bottom: bottom, mid: mid,
+                           effect: effect,
+                           isSelected: true,
+                           rowIndex: d.rowIndex,
+                           effectIndex: d.effectIndex)
+                if liveDropInvalid {
+                    cg.setFillColor(UIColor.systemRed
+                        .withAlphaComponent(0.35).cgColor)
+                    cg.fill(CGRect(x: x1, y: top,
+                                    width: max(1, x2 - x1),
+                                    height: bottom - top))
+                }
             }
         }
     }
@@ -746,9 +819,25 @@ final class EffectsCanvasUIView: UIView {
         let p = g.location(in: self)
         if let hit = hitTestEffect(at: p), hit.zone != .empty {
             actions.onTapEffect(hit.rowIndex, hit.effectIndex)
-        } else {
-            actions.onTapEmpty()
+            return
         }
+        // Resolve which model row (if any) the tap landed in so the
+        // caller can offer to add an effect there when a palette
+        // entry is armed. Timing rows are excluded — palette effects
+        // only make sense on model layers.
+        let (tops, heights) = rowLayout()
+        var rowId: Int? = nil
+        for i in 0..<rows.count {
+            if p.y >= tops[i] && p.y < tops[i] + heights[i] {
+                if rows[i].timing == nil {
+                    rowId = rows[i].id
+                }
+                break
+            }
+        }
+        let ms: Int? = (rowId != nil && pixelsPerMS > 0)
+            ? max(0, Int(p.x / pixelsPerMS)) : nil
+        actions.onTapEmpty(rowId, ms)
     }
 
     @objc private func onPan(_ g: UIPanGestureRecognizer) {
@@ -813,19 +902,58 @@ final class EffectsCanvasUIView: UIView {
                 // Snap whichever edge is closer to a timing mark; keep
                 // duration fixed so the effect slides as a whole.
                 let duration = d.origEndMS - d.origStartMS
-                // Clamp against left + right neighbors so the effect
-                // can't be pushed over an adjacent one.
-                let minStart = d.minStartMS
-                let maxStart = d.maxEndMS == Int.max
+                // Bounds: when hovering over the source row, use the
+                // source-row neighbors captured at drag.began.
+                // Otherwise find the target row's own neighbors
+                // around the unconstrained tentative position so the
+                // effect can't plow into an existing one in the
+                // target row either.
+                let unclampedStart = d.origStartMS + dMS
+                let unclampedEnd = unclampedStart + duration
+                var minStart = d.minStartMS
+                var maxEnd = d.maxEndMS
+                var invalid = false
+                if let dstId = liveRowId,
+                   let dstRow = rows.first(where: { $0.id == dstId }) {
+                    var prevEnd = 0
+                    var nextStart = Int.max
+                    for e in dstRow.effects {
+                        // Does this target-row effect overlap the
+                        // unclamped drop range? If so the gap that
+                        // contains our drop point doesn't exist.
+                        let overlaps = unclampedStart < e.endTimeMS
+                            && unclampedEnd > e.startTimeMS
+                        if overlaps { invalid = true }
+                        if e.endTimeMS <= unclampedStart {
+                            prevEnd = max(prevEnd, e.endTimeMS)
+                        } else if e.startTimeMS >= unclampedEnd {
+                            nextStart = min(nextStart, e.startTimeMS)
+                        }
+                    }
+                    minStart = prevEnd
+                    maxEnd = nextStart
+                }
+                let maxStart = maxEnd == Int.max
                     ? Int.max
-                    : d.maxEndMS - duration
-                let tentativeStart = max(minStart,
-                                          min(maxStart, d.origStartMS + dMS))
+                    : maxEnd - duration
+                // If duration won't fit in the gap, the drop is
+                // invalid — ghost still renders at the unconstrained
+                // finger position so the user sees where they were
+                // dropping, but with a warning tint.
+                if maxStart < minStart { invalid = true }
+                liveDropInvalid = invalid
+                let clampedStart: Int = invalid
+                    ? unclampedStart
+                    : max(minStart, min(maxStart, unclampedStart))
+                let tentativeStart = clampedStart
                 let tentativeEnd = tentativeStart + duration
                 let snappedStart = snapToNearestMark(tentativeStart)
                 let snappedEnd   = snapToNearestMark(tentativeEnd)
+                // Use the effective (source or target) bounds so
+                // timing-mark snap doesn't pull the ghost out of a
+                // valid target-row gap into an adjacent effect.
                 let withinLeft  = snappedStart >= minStart
-                let withinRight = snappedEnd   <= d.maxEndMS
+                let withinRight = snappedEnd   <= maxEnd
                 if withinLeft && withinRight
                     && snappedStart != tentativeStart
                     && snappedEnd == tentativeEnd {
@@ -887,6 +1015,43 @@ final class EffectsCanvasUIView: UIView {
                     liveFadeOutSec = newSec
                 }
             }
+            // Auto-scroll: if the finger is near the horizontal edge
+            // of the enclosing viewport, push the scroll offset so
+            // the dragged effect can be moved past what's currently
+            // on-screen. Proximity drives speed; a display link keeps
+            // the scroll going even if the finger is held stationary.
+            lastDragLocationInSelf = g.location(in: self)
+            updateAutoScrollForDrag()
+
+            // Cross-row hover detection: move drags only. If the
+            // finger has wandered into a different model row the
+            // effect will render as a ghost there until .ended
+            // commits or cancels the cross-row move. Resize and fade
+            // drags stay anchored to the home row.
+            if d.kind == .move {
+                let p = g.location(in: self)
+                let (tops, heights) = rowLayout()
+                var hoverId: Int? = nil
+                for i in 0..<rows.count {
+                    if p.y >= tops[i] && p.y < tops[i] + heights[i] {
+                        hoverId = rows[i].id
+                        break
+                    }
+                }
+                // Reject timing rows as drop targets — you can't drop
+                // a model-layer effect onto a timing track.
+                if let h = hoverId,
+                   let r = rows.first(where: { $0.id == h }),
+                   r.timing != nil {
+                    hoverId = nil
+                }
+                let newLiveRow = (hoverId == d.rowIndex) ? nil : hoverId
+                if newLiveRow != liveRowId {
+                    liveRowId = newLiveRow
+                    setNeedsDisplay() // full redraw — row layout visual changes
+                }
+            }
+
             // Expand the drag's high-water-mark range to include this
             // frame's position. This monotonically grows — so if the
             // user drags right and then back, the right-excursion
@@ -912,7 +1077,18 @@ final class EffectsCanvasUIView: UIView {
             switch d.kind {
             case .move:
                 if let ls = liveStartMS, let le = liveEndMS {
-                    actions.onMoveEffect(d.rowIndex, d.effectIndex, ls, le)
+                    if let dst = liveRowId, dst != d.rowIndex {
+                        // Drop was over a different row. Commit only
+                        // if the drop would actually fit in the
+                        // target row's gap; otherwise cancel silently
+                        // — the effect stays in its home row.
+                        if !liveDropInvalid {
+                            actions.onMoveEffectToRow(d.rowIndex, d.effectIndex,
+                                                        dst, ls, le)
+                        }
+                    } else {
+                        actions.onMoveEffect(d.rowIndex, d.effectIndex, ls, le)
+                    }
                 }
             case .resizeLeft:
                 if let ls = liveStartMS {
@@ -936,6 +1112,9 @@ final class EffectsCanvasUIView: UIView {
             liveEndMS = nil
             liveFadeInSec = nil
             liveFadeOutSec = nil
+            liveRowId = nil
+            liveDropInvalid = false
+            stopAutoScroll()
             invalidate(xRanges: [x1...x2])
             // Re-enable the host UIScrollView's pan now that the drag
             // is settled; the next touch can scroll normally again.
@@ -955,6 +1134,152 @@ final class EffectsCanvasUIView: UIView {
             v = cur.superview
         }
         return nil
+    }
+
+    // MARK: - Auto-scroll during drag
+
+    /// Edge margin at which auto-scroll kicks in. Finger closer than
+    /// this to the visible left/right edge scrolls the viewport.
+    private static let autoScrollMargin: CGFloat = 60
+    /// Max scroll speed in pixels per display frame — tuned so a long
+    /// hold at the very edge slews smoothly without overshooting.
+    private static let autoScrollMaxPxPerFrame: CGFloat = 18
+
+    /// Recompute whether the finger is near an edge of the enclosing
+    /// scroll view's visible area. Starts or stops the auto-scroll
+    /// display link and sets the current speed.
+    private func updateAutoScrollForDrag() {
+        guard let sv = suppressedScrollView else {
+            stopAutoScroll()
+            return
+        }
+        // Convert finger position from self-coords to the scroll
+        // view's visible rect (bounds within its own coordinate space).
+        let inSV = convert(lastDragLocationInSelf, to: sv)
+        let visibleW = sv.bounds.width
+        let distLeft = inSV.x - 0
+        let distRight = visibleW - inSV.x
+        let margin = Self.autoScrollMargin
+
+        var speed: CGFloat = 0
+        if distLeft < margin {
+            let t = max(0, min(1, (margin - distLeft) / margin))
+            speed = -t * Self.autoScrollMaxPxPerFrame
+        } else if distRight < margin {
+            let t = max(0, min(1, (margin - distRight) / margin))
+            speed = t * Self.autoScrollMaxPxPerFrame
+        }
+        autoScrollSpeedX = speed
+        if speed == 0 {
+            stopAutoScroll()
+        } else if autoScrollLink == nil {
+            let link = CADisplayLink(target: self, selector: #selector(autoScrollTick))
+            link.add(to: .main, forMode: .common)
+            autoScrollLink = link
+        }
+    }
+
+    /// Per-frame auto-scroll. Pushes the scroll view's contentOffset
+    /// by the current speed; `scrollViewDidScroll` then syncs the
+    /// shared `TimelineState.hScrollOffsetPx` so other synced panes
+    /// (row headers, ruler) follow. We also re-run the drag update so
+    /// `liveStartMS/liveEndMS` reflect the new content under the
+    /// finger even when the finger itself isn't moving.
+    @objc private func autoScrollTick() {
+        guard let sv = suppressedScrollView, let d = drag else {
+            stopAutoScroll(); return
+        }
+        let maxX = max(0, sv.contentSize.width - sv.bounds.width)
+        let newX = max(0, min(maxX, sv.contentOffset.x + autoScrollSpeedX))
+        if newX == sv.contentOffset.x {
+            // Hit a viewport edge — further scroll is a no-op.
+            return
+        }
+        sv.contentOffset = CGPoint(x: newX, y: sv.contentOffset.y)
+        // Re-run live drag math with the scrolled-updated location.
+        // Finger's self-coord x shifts by the scroll delta, so using
+        // the latest `g.location(in: self)` would be ideal — but we
+        // don't have a live gesture ref here. Approximate by updating
+        // lastDragLocationInSelf by the scroll delta.
+        lastDragLocationInSelf.x = convertFingerLocationAfterScroll(
+            previous: lastDragLocationInSelf, scrollView: sv,
+            scrollDeltaX: autoScrollSpeedX)
+        // Synthesize an update of the drag state using the new finger
+        // location. Computes a virtual translation derived from where
+        // the finger would sit relative to the drag's origin.
+        applyDragUpdateForCurrentFingerLocation(d: d)
+    }
+
+    private func convertFingerLocationAfterScroll(previous: CGPoint,
+                                                   scrollView: UIScrollView,
+                                                   scrollDeltaX: CGFloat) -> CGFloat {
+        // Finger's visible-screen position hasn't changed, so its
+        // x-in-self advances by the same amount the content offset
+        // moved — mirroring what would happen on the next finger-move
+        // gesture tick.
+        return previous.x + scrollDeltaX
+    }
+
+    /// Replays the drag's `.changed` math from the current
+    /// `lastDragLocationInSelf` without a gesture-recognizer event.
+    /// Mirrors the core of `onPan(.changed)` for move / resize cases.
+    private func applyDragUpdateForCurrentFingerLocation(d: DragState) {
+        // Derive the same delta the gesture would give us:
+        //   dMS = (currentFingerX - beganFingerX) / pixelsPerMS
+        // We never recorded the begin X, so reconstruct it from the
+        // effect's original start + the live start: the effect has
+        // drifted by `liveStart - origStart` in world ms, which maps
+        // to the finger's cumulative delta in world pixels.
+        guard pixelsPerMS > 0 else { return }
+        let effectDriftMS: Int
+        switch d.kind {
+        case .move, .resizeLeft:
+            effectDriftMS = (liveStartMS ?? d.origStartMS) - d.origStartMS
+        case .resizeRight:
+            effectDriftMS = (liveEndMS ?? d.origEndMS) - d.origEndMS
+        default:
+            return
+        }
+        // The new drift is previous drift + autoScrollSpeedX (one
+        // frame's worth). Apply the same clamping as the real
+        // gesture path does.
+        let extraMS = Int(autoScrollSpeedX / pixelsPerMS)
+        let totalDeltaMS = effectDriftMS + extraMS
+
+        switch d.kind {
+        case .move:
+            let duration = d.origEndMS - d.origStartMS
+            let minStart = d.minStartMS
+            let maxStart = d.maxEndMS == Int.max
+                ? Int.max : d.maxEndMS - duration
+            let newStart = max(minStart,
+                                min(maxStart, d.origStartMS + totalDeltaMS))
+            liveStartMS = newStart
+            liveEndMS = newStart + duration
+        case .resizeLeft:
+            let ns = max(d.minStartMS, d.origStartMS + totalDeltaMS)
+            liveStartMS = min(ns, d.origEndMS - 1)
+            liveEndMS = d.origEndMS
+        case .resizeRight:
+            let raw = d.origEndMS + totalDeltaMS
+            let capped = min(d.maxEndMS, raw)
+            liveEndMS = max(capped, d.origStartMS + 1)
+            liveStartMS = d.origStartMS
+        default:
+            return
+        }
+        if let ls = liveStartMS { dragMinMS = min(dragMinMS, ls) }
+        if let le = liveEndMS { dragMaxMS = max(dragMaxMS, le) }
+        let slop: CGFloat = 16
+        let x1 = CGFloat(dragMinMS) * pixelsPerMS - slop
+        let x2 = CGFloat(dragMaxMS) * pixelsPerMS + slop
+        invalidate(xRanges: [x1...x2])
+    }
+
+    private func stopAutoScroll() {
+        autoScrollLink?.invalidate()
+        autoScrollLink = nil
+        autoScrollSpeedX = 0
     }
 
     private var pinchAnchorX: CGFloat = 0
@@ -1462,6 +1787,11 @@ final class TopChromeCanvasUIView: UIView {
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(onPinch(_:)))
         pinch.delegate = passthroughDelegate
         addGestureRecognizer(pinch)
+        // Tap on the ruler / waveform to seek the play head to that
+        // time. Works whether or not the sequence has audio.
+        let tap = UITapGestureRecognizer(target: self, action: #selector(onSeekTap(_:)))
+        tap.delegate = passthroughDelegate
+        addGestureRecognizer(tap)
     }
 
     private lazy var passthroughDelegate: PassthroughGestureDelegate = {
@@ -1480,5 +1810,12 @@ final class TopChromeCanvasUIView: UIView {
         default:
             break
         }
+    }
+
+    @objc private func onSeekTap(_ g: UITapGestureRecognizer) {
+        guard pixelsPerMS > 0 else { return }
+        let p = g.location(in: self)
+        let ms = max(0, min(durationMS, Int(p.x / pixelsPerMS)))
+        actions.onSeekToMS(ms)
     }
 }

@@ -65,7 +65,16 @@ struct SequencerGridV2View: View {
             let modelRowsH = modelRows.reduce(CGFloat(0)) { sum, r in
                 sum + ((r.id == selectedRowId) ? metrics.selectedRowHeight : metrics.rowHeight)
             }
-            let modelAreaH = max(modelRowsH, availableGridH - timingBandH)
+            // Hosted content height must match the actual row content
+            // so SyncedScrollView's width/height constraints don't
+            // over-propose a taller size to the inner SwiftUI view.
+            // Earlier this was `max(modelRowsH, availableGridH - timingBandH)`
+            // to reserve the full viewport; when the view had few
+            // rows and no timing band the extra height caused the
+            // left-column header VStack to render at the bottom of
+            // its host while the right-column canvas stayed at the
+            // top, visibly misaligning the two sides.
+            let modelAreaH = modelRowsH
 
             ZStack(alignment: .topLeading) {
                 VStack(spacing: 0) {
@@ -283,6 +292,9 @@ struct SequencerGridV2View: View {
     private func topChromeContent(contentWidth: CGFloat) -> some View {
         var actions = EffectCanvasActions()
         actions.onPinchZoom = pinchZoomAction
+        actions.onSeekToMS = { ms in
+            viewModel.seekTo(ms: ms)
+        }
         return TopChromeCanvas(
             durationMS: viewModel.sequenceDurationMS,
             pixelsPerMS: timeline.pixelsPerMS,
@@ -368,7 +380,9 @@ struct SequencerGridV2View: View {
                     onSelect: { viewModel.selectPreviewModel(rowIndex: row.id) }
                 )
             }
+            Spacer(minLength: 0)
         }
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private func modelEffectsPlaceholder(
@@ -384,12 +398,26 @@ struct SequencerGridV2View: View {
         actions.onTapEffect = { rowIdx, effIdx in
             viewModel.selectEffect(rowIndex: rowIdx, effectIndex: effIdx)
         }
-        actions.onTapEmpty = {
-            viewModel.clearSelection()
+        actions.onTapEmpty = { rowIdx, ms in
+            // If the user has armed a palette effect and the tap
+            // landed on an empty time range of a model row, create a
+            // new effect there. Otherwise the tap just clears the
+            // current selection (previous behavior).
+            if let row = rowIdx, let atMS = ms,
+               viewModel.selectedPaletteEffect != nil {
+                viewModel.addEffectFromPaletteTap(rowIndex: row, atMS: atMS)
+            } else {
+                viewModel.clearSelection()
+            }
         }
         actions.onMoveEffect = { rowIdx, effIdx, newStart, newEnd in
             viewModel.moveEffect(rowIndex: rowIdx, effectIndex: effIdx,
                                  newStartMS: newStart, newEndMS: newEnd)
+        }
+        actions.onMoveEffectToRow = { srcRow, effIdx, dstRow, newStart, newEnd in
+            viewModel.moveEffectToRow(srcRowIndex: srcRow, effectIndex: effIdx,
+                                       dstRowIndex: dstRow,
+                                       newStartMS: newStart, newEndMS: newEnd)
         }
         actions.onResizeEdge = { rowIdx, effIdx, edge, newMS in
             viewModel.resizeEffectEdge(rowIndex: rowIdx, effectIndex: effIdx,
