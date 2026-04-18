@@ -449,6 +449,7 @@ struct SequencerGridV2View: View {
             contentHeight: canvasH,
             timingMarkTimesMS: timingMarkTimes,
             selection: viewModel.selectedEffect,
+            inspectorRevision: viewModel.inspectorRevision,
             fadeProvider: { [document = viewModel.document] rowIdx, effIdx in
                 let fi = document.effectFadeInSeconds(forRow: Int32(rowIdx), at: Int32(effIdx))
                 let fo = document.effectFadeOutSeconds(forRow: Int32(rowIdx), at: Int32(effIdx))

@@ -773,7 +773,7 @@ each row is addressed in the sub-phases below.
 |---|---|---|
 | `controlType: filepicker` | 2 props (Glediator, VUMeter file) | **landed (C-2)** — `FilepickerPropertyView`: `.fileImporter` sheet filtered by UTTypes parsed from `fileFilter`; stores absolute path + registers security-scoped bookmark via `obtainAccessToPath:` |
 | `controlType: fontpicker` | 1 prop (Text_Font) | **landed (C-2)** — `FontpickerPropertyView` sheet over `UIFont.familyNames` + size stepper + bold/italic; stores wx `NativeFontInfo` user-desc (e.g. `"bold Arial 26 utf-8"`) that the Phase A-2 `ParseFontString` already round-trips |
-| `controlType: custom` beyond PaletteHeaderRow | 38 props, 15 effects | **in progress (C-6)** — 8 custom ids landed (Pictures/Video/Shader FilenameBlocks, Pictures/Video/Faces TransparentBlackRows, Text_File_Row, Morph_Swap); rest pending |
+| `controlType: custom` beyond PaletteHeaderRow | 38 props, 15 effects | **in progress (C-6)** — 13 custom ids landed (Pictures/Video/Shader FilenameBlocks, Pictures/Video/Faces TransparentBlackRows, Text_File_Row, Morph_Swap, LayerMorphRow, LayerMethodRow, CanvasRow, In/Out_Transition_Header); rest pending |
 | `separator: true` | 3 uses | **landed (C-2)** — `Divider` inserted before property |
 | `suppressIfDefault: true` | 35 uses | **landed (C-2)** — write equal-to-default removes the key via bridge `removeEffectSettingForKey:` |
 | `lockable: true` | 261 uses | no lock UI |
@@ -792,12 +792,24 @@ Per-tab work summary:
   `C_BUTTON_Palette*` keys (landed). Layout cleanup on
   `shared/Color.json` compound rows (`ChromaKeyRow`, `SparklesRow`,
   `ResetPanelRow` -- currently just "(custom)" placeholders).
-- **Blending** -- add `T_CHECKBOX_*` / `T_CHOICE_*` transition
-  editing (currently dead); `shared/Blending.json` has
-  `SuppressEffectUntil` / `FreezeEffectAtFrame` (already work) plus
-  `LayerMorphRow` / `LayerMethodRow` / `CanvasRow` /
-  `In_Transition_*` / `Out_Transition_*` custom rows (currently
-  placeholders).
+- **Blending** -- **landed.** `SuppressEffectUntil` /
+  `FreezeEffectAtFrame` work via the standard spin controls. All five
+  custom rows implemented in `BlendingPanelViews.swift`:
+  `LayerMorphRowView` (Morph checkbox + Effect Layer Mix slider,
+  backed by `T_CHECKBOX_LayerMorph` / `T_SLIDER_EffectLayerMix`),
+  `LayerMethodRowView` (all 24 layer-mix modes + tap-to-open help
+  sheet with the same tooltip text as desktop),
+  `CanvasRowView` (Canvas checkbox + readout of `T_LayersSelected`;
+  full `LayerSelectDialog` equivalent deferred so round-tripping
+  doesn't corrupt the stored selection),
+  `TransitionHeaderRowView` (parameterised by direction — serves
+  both `In_Transition_Header` and `Out_Transition_Header`): 22
+  transition types picker + seconds TextField + preset chips
+  (0.00/0.25/0.50/0.75/1.00/1.50/2.00, matching `kFadePresets`).
+  All writes suppress the default so settings-map entries don't
+  bloat. Runtime enable/disable of Adjust/Reverse based on
+  fade==0 or type∈`kTransitionsNoAdjust`/`kTransitionsNoReverse`
+  is a follow-up polish item.
 - **Buffer** -- layout cleanup on `shared/Buffer.json`; most
   controls are standard `slider` / `choice` / `checkbox` and already
   render -- they just need to live in the Buffer tab. The roto-zoom

@@ -92,6 +92,16 @@ struct EffectPropertyView: View {
                                      fileFilter: "Text (*.txt)|*.txt")
         case "Morph_Swap":
             MorphSwapRowView()
+        case "LayerMorphRow":
+            LayerMorphRowView()
+        case "LayerMethodRow":
+            LayerMethodRowView()
+        case "CanvasRow":
+            CanvasRowView()
+        case "In_Transition_Header":
+            TransitionHeaderRowView(isIn: true)
+        case "Out_Transition_Header":
+            TransitionHeaderRowView(isIn: false)
         default:
             customPlaceholder
         }
@@ -223,17 +233,23 @@ struct EffectPropertyView: View {
             get: { Int(rawValue) ?? Int(defaultValueString) ?? 0 },
             set: { writeValue(String($0)) }
         )
+        // The value text has to live OUTSIDE the Stepper — when it's
+        // passed as the Stepper's label closure, `.labelsHidden()`
+        // hides it along with the label, leaving just -/+ with no
+        // readout. Keeping it as a sibling in the HStack keeps the
+        // value visible while still compacting the Stepper to just
+        // its buttons.
         return HStack {
             Text(property.label)
                 .font(.caption)
             Spacer()
-            Stepper(value: binding, in: minVal...maxVal) {
-                Text("\(binding.wrappedValue)")
-                    .monospacedDigit()
-                    .font(.caption2)
-                    .frame(minWidth: 36, alignment: .trailing)
-            }
-            .labelsHidden()
+            Text("\(binding.wrappedValue)")
+                .monospacedDigit()
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 48, alignment: .trailing)
+            Stepper("", value: binding, in: minVal...maxVal)
+                .labelsHidden()
         }
         .padding(.vertical, 2)
     }

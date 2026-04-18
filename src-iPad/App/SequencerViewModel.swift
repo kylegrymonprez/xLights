@@ -58,6 +58,15 @@ class SequencerViewModel {
     var selectedPaletteEffect: String?
     var showInspector = false
 
+    /// Bumps every time an inspector edit writes a setting. Observed by
+    /// `ModelEffectsCanvas.updateUIView` so fade-bar widths, bracket
+    /// colours, and (eventually) cached effect-background thumbnails
+    /// redraw when the user changes a setting without moving / resizing
+    /// the effect. The view-model holds the selection context, so the
+    /// canvas can derive WHICH effect's slot to invalidate from
+    /// `selectedEffect` at the moment the revision changes.
+    var inspectorRevision: Int = 0
+
     // Metadata for the currently selected effect and shared panels.
     // Keys in `blendingMetadata` serialize with the T_ prefix (the panel was
     // historically called "Timing" — desktop renamed it "Blending" without
@@ -625,6 +634,12 @@ class SequencerViewModel {
 
         if changed {
             document.renderEffect(forRow: Int32(sel.rowIndex), at: Int32(sel.effectIndex))
+            // Tell the effects canvas that something on this effect
+            // changed so it redraws the selected slot (fade bars,
+            // colour pickers reflected in brackets, etc.). The render
+            // result lands asynchronously; this invalidation covers the
+            // UI-derived visuals that don't need the pixel data.
+            inspectorRevision &+= 1
             let rowIndex = sel.rowIndex
             let effectIndex = sel.effectIndex
             undoManager.registerUndo(withTarget: self) { vm in
@@ -657,6 +672,7 @@ class SequencerViewModel {
                 selectedEffectSettings[key] = value
             }
             document.renderEffect(forRow: Int32(rowIndex), at: Int32(effectIndex))
+            inspectorRevision &+= 1
             undoManager.registerUndo(withTarget: self) { vm in
                 vm.setSettingValueAt(rowIndex: rowIndex, effectIndex: effectIndex,
                                      key: key, value: prev)

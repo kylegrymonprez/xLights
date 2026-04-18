@@ -157,6 +157,11 @@ struct ModelEffectsCanvas: UIViewRepresentable {
     let contentHeight: CGFloat
     let timingMarkTimesMS: [Int]
     let selection: SequencerViewModel.EffectSelection?
+    /// Bumps whenever an inspector edit writes a setting. Compared
+    /// between old and new state in `updateUIView`; a change invalidates
+    /// the currently-selected effect's x-range so fade bars etc. redraw
+    /// without the effect needing to move / resize / rename.
+    let inspectorRevision: Int
     let fadeProvider: (Int, Int) -> (Float, Float) // (row, effectIdx) -> (fadeInSec, fadeOutSec)
     let stateLookup: EffectStateLookup
     let actions: EffectCanvasActions
@@ -207,6 +212,15 @@ struct ModelEffectsCanvas: UIViewRepresentable {
                     dirtyRanges.append(selectionRange(s, pixelsPerMS: pixelsPerMS))
                 }
             }
+
+            // Inspector setting edit on the selected effect — fade bars,
+            // lock/disable glyph state, (eventually) cached background
+            // thumbnails, etc. The effect itself didn't move/rename so
+            // rowEffectDiffRanges won't pick it up; use the revision
+            // bump and the stable selection to know which slot redraws.
+            if view.inspectorRevision != inspectorRevision, let s = selection {
+                dirtyRanges.append(selectionRange(s, pixelsPerMS: pixelsPerMS))
+            }
         }
 
         let sizeChanged = view.totalSize != newSize
@@ -216,6 +230,7 @@ struct ModelEffectsCanvas: UIViewRepresentable {
         view.totalSize = newSize
         view.timingMarkTimesMS = timingMarkTimesMS
         view.selection = selection
+        view.inspectorRevision = inspectorRevision
         view.fadeProvider = fadeProvider
         view.stateLookup = stateLookup
         view.actions = actions
@@ -298,6 +313,7 @@ final class EffectsCanvasUIView: UIView {
     var totalSize: CGSize = .zero
     var timingMarkTimesMS: [Int] = []
     var selection: SequencerViewModel.EffectSelection?
+    var inspectorRevision: Int = 0
     var fadeProvider: (Int, Int) -> (Float, Float) = { _,_ in (0, 0) }
     var stateLookup: EffectStateLookup = EffectStateLookup()
     var actions: EffectCanvasActions = EffectCanvasActions()
