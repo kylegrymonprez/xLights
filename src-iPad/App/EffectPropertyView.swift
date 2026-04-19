@@ -71,15 +71,18 @@ struct EffectPropertyView: View {
         case "Pictures_FilenameBlock":
             EffectFilenameBlockView(label: "Image",
                                      settingKey: "E_TEXTCTRL_Pictures_Filename",
-                                     fileFilter: "Images (*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp)|*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp")
+                                     fileFilter: "Images (*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp)|*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp",
+                                     subdirectory: "Images")
         case "Video_FilenameBlock":
             EffectFilenameBlockView(label: "Video",
                                      settingKey: "E_FILEPICKERCTRL_Video_Filename",
-                                     fileFilter: "Videos (*.mp4;*.mov;*.m4v;*.avi;*.webm;*.mkv)|*.mp4;*.mov;*.m4v;*.avi;*.webm;*.mkv")
+                                     fileFilter: "Videos (*.mp4;*.mov;*.m4v;*.avi;*.webm;*.mkv)|*.mp4;*.mov;*.m4v;*.avi;*.webm;*.mkv",
+                                     subdirectory: "Videos")
         case "Shader_FilenameBlock":
             EffectFilenameBlockView(label: "Shader",
                                      settingKey: "E_0FILEPICKERCTRL_IFS",
-                                     fileFilter: "Shader (*.fs)|*.fs")
+                                     fileFilter: "Shader (*.fs)|*.fs",
+                                     subdirectory: "Shaders")
         case "Pictures_TransparentBlackRow":
             TransparentBlackRowView(effectKeyStem: "Pictures")
         case "Video_TransparentBlackRow":
@@ -89,7 +92,8 @@ struct EffectPropertyView: View {
         case "Text_File_Row":
             EffectFilenameBlockView(label: "From File",
                                      settingKey: "E_FILEPICKERCTRL_Text_File",
-                                     fileFilter: "Text (*.txt)|*.txt")
+                                     fileFilter: "Text (*.txt)|*.txt",
+                                     subdirectory: "")
         case "Morph_Swap":
             MorphSwapRowView()
         case "LayerMorphRow":

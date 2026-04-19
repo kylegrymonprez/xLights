@@ -67,6 +67,61 @@
     return ObtainAccessToURL(std::string([path UTF8String]), enforceWritable) ? YES : NO;
 }
 
+// MARK: - Media relocation
+
+- (NSString*)showFolderPath {
+    if (!_context) return @"";
+    const std::string& s = _context->GetShowDirectory();
+    return [NSString stringWithUTF8String:s.c_str()];
+}
+
+- (NSArray<NSString*>*)mediaFolderPaths {
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    if (!_context) return out;
+    for (const auto& mf : _context->GetMediaFolders()) {
+        [out addObject:[NSString stringWithUTF8String:mf.c_str()]];
+    }
+    return out;
+}
+
+- (NSString*)moveFileToShowFolder:(NSString*)sourcePath
+                        subdirectory:(NSString*)subdirectory {
+    if (!_context || sourcePath.length == 0) return nil;
+    std::string result = _context->MoveToShowFolder(
+        std::string([sourcePath UTF8String]),
+        std::string([(subdirectory ?: @"") UTF8String]),
+        /*reuse*/ false);
+    if (result.empty()) return nil;
+    return [NSString stringWithUTF8String:result.c_str()];
+}
+
+- (NSString*)copyFileToMediaFolder:(NSString*)sourcePath
+                       mediaFolderPath:(NSString*)mediaFolderPath
+                        subdirectory:(NSString*)subdirectory {
+    if (!_context || sourcePath.length == 0 || mediaFolderPath.length == 0) {
+        return nil;
+    }
+    std::string result = _context->CopyToMediaFolder(
+        std::string([sourcePath UTF8String]),
+        std::string([mediaFolderPath UTF8String]),
+        std::string([(subdirectory ?: @"") UTF8String]));
+    if (result.empty()) return nil;
+    return [NSString stringWithUTF8String:result.c_str()];
+}
+
+- (BOOL)pathIsInShowOrMediaFolder:(NSString*)path {
+    if (!_context || path.length == 0) return NO;
+    return _context->IsInShowOrMediaFolder(
+        std::string([path UTF8String])) ? YES : NO;
+}
+
+- (NSString*)makeRelativePath:(NSString*)path {
+    if (!_context || path.length == 0) return path ?: @"";
+    std::string s = _context->MakeRelativePath(
+        std::string([path UTF8String]));
+    return [NSString stringWithUTF8String:s.c_str()];
+}
+
 - (BOOL)openSequence:(NSString*)path {
     return _context->OpenSequence(std::string([path UTF8String]));
 }

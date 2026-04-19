@@ -16,6 +16,35 @@
 // bookmark is stored in UserDefaults and access survives app restart.
 + (BOOL)obtainAccessToPath:(NSString*)path enforceWritable:(BOOL)enforceWritable;
 
+// Show / media folder accessors — needed by the file-relocation logic
+// so Swift can tell whether a picked URL is already inside the
+// enforced roots.
+- (NSString*)showFolderPath;
+- (NSArray<NSString*>*)mediaFolderPaths;
+
+// Copy `sourcePath` into `<showFolder>/<subdirectory>`, appending `_N`
+// to the basename on collision. Returns the destination absolute path
+// on success, nil on failure (no show folder loaded, copy error).
+- (NSString*)moveFileToShowFolder:(NSString*)sourcePath
+                        subdirectory:(NSString*)subdirectory;
+
+// Copy `sourcePath` into `<mediaFolderPath>/<subdirectory>`.
+// `mediaFolderPath` must already be in `mediaFolderPaths`; unknown
+// paths are rejected so the "media always lives in a configured root"
+// invariant isn't broken.
+- (NSString*)copyFileToMediaFolder:(NSString*)sourcePath
+                       mediaFolderPath:(NSString*)mediaFolderPath
+                        subdirectory:(NSString*)subdirectory;
+
+// True iff `path` is under the show folder or any configured media
+// folder. Used to decide whether a picked file needs copying.
+- (BOOL)pathIsInShowOrMediaFolder:(NSString*)path;
+
+// Compute a show-folder-relative path (e.g. `Images/foo.png`). Absolute
+// paths outside the show folder round-trip unchanged so media-folder
+// files aren't clobbered.
+- (NSString*)makeRelativePath:(NSString*)path;
+
 // Sequence
 - (BOOL)openSequence:(NSString*)path;
 - (void)closeSequence;
