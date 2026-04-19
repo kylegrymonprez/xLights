@@ -377,6 +377,11 @@ void ShaderPanel::ClearDynamicUI() {
     if (_dynamicSizer) {
         _dynamicSizer->Clear(/*delete_windows*/ true);
     }
+    // _dynamicSizer->Clear(true) destroyed the wx controls but left their
+    // PropertyInfo pointers dangling inside the JsonEffectPanel properties_
+    // map. Purge them so walkers (SetRenderableEffect, visibility rules, ...)
+    // don't dereference destroyed widgets on the next rebuild.
+    RemovePropertiesWithPrefix("SHADERXYZZY_");
 }
 
 void ShaderPanel::ApplyShaderConfig(bool resetParams) {
@@ -453,218 +458,16 @@ void ShaderPanel::BuildDynamicUI() {
     wxWindow* parentWin = _dynamicSizer->GetContainingWindow();
     if (parentWin == nullptr) parentWin = this;
 
-    for (const auto& it : _shaderConfig->GetParms()) {
-        if (!it.ShowParm()) continue;
-
-        if (it._type == ShaderParmType::SHADER_PARM_FLOAT) {
-            auto* staticText = new wxStaticText(parentWin, wxNewId(), wxString(it.GetLabel()),
-                                                 wxDefaultPosition, wxDefaultSize, 0,
-                                                 wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_STATIC)));
-            _dynamicSizer->Add(staticText, 1, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 2);
-
-            auto* sliderSizer = new wxFlexGridSizer(0, 2, 0, 0);
-            sliderSizer->AddGrowableCol(0);
-
-            auto* slider = new BulkEditSliderF2(parentWin, wxNewId(),
-                                                 it._default * 100, it._min * 100, it._max * 100,
-                                                 wxDefaultPosition, wxDefaultSize, 0,
-                                                 wxDefaultValidator,
-                                                 wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_SLIDER)));
-            sliderSizer->Add(slider, 1, wxALL | wxEXPAND, 2);
-
-            auto vcId = wxNewId();
-            auto* vcb = new BulkEditValueCurveButton(parentWin, vcId, GetValueCurveNotSelectedBitmap(),
-                                                      wxDefaultPosition, wxDefaultSize,
-                                                      wxBU_AUTODRAW | wxNO_BORDER,
-                                                      wxDefaultValidator,
-                                                      wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_VALUECURVE)));
-            sliderSizer->Add(vcb, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 2);
-            vcb->GetValue()->SetLimits(it._min * 100, it._max * 100);
-            vcb->GetValue()->SetDivisor(100);
-            Connect(vcId, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&ShaderPanel::OnVCButtonClick);
-
-            _dynamicSizer->Add(sliderSizer, 1, wxALL | wxEXPAND, 0);
-
-            auto def = wxString::Format("%.2f", it._default);
-            auto* text = new BulkEditTextCtrlF2(parentWin, wxNewId(), def,
-                                                 wxDefaultPosition,
-                                                 wxDLG_UNIT(parentWin, wxSize(30, -1)), 0,
-                                                 wxDefaultValidator,
-                                                 wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_TEXTCTRL)));
-            _dynamicSizer->Add(text, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 2);
-
-            Connect(text->GetId(), wxEVT_TEXT, (wxObjectEventFunction)&xlEffectPanel::HandleCommandChange);
-            Connect(slider->GetId(), wxEVT_SLIDER, (wxObjectEventFunction)&xlEffectPanel::HandleCommandChange);
-        } else if (it._type == ShaderParmType::SHADER_PARM_LONG) {
-            auto* staticText = new wxStaticText(parentWin, wxNewId(), wxString(it.GetLabel()),
-                                                 wxDefaultPosition, wxDefaultSize, 0,
-                                                 wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_STATIC)));
-            _dynamicSizer->Add(staticText, 1, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 2);
-
-            auto* sliderSizer = new wxFlexGridSizer(0, 2, 0, 0);
-            sliderSizer->AddGrowableCol(0);
-
-            auto* slider = new BulkEditSlider(parentWin, wxNewId(),
-                                               it._default, it._min, it._max,
-                                               wxDefaultPosition, wxDefaultSize, 0,
-                                               wxDefaultValidator,
-                                               wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_SLIDER)));
-            sliderSizer->Add(slider, 1, wxALL | wxEXPAND, 2);
-
-            auto vcId = wxNewId();
-            auto* vcb = new BulkEditValueCurveButton(parentWin, vcId, GetValueCurveNotSelectedBitmap(),
-                                                      wxDefaultPosition, wxDefaultSize,
-                                                      wxBU_AUTODRAW | wxNO_BORDER,
-                                                      wxDefaultValidator,
-                                                      wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_VALUECURVE)));
-            sliderSizer->Add(vcb, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 2);
-            vcb->GetValue()->SetLimits(it._min, it._max);
-            Connect(vcId, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&ShaderPanel::OnVCButtonClick);
-
-            _dynamicSizer->Add(sliderSizer, 1, wxALL | wxEXPAND, 0);
-
-            auto def = wxString::Format("%ld", (long)it._default);
-            auto* text = new BulkEditTextCtrl(parentWin, wxNewId(), def,
-                                               wxDefaultPosition,
-                                               wxDLG_UNIT(parentWin, wxSize(30, -1)), 0,
-                                               wxDefaultValidator,
-                                               wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_TEXTCTRL)));
-            _dynamicSizer->Add(text, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 2);
-
-            Connect(text->GetId(), wxEVT_TEXT, (wxObjectEventFunction)&xlEffectPanel::HandleCommandChange);
-            Connect(slider->GetId(), wxEVT_SLIDER, (wxObjectEventFunction)&xlEffectPanel::HandleCommandChange);
-        } else if (it._type == ShaderParmType::SHADER_PARM_LONGCHOICE) {
-            auto* staticText = new wxStaticText(parentWin, wxNewId(), wxString(it.GetLabel()),
-                                                 wxDefaultPosition, wxDefaultSize, 0,
-                                                 wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_STATIC)));
-            _dynamicSizer->Add(staticText, 1, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 2);
-
-            auto* choice = new BulkEditChoice(parentWin, wxNewId(),
-                                               wxDefaultPosition, wxDefaultSize, 0, 0, 0,
-                                               wxDefaultValidator,
-                                               wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_CHOICE)));
-            for (const auto& opt : it.GetChoices()) {
-                choice->AppendString(wxString(opt));
-            }
-            int def = it._default;
-            if (it._valueOptions.find(def) != it._valueOptions.end()) {
-                choice->SetStringSelection(wxString(it._valueOptions.find(def)->second));
-            } else {
-                choice->SetSelection(0);
-            }
-            _dynamicSizer->Add(choice, 1, wxTOP | wxBOTTOM | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 5);
-            _dynamicSizer->Add(-1, -1, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 2);
-            Connect(choice->GetId(), wxEVT_CHOICE, (wxObjectEventFunction)&xlEffectPanel::HandleCommandChange);
-        } else if (it._type == ShaderParmType::SHADER_PARM_EVENT) {
-            auto* staticText = new wxStaticText(parentWin, wxNewId(), wxString(it.GetLabel()),
-                                                 wxDefaultPosition, wxDefaultSize, 0,
-                                                 wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_STATIC)));
-            _dynamicSizer->Add(staticText, 1, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 2);
-
-            auto* choice = new BulkEditChoice(parentWin, wxNewId(),
-                                               wxDefaultPosition, wxDefaultSize, 0, 0, 0,
-                                               wxDefaultValidator,
-                                               wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_CHOICE)));
-            for (const auto& opt : it.GetChoices()) {
-                choice->AppendString(wxString(opt));
-            }
-            choice->SetSelection(it._default);
-            _dynamicSizer->Add(choice, 1, wxTOP | wxBOTTOM | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 5);
-            _dynamicSizer->Add(-1, -1, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 2);
-            Connect(choice->GetId(), wxEVT_CHOICE, (wxObjectEventFunction)&xlEffectPanel::HandleCommandChange);
-        } else if (it._type == ShaderParmType::SHADER_PARM_BOOL) {
-            auto* staticText = new wxStaticText(parentWin, wxNewId(), wxString(it.GetLabel()),
-                                                 wxDefaultPosition, wxDefaultSize, 0,
-                                                 wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_STATIC)));
-            _dynamicSizer->Add(staticText, 1, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 2);
-            auto* checkbox = new BulkEditCheckBox(parentWin, wxNewId(), _(""),
-                                                   wxDefaultPosition, wxDefaultSize, 0,
-                                                   wxDefaultValidator,
-                                                   wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_CHECKBOX)));
-            checkbox->SetValue(it._default == 1);
-            _dynamicSizer->Add(checkbox, 1, wxALL | wxEXPAND, 2);
-            _dynamicSizer->Add(-1, -1, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 2);
-            Connect(checkbox->GetId(), wxEVT_CHECKBOX, (wxObjectEventFunction)&xlEffectPanel::HandleCommandChange);
-        } else if (it._type == ShaderParmType::SHADER_PARM_POINT2D) {
-            // X
-            auto* staticText = new wxStaticText(parentWin, wxNewId(),
-                                                 wxString(it.GetLabel()) + " X",
-                                                 wxDefaultPosition, wxDefaultSize, 0,
-                                                 wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_STATIC)) + "X");
-            _dynamicSizer->Add(staticText, 1, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 2);
-
-            auto* sliderSizer = new wxFlexGridSizer(0, 2, 0, 0);
-            sliderSizer->AddGrowableCol(0);
-
-            auto* slider = new BulkEditSliderF2(parentWin, wxNewId(),
-                                                 it._defaultPt.x * 100, it._minPt.x * 100, it._maxPt.x * 100,
-                                                 wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator,
-                                                 wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_SLIDER)) + "X");
-            sliderSizer->Add(slider, 1, wxALL | wxEXPAND, 2);
-
-            auto vcIdX = wxNewId();
-            auto* vcb = new BulkEditValueCurveButton(parentWin, vcIdX, GetValueCurveNotSelectedBitmap(),
-                                                      wxDefaultPosition, wxDefaultSize,
-                                                      wxBU_AUTODRAW | wxNO_BORDER, wxDefaultValidator,
-                                                      wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_VALUECURVE)) + "X");
-            sliderSizer->Add(vcb, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 2);
-            vcb->GetValue()->SetLimits(it._minPt.x * 100, it._maxPt.x * 100);
-            vcb->GetValue()->SetDivisor(100);
-            Connect(vcIdX, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&ShaderPanel::OnVCButtonClick);
-
-            _dynamicSizer->Add(sliderSizer, 1, wxALL | wxEXPAND, 0);
-
-            auto def = wxString::Format("%.2f", it._defaultPt.x);
-            auto* text = new BulkEditTextCtrlF2(parentWin, wxNewId(), def,
-                                                 wxDefaultPosition,
-                                                 wxDLG_UNIT(parentWin, wxSize(30, -1)), 0,
-                                                 wxDefaultValidator,
-                                                 wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_TEXTCTRL)) + "X");
-            _dynamicSizer->Add(text, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 2);
-
-            Connect(text->GetId(), wxEVT_TEXT, (wxObjectEventFunction)&xlEffectPanel::HandleCommandChange);
-            Connect(slider->GetId(), wxEVT_SLIDER, (wxObjectEventFunction)&xlEffectPanel::HandleCommandChange);
-
-            // Y
-            staticText = new wxStaticText(parentWin, wxNewId(),
-                                           wxString(it.GetLabel()) + " Y",
-                                           wxDefaultPosition, wxDefaultSize, 0,
-                                           wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_STATIC)) + "Y");
-            _dynamicSizer->Add(staticText, 1, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 2);
-
-            sliderSizer = new wxFlexGridSizer(0, 2, 0, 0);
-            sliderSizer->AddGrowableCol(0);
-
-            slider = new BulkEditSliderF2(parentWin, wxNewId(),
-                                           it._defaultPt.y * 100, it._minPt.y * 100, it._maxPt.y * 100,
-                                           wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator,
-                                           wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_SLIDER)) + "Y");
-            sliderSizer->Add(slider, 1, wxALL | wxEXPAND, 2);
-
-            auto vcIdY = wxNewId();
-            vcb = new BulkEditValueCurveButton(parentWin, vcIdY, GetValueCurveNotSelectedBitmap(),
-                                                wxDefaultPosition, wxDefaultSize,
-                                                wxBU_AUTODRAW | wxNO_BORDER, wxDefaultValidator,
-                                                wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_VALUECURVE)) + "Y");
-            sliderSizer->Add(vcb, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 2);
-            vcb->GetValue()->SetLimits(it._minPt.y * 100, it._maxPt.y * 100);
-            vcb->GetValue()->SetDivisor(100);
-            Connect(vcIdY, wxEVT_COMMAND_BUTTON_CLICKED, (wxObjectEventFunction)&ShaderPanel::OnVCButtonClick);
-
-            _dynamicSizer->Add(sliderSizer, 1, wxALL | wxEXPAND, 0);
-
-            def = wxString::Format("%.2f", it._defaultPt.y);
-            text = new BulkEditTextCtrlF2(parentWin, wxNewId(), def,
-                                           wxDefaultPosition,
-                                           wxDLG_UNIT(parentWin, wxSize(30, -1)), 0,
-                                           wxDefaultValidator,
-                                           wxString(it.GetId(ShaderCtrlType::SHADER_CTRL_TEXTCTRL)) + "Y");
-            _dynamicSizer->Add(text, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 2);
-
-            Connect(text->GetId(), wxEVT_TEXT, (wxObjectEventFunction)&xlEffectPanel::HandleCommandChange);
-            Connect(slider->GetId(), wxEVT_SLIDER, (wxObjectEventFunction)&xlEffectPanel::HandleCommandChange);
-        }
-    }
+    // Core ShaderConfig emits a schema-shaped JSON array for every visible
+    // uniform; the JsonEffectPanel builder then lays out each row exactly
+    // like a static property. Using the same builder for dynamic rows means
+    // iPad (which has no wxWidgets but speaks the same JSON) can render the
+    // panel from an identical description — and any future additions to the
+    // schema (new control types, etc.) arrive here for free.
+    const int dynamicCols = 3;
+    BuildPropertiesIntoSizer(parentWin, _dynamicSizer,
+                             _shaderConfig->GetDynamicPropertiesJson(),
+                             dynamicCols);
 }
 
 void ShaderPanel::ValidateWindow() {

@@ -55,6 +55,25 @@ protected:
     // property grid, then add their own custom controls on top.
     void BuildFromJson(const nlohmann::json& metadata);
 
+    // Render a bare JSON property array into a caller-provided sizer. Used
+    // when a subclass needs to inject dynamically generated rows into a
+    // custom region of the panel (e.g. ShaderPanel reads the loaded shader's
+    // uniforms, has ShaderConfig emit a matching JSON array, and drops it
+    // into its own wxFlexGridSizer). Every entry flows through the same
+    // BuildPropertyRow dispatcher that BuildFromJson uses, so the full
+    // control-type vocabulary (slider, checkbox, choice, point2d, value
+    // curve, ...) is available. Ids get registered in properties_ just like
+    // static properties — pair calls with RemovePropertiesWithPrefix before
+    // rebuilding so stale wx pointers don't linger past sizer Clear.
+    void BuildPropertiesIntoSizer(wxWindow* parentWin, wxSizer* sizer,
+                                  const nlohmann::json& propArray, int cols);
+
+    // Erase PropertyInfo entries whose id starts with `prefix`. Call after
+    // tearing down a dynamically built region so FindControlForProperty and
+    // the visibility / effect walkers don't dereference destroyed wx
+    // controls on the next rebuild.
+    void RemovePropertiesWithPrefix(const std::string& prefix);
+
     // Parent window that framework-built controls should use. Defaults to
     // the panel itself; when the metadata has "scrollable": true the
     // framework creates a wxScrolledWindow child and points this at it so

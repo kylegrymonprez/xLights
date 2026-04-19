@@ -1017,9 +1017,15 @@ tab they were on, not always "Effect" (persist in
    - **Shader** -- `Shader_FilenameBlock` ✅ (keyed to
      `E_0FILEPICKERCTRL_IFS`). `Shader_SpeedRow` pending (likely
      passes through the standard slider path with f/100 divisor).
-     `Shader_DynamicParams` pending -- needs a new iPad path to
-     parse `.fs` uniform metadata and render sliders / checks /
-     colour pickers dynamically.
+     `Shader_DynamicParams` — core-side landed: `ShaderConfig::GetDynamicPropertiesJson()`
+     emits a schema-shaped JSON array (one entry per visible uniform,
+     ids namespaced `SHADERXYZZY_<name>` so render-path keys
+     round-trip). The desktop `JsonEffectPanel` gained a
+     `point2d` controlType and a `BuildPropertiesIntoSizer` re-entry
+     point so it consumes the same JSON. iPad path: parse the
+     shader via the existing `ShaderMediaCacheEntry` bridge, call
+     `GetDynamicPropertiesJson`, and feed it into the same view
+     builder used for static Shader.json properties.
    - **Video** -- `Video_FilenameBlock` ✅ (keyed to
      `E_FILEPICKERCTRL_Video_Filename`),
      `Video_TransparentBlackRow` ✅. `Video_DurationRow` pending.
@@ -1083,15 +1089,17 @@ tab they were on, not always "Effect" (persist in
      "match-effect-length" action.
    - **Text** -- `Text_Font_XL_Row` still pending — needs a bridge
      enumerating the xLights-bundled bitmap fonts under `fonts/`.
-   - **Shader** -- `Shader_DynamicParams` still pending — needs an
-     iPad `.fs` uniform parser to build sliders / checks / colour
-     pickers for the selected shader's declared uniforms.
+   - **Shader** -- `Shader_DynamicParams` core-side landed; iPad
+     still needs to plumb the JSON from
+     `ShaderConfig::GetDynamicPropertiesJson` into the existing
+     view builder so the dynamic slider / check / choice / point2d
+     rows render without a separate parser.
    - `Video_DurationRow` still pending (needs a bridge for the
      picked video's total duration + a "match effect length" action).
    - `Text_Font_XL_Row` still pending (needs bridge enumerating the
      xLights-bundled bitmap fonts under `fonts/`).
-   - Shader `Shader_DynamicParams` still pending (needs an iPad
-     `.fs` uniform parser).
+   - Shader `Shader_DynamicParams` core JSON emitter landed;
+     iPad binding to consume it still pending.
 7. **C-7 Lockable properties.** Small lock glyph next to each
    `lockable:true` property that writes `LOCK_<id>=1` into the
    effect's settings string. Low priority -- only relevant for

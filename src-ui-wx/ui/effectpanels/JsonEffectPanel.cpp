@@ -875,6 +875,24 @@ void JsonEffectPanel::BuildSection(wxSizer* parentSizer, const nlohmann::json& g
     }
 }
 
+void JsonEffectPanel::BuildPropertiesIntoSizer(wxWindow* parentWin, wxSizer* sizer,
+                                                 const nlohmann::json& propArray, int cols) {
+    if (!propArray.is_array()) return;
+    for (const auto& prop : propArray) {
+        BuildPropertyRow(parentWin, sizer, prop, cols);
+    }
+}
+
+void JsonEffectPanel::RemovePropertiesWithPrefix(const std::string& prefix) {
+    for (auto it = properties_.begin(); it != properties_.end(); ) {
+        if (it->first.rfind(prefix, 0) == 0) {
+            it = properties_.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 void JsonEffectPanel::BuildPropertyRow(wxWindow* parentWin, wxSizer* sizer, const nlohmann::json& prop, int cols) {
     std::string id = prop.value("id", "");
     std::string label = prop.value("label", id);
@@ -1406,6 +1424,182 @@ void JsonEffectPanel::BuildPropertyRow(wxWindow* parentWin, wxSizer* sizer, cons
         // Columns 3+4: spacers
         if (cols >= 3) sizer->Add(-1, -1, 1, wxALL, 1);
         if (cols >= 4) sizer->Add(-1, -1, 1, wxALL, 1);
+    } else if (controlType == "point2d") {
+        // Two rows, one per axis, each laid out like a float-slider row with
+        // the slider as the serialized primary. Control names get an "X"/"Y"
+        // suffix appended to the property id so setting keys round-trip as
+        // E_SLIDER_<id>X / E_SLIDER_<id>Y — the legacy shape that
+        // ShaderEffect::Render reads via GetUndecoratedId + "X"/"Y".
+        //
+        // Properties supported:
+        //   divisor         : slider scale (100 for float percents)
+        //   minX/maxX/defaultX, minY/maxY/defaultY : per-axis range/default
+        //                    (floats in user units; we scale to int by divisor)
+        //   valueCurve      : add a VC button per axis
+        //   lockable        : add a lock button per axis
+        //
+        // Falls back to min/max/default if the per-axis variants are absent,
+        // so a symmetric point2d can be declared with a single range.
+        const int divisor = prop.value("divisor", 1);
+        const bool hasVC = prop.value("valueCurve", false);
+        const bool lockable = prop.value("lockable", false);
+
+        auto readAxis = [&](const std::string& axis,
+                            double& minOut, double& maxOut, double& defOut) {
+            const std::string minKey = "min" + axis;
+            const std::string maxKey = "max" + axis;
+            const std::string defKey = "default" + axis;
+            minOut = prop.contains(minKey) ? prop[minKey].get<double>()
+                                           : prop.value("min", 0.0);
+            maxOut = prop.contains(maxKey) ? prop[maxKey].get<double>()
+                                           : prop.value("max", 1.0);
+            defOut = prop.contains(defKey) ? prop[defKey].get<double>()
+                                           : prop.value("default", 0.0);
+        };
+
+        auto buildAxis = [&](const std::string& axis) {
+            double axMin = 0, axMax = 0, axDef = 0;
+            readAxis(axis, axMin, axMax, axDef);
+            const std::string axId = id + axis;
+            const int scaledMin = static_cast<int>(axMin * (divisor > 1 ? divisor : 1));
+            const int scaledMax = static_cast<int>(axMax * (divisor > 1 ? divisor : 1));
+            const int scaledDef = static_cast<int>(axDef * (divisor > 1 ? divisor : 1));
+
+            PropertyInfo axInfo;
+            axInfo.id = axId;
+            axInfo.controlType = "slider";
+            axInfo.type = "float";
+            axInfo.divisor = divisor;
+            axInfo.settingPrefix = "SLIDER";
+
+            // Col 1: label
+            std::string labelName = "ID_STATICTEXT_" + axId;
+            auto* staticText = new wxStaticText(parentWin, wxNewId(),
+                                                wxString(label) + " " + axis,
+                                                wxDefaultPosition, wxDefaultSize, 0,
+                                                wxString(labelName));
+            sizer->Add(staticText, 1, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 2);
+
+            // Col 2: slider (+ optional VC button) in sub-sizer
+            auto* sliderSizer = new wxFlexGridSizer(0, 2, 0, 0);
+            sliderSizer->AddGrowableCol(0);
+
+            wxWindowID sliderWxId = wxNewId();
+            wxSlider* slider = nullptr;
+            std::string sliderName = "ID_SLIDER_" + axId;
+            if (divisor > 1) {
+                switch (divisor) {
+                case 10:
+                    slider = new BulkEditSliderF1(parentWin, sliderWxId, scaledDef, scaledMin, scaledMax,
+                                                   wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator,
+                                                   wxString(sliderName));
+                    break;
+                case 100:
+                    slider = new BulkEditSliderF2(parentWin, sliderWxId, scaledDef, scaledMin, scaledMax,
+                                                   wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator,
+                                                   wxString(sliderName));
+                    break;
+                case 360:
+                    slider = new BulkEditSliderF360(parentWin, sliderWxId, scaledDef, scaledMin, scaledMax,
+                                                     wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator,
+                                                     wxString(sliderName));
+                    break;
+                default:
+                    slider = new BulkEditSliderF1(parentWin, sliderWxId, scaledDef, scaledMin, scaledMax,
+                                                   wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator,
+                                                   wxString(sliderName));
+                    break;
+                }
+            } else {
+                slider = new BulkEditSlider(parentWin, sliderWxId, scaledDef, scaledMin, scaledMax,
+                                             wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator,
+                                             wxString(sliderName));
+            }
+            axInfo.slider = slider;
+            sliderSizer->Add(slider, 1, wxALL | wxEXPAND, 2);
+
+            if (hasVC) {
+                std::string vcName = "ID_VALUECURVE_" + axId;
+                wxWindowID vcId = wxNewId();
+                auto* vcBtn = new BulkEditValueCurveButton(parentWin, vcId, GetValueCurveNotSelectedBitmap(),
+                                                            wxDefaultPosition, wxDefaultSize,
+                                                            wxBU_AUTODRAW | wxBORDER_NONE,
+                                                            wxDefaultValidator, wxString(vcName));
+                axInfo.valueCurveBtn = vcBtn;
+                vcBtn->GetValue()->SetLimits(static_cast<float>(scaledMin),
+                                             static_cast<float>(scaledMax));
+                if (divisor > 1) vcBtn->GetValue()->SetDivisor(divisor);
+                sliderSizer->Add(vcBtn, 1, wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 0);
+                Connect(vcId, wxEVT_COMMAND_BUTTON_CLICKED,
+                        (wxObjectEventFunction)&JsonEffectPanel::OnVCButtonClick);
+            }
+            sizer->Add(sliderSizer, 1, wxALL | wxEXPAND, 0);
+
+            // Col 3: buddy text control
+            std::string textName = "IDD_TEXTCTRL_" + axId;
+            wxWindowID textWxId = wxNewId();
+            BulkEditTextCtrl* textCtrl = nullptr;
+            if (divisor > 1) {
+                wxString defStr = wxString::Format("%.2f", axDef);
+                switch (divisor) {
+                case 10:
+                    textCtrl = new BulkEditTextCtrlF1(parentWin, textWxId, defStr,
+                                                       wxDefaultPosition, wxDLG_UNIT(parentWin, wxSize(20, -1)),
+                                                       0, wxDefaultValidator, wxString(textName));
+                    break;
+                case 100:
+                    textCtrl = new BulkEditTextCtrlF2(parentWin, textWxId, defStr,
+                                                       wxDefaultPosition, wxDLG_UNIT(parentWin, wxSize(20, -1)),
+                                                       0, wxDefaultValidator, wxString(textName));
+                    break;
+                case 360:
+                    textCtrl = new BulkEditTextCtrlF360(parentWin, textWxId, defStr,
+                                                         wxDefaultPosition, wxDLG_UNIT(parentWin, wxSize(20, -1)),
+                                                         0, wxDefaultValidator, wxString(textName));
+                    break;
+                default:
+                    textCtrl = new BulkEditTextCtrlF1(parentWin, textWxId, defStr,
+                                                       wxDefaultPosition, wxDLG_UNIT(parentWin, wxSize(20, -1)),
+                                                       0, wxDefaultValidator, wxString(textName));
+                    break;
+                }
+            } else {
+                wxString defStr = wxString::Format("%d", scaledDef);
+                textCtrl = new BulkEditTextCtrl(parentWin, textWxId, defStr,
+                                                 wxDefaultPosition, wxDLG_UNIT(parentWin, wxSize(20, -1)),
+                                                 0, wxDefaultValidator, wxString(textName));
+            }
+            textCtrl->SetMaxLength(5);
+            axInfo.buddyText = textCtrl;
+            sizer->Add(textCtrl, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 2);
+
+            // Col 4: lock button or spacer
+            if (cols >= 4) {
+                if (lockable) {
+                    std::string lockName = "ID_BITMAPBUTTON_SLIDER_" + axId;
+                    wxWindowID lockId = wxNewId();
+                    auto* lockBtn = new xlLockButton(parentWin, lockId, wxNullBitmap, wxDefaultPosition, wxSize(14, 14),
+                                                      wxBU_AUTODRAW | wxBORDER_NONE, wxDefaultValidator,
+                                                      wxString(lockName));
+                    sizer->Add(lockBtn, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 1);
+                    Connect(lockId, wxEVT_COMMAND_BUTTON_CLICKED,
+                            (wxObjectEventFunction)&JsonEffectPanel::OnLockButtonClick);
+                } else {
+                    sizer->Add(-1, -1, 1, wxALL | wxALIGN_CENTER_HORIZONTAL | wxALIGN_CENTER_VERTICAL, 1);
+                }
+            }
+
+            properties_[axId] = axInfo;
+        };
+
+        buildAxis("X");
+        buildAxis("Y");
+
+        // point2d doesn't aggregate into a single PropertyInfo — each axis
+        // lives under <id>X / <id>Y. Skip the trailing properties_[id] = info
+        // store and tooltip-attach since there's no single "primary" control.
+        return;
+
     } else if (controlType == "custom") {
         // Delegate to subclass to create the control
         wxWindow* customCtrl = CreateCustomControl(parentWin, sizer, prop, cols);

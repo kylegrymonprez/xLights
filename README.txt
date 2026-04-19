@@ -20,6 +20,9 @@ XLIGHTS/NUTCRACKER RELEASE NOTES
     -enh (derwin12)             Add more variability to Lines Effect. Now using float values (#4532)
     -enh (AGFazio)              Inclulde Node Count in Submodel dialog (#5359)
     -enh (dkulp)                Render: RenderProgressInfo now self-signals completion via an atomic flag
+    -enh (dkulp)                Shader effect: dynamic uniforms emit JSON matching the effect-panel schema; JsonEffectPanel
+                                gains a reusable point2d control type, so iPad and desktop build the dynamic rows from the
+                                same description.
     -bug (dkup/derwin)          Handle various codec issues in avi conversions (#6142, #6153)
     -bug (derwin12)             Fix Use State as Outline for Face Effect default
     -bug (derwin12)             New polyline with default drop pattern did not render (#6156)
