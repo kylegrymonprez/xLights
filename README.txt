@@ -11,6 +11,9 @@ Issue Tracker is found here: www.github.com/xLightsSequencer/xLights/issues
 XLIGHTS/NUTCRACKER RELEASE NOTES
 ---------------------------------
 2026.07  April ??, 2026
+    -bug (dkulp)                Metal render: drain autoreleased MTLCommandEncoders per frame instead of
+                                per render-job (large memory growth during long renders), fix sparkleBuffer
+                                use-after-free, and release retained Metal objects at shutdown
     -enh (charlie)              Dramatically faster House Preview -> Video export on macOS
                                 (~17x at 4K): wire up a proper VideoToolbox hw_frames_ctx so
                                 h264_videotoolbox / hevc_videotoolbox consume GPU-backed
