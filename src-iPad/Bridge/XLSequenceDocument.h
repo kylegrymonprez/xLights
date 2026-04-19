@@ -147,6 +147,12 @@
 // Empty string if no metadata is available for the effect.
 - (NSString*)metadataJsonForEffectNamed:(NSString*)effectName;
 
+// Shader dynamic properties — parses the .fs file at `shaderPath` and
+// returns a JSON-encoded array of property entries that drop into
+// `EffectPropertyView` using the same schema as static metadata. Empty
+// string if the file isn't a parseable shader or the path is empty.
+- (NSString*)shaderDynamicPropertiesJsonForPath:(NSString*)shaderPath;
+
 // Shared metadata — returns JSON string for Buffer/Color/Timing shared panels.
 // name must be one of "Buffer", "Color", "Timing".
 - (NSString*)sharedMetadataJsonNamed:(NSString*)name;

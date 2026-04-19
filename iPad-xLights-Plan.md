@@ -999,7 +999,8 @@ each row is addressed in the sub-phases below.
 |---|---|---|
 | `controlType: filepicker` | 2 props (Glediator, VUMeter file) | **landed (C-2)** — `FilepickerPropertyView`: `.fileImporter` sheet filtered by UTTypes parsed from `fileFilter`; stores absolute path + registers security-scoped bookmark via `obtainAccessToPath:` |
 | `controlType: fontpicker` | 1 prop (Text_Font) | **landed (C-2)** — `FontpickerPropertyView` sheet over `UIFont.familyNames` + size stepper + bold/italic; stores wx `NativeFontInfo` user-desc (e.g. `"bold Arial 26 utf-8"`) that the Phase A-2 `ParseFontString` already round-trips |
-| `controlType: custom` beyond PaletteHeaderRow | 38 props, 15 effects | **in progress (C-6)** — 26 custom ids landed + ResetPanelRow hidden (27/38). Pending: DMX_ChannelsNotebook / DMX_ButtonsRow, Sketch_Info / Sketch_DefRow / Sketch_BackgroundRow, Video_DurationRow, Text_Font_XL_Row, Shader_DynamicParams |
+| `controlType: custom` beyond PaletteHeaderRow | 38 props, 15 effects | **in progress (C-6)** — 27 custom ids landed + ResetPanelRow hidden (28/38). Pending: DMX_ChannelsNotebook / DMX_ButtonsRow, Sketch_Info / Sketch_DefRow / Sketch_BackgroundRow, Video_DurationRow, Text_Font_XL_Row |
+| `controlType: point2d` | shader dynamic params (per `.fs`) | **landed** — `Point2DPropertyView` synthesises two sibling slider rows keyed `<id>X` / `<id>Y` with per-axis bounds |
 | `separator: true` | 3 uses | **landed (C-2)** — `Divider` inserted before property |
 | `suppressIfDefault: true` | 35 uses | **landed (C-2)** — write equal-to-default removes the key via bridge `removeEffectSettingForKey:` |
 | `lockable: true` | 261 uses | no lock UI |
@@ -1272,17 +1273,26 @@ tab they were on, not always "Effect" (persist in
      "match-effect-length" action.
    - **Text** -- `Text_Font_XL_Row` still pending — needs a bridge
      enumerating the xLights-bundled bitmap fonts under `fonts/`.
-   - **Shader** -- `Shader_DynamicParams` core-side landed; iPad
-     still needs to plumb the JSON from
-     `ShaderConfig::GetDynamicPropertiesJson` into the existing
-     view builder so the dynamic slider / check / choice / point2d
-     rows render without a separate parser.
+   - **Shader** -- `Shader_DynamicParams` ✅
+     (`ShaderDynamicParamsView` — calls new bridge
+     `shaderDynamicPropertiesJsonForPath:` which parses the picked
+     `.fs` via `ShaderEffect::ParseShader` and returns the JSON from
+     `ShaderConfig::GetDynamicPropertiesJson`; decodes into an array
+     of `PropertyMetadata` and renders each through
+     `EffectPropertyView` so every shader uniform lands as a native
+     slider / choice / checkbox / point2d row with VC buttons,
+     editable value fields, and suppressIfDefault for free).
+     Re-parses on shader-path change so swapping shaders rebuilds
+     the dynamic UI without requiring a deselect/reselect.
+     Side-effect: `controlType: "point2d"` (new in schema) is
+     rendered via `Point2DPropertyView` which synthesises two
+     sibling sliders keyed `<id>X` / `<id>Y` with per-axis bounds
+     from `minX`/`maxX`/`defaultX` + fall-back to single-axis
+     values — matches `JsonEffectPanel.cpp:1427-1601`.
    - `Video_DurationRow` still pending (needs a bridge for the
      picked video's total duration + a "match effect length" action).
    - `Text_Font_XL_Row` still pending (needs bridge enumerating the
      xLights-bundled bitmap fonts under `fonts/`).
-   - Shader `Shader_DynamicParams` core JSON emitter landed;
-     iPad binding to consume it still pending.
 7. **C-7 Lockable properties.** Small lock glyph next to each
    `lockable:true` property that writes `LOCK_<id>=1` into the
    effect's settings string. Low priority -- only relevant for

@@ -18,6 +18,7 @@
 #include "render/Effect.h"
 #include "effects/RenderableEffect.h"
 #include "effects/EffectManager.h"
+#include "effects/ShaderEffect.h"
 #include "graphics/xlGraphicsAccumulators.h"
 #include "media/AudioManager.h"
 #include "models/Model.h"
@@ -578,6 +579,24 @@
     std::stringstream ss;
     ss << f.rdbuf();
     return [NSString stringWithUTF8String:ss.str().c_str()];
+}
+
+- (NSString*)shaderDynamicPropertiesJsonForPath:(NSString*)shaderPath {
+    if (!shaderPath || shaderPath.length == 0) return @"";
+
+    // Mirrors the desktop path: parse the .fs into a ShaderConfig, ask
+    // for the JSON-shaped dynamic-property array, return it as a string
+    // the Swift-side panel builder can decode exactly like static
+    // effect metadata. Caller owns the returned string; we free the
+    // config before we return.
+    ShaderConfig* cfg = ShaderEffect::ParseShader(
+        std::string([shaderPath UTF8String]),
+        &_context->GetSequenceElements());
+    if (!cfg) return @"";
+
+    std::string dumped = cfg->GetDynamicPropertiesJson().dump();
+    delete cfg;
+    return [NSString stringWithUTF8String:dumped.c_str()];
 }
 
 // MARK: - Effect Setting Read/Write

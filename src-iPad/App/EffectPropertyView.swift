@@ -51,6 +51,9 @@ struct EffectPropertyView: View {
             FontpickerPropertyView(property: property,
                                     currentDesc: rawValue,
                                     onChange: { writeValue($0) })
+        case "point2d":
+            Point2DPropertyView(property: property,
+                                  metadataPrefix: metadataPrefix)
         case "custom":
             customView
         default:
@@ -83,6 +86,8 @@ struct EffectPropertyView: View {
                                      settingKey: "E_0FILEPICKERCTRL_IFS",
                                      fileFilter: "Shader (*.fs)|*.fs",
                                      subdirectory: "Shaders")
+        case "Shader_DynamicParams":
+            ShaderDynamicParamsView()
         case "Pictures_TransparentBlackRow":
             TransparentBlackRowView(effectKeyStem: "Pictures")
         case "Video_TransparentBlackRow":
