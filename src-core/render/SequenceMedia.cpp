@@ -41,18 +41,33 @@ MediaCacheEntry::MediaCacheEntry(MediaType type, const std::string& path, const 
 MediaCacheEntry::~MediaCacheEntry() {}
 
 void MediaCacheEntry::LoadRawFromFile(const std::string& filepath) {
-    ObtainAccessToURL(filepath);
-    FileExists(filepath, true);
+    bool accessOK = ObtainAccessToURL(filepath);
+    bool exists = FileExists(filepath, true);
     std::ifstream stream(filepath, std::ios::binary | std::ios::ate);
     if (stream.is_open()) {
         auto size = stream.tellg();
-        if (size <= 0) return;
+        if (size <= 0) {
+            spdlog::warn("MediaCacheEntry::LoadRawFromFile: 0-byte file '{}'", filepath);
+            return;
+        }
         stream.seekg(0);
         std::vector<uint8_t> buffer(static_cast<size_t>(size));
         stream.read(reinterpret_cast<char*>(buffer.data()), size);
-        if (!stream) return;
+        if (!stream) {
+            spdlog::warn("MediaCacheEntry::LoadRawFromFile: read failed for '{}'", filepath);
+            return;
+        }
         _embeddedData = Base64::Encode(buffer.data(), buffer.size());
         RecordFileTimestamp();
+    } else {
+        // Surface the failure so sandbox / path-resolution regressions
+        // are visible in the log instead of showing up only as the
+        // red-pixel fallback from PicturesEffect. Logs the flags we
+        // care about so we can tell whether the problem was access
+        // (sandbox), existence (path wrong), or something else.
+        spdlog::warn("MediaCacheEntry::LoadRawFromFile: could not open '{}' "
+                     "(ObtainAccessToURL={}, FileExists={}, errno={})",
+                     filepath, accessOK, exists, errno);
     }
 }
 
@@ -582,6 +597,17 @@ std::shared_ptr<ImageCacheEntry> SequenceMedia::GetImage(const std::string& file
     lock.unlock();
 
     np->Load();
+    // Surface resolution failures in the log — the pictures effect
+    // otherwise just shows a red frame with no indication why.
+    // Desktop historically relied on the file-picker + user vetting,
+    // so this path is quiet; on iPad the path can mis-resolve
+    // (sandbox, missing bookmark, desktop-saved absolute path with no
+    // matching file in the show folder) and we need visibility.
+    if (!np->IsOk()) {
+        spdlog::warn("SequenceMedia::GetImage: not OK after load. "
+                     "requested='{}' resolved='{}'",
+                     filepath, loadPath);
+    }
     return np;
 }
 
