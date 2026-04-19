@@ -50,9 +50,9 @@ class SequencerViewModel {
     /// the render finishes instead of the user having to scroll or
     /// zoom to force a redraw.
     var renderedBackgroundsRevision: Int = 0
-    /// Coalesces multiple render kickoffs into one poll. Non-nil
-    /// while `trackRenderCompletion()` has a timer running.
-    @ObservationIgnored private var renderTrackingTimer: Timer?
+    /// Coalesces multiple render kickoffs into one poll. Set while
+    /// `trackRenderCompletion()` has an asyncAfter chain in flight.
+    @ObservationIgnored private var renderPollInFlight: Bool = false
 
     // Preview
     var showPreview = false
@@ -509,22 +509,27 @@ class SequencerViewModel {
     /// range re-render, move/delete) so the effect grid redraws once
     /// the renderer finishes populating effect background geometry.
     /// Multiple concurrent render kickoffs coalesce into a single
-    /// running timer. Cheap no-op when the bridge reports the render
-    /// is already done at the next poll tick (we bump anyway — an
-    /// extra redraw is free, a stale background is not).
+    /// running poll via `renderPollInFlight`. Uses
+    /// `DispatchQueue.main.asyncAfter` rather than `Timer` because
+    /// Timers schedule on RunLoop `.default` only — during pinch /
+    /// scroll interactions the RunLoop is in `.tracking` mode and
+    /// the timer pauses. asyncAfter fires in all RunLoop modes.
     @MainActor
     func trackRenderCompletion() {
-        guard renderTrackingTimer == nil else { return }
-        let doc = document
-        renderTrackingTimer = Timer.scheduledTimer(
-            withTimeInterval: 0.2, repeats: true) { [weak self] timer in
-            guard let self = self else { timer.invalidate(); return }
-            if doc.isRenderDone() {
-                timer.invalidate()
-                Task { @MainActor in
-                    self.renderTrackingTimer = nil
-                    self.renderedBackgroundsRevision &+= 1
-                }
+        guard !renderPollInFlight else { return }
+        renderPollInFlight = true
+        scheduleRenderPoll()
+    }
+
+    @MainActor
+    private func scheduleRenderPoll() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self = self else { return }
+            if self.document.isRenderDone() {
+                self.renderPollInFlight = false
+                self.renderedBackgroundsRevision &+= 1
+            } else {
+                self.scheduleRenderPoll()
             }
         }
     }

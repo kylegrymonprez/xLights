@@ -25,6 +25,14 @@ struct EffectsMetalGridView: UIViewRepresentable {
     /// `setNeedsDisplay`) and the grid picks up the newly populated
     /// effect-background display lists for `DrawEffectBackground`.
     let renderedBackgroundsRevision: Int
+    /// Bumped on every inspector setting edit, before the render
+    /// finishes. Lets the grid redraw immediately so effects whose
+    /// `DrawEffectBackground` computes its geometry from the current
+    /// palette/settings at draw time (ColorWash, On without ramps,
+    /// etc.) show the new color instantly without waiting for the
+    /// render-completion poll. Cached-display-list effects still
+    /// update a second time when `renderedBackgroundsRevision` bumps.
+    let inspectorRevision: Int
 
     // Shared scroll state (pan writes, other canvases read)
     @Binding var scrollOffsetX: CGFloat

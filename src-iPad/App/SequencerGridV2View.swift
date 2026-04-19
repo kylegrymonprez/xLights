@@ -426,6 +426,7 @@ struct SequencerGridV2View: View {
             activeDrag: viewModel.activeDrag,
             timingMarkTimesMS: collectActiveTimingMarkTimes(),
             renderedBackgroundsRevision: viewModel.renderedBackgroundsRevision,
+            inspectorRevision: viewModel.inspectorRevision,
             scrollOffsetX: Binding(
                 get: { timeline.hScrollOffsetPx },
                 set: { timeline.hScrollOffsetPx = $0 }),

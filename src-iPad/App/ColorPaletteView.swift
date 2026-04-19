@@ -37,7 +37,14 @@ struct ColorPaletteView: View {
 
         let enabledBinding = Binding<Bool>(
             get: {
-                let v = viewModel.settingValue(forKey: checkboxKey, defaultValue: slot == 1 ? "1" : "0")
+                // Default to off for every slot, including slot 1. A
+                // previous heuristic defaulted slot 1 to "1" when the
+                // map had no entry, which made Palette 1 look forced-on
+                // for any effect whose saved palette genuinely has
+                // slot 1 disabled. `Effect::ParseColorMap` treats a
+                // missing checkbox key as false, so matching that here
+                // is what keeps the render and the UI in sync.
+                let v = viewModel.settingValue(forKey: checkboxKey, defaultValue: "0")
                 return v == "1" || v.lowercased() == "true"
             },
             set: { viewModel.setSettingValue($0 ? "1" : "0", forKey: checkboxKey) }
