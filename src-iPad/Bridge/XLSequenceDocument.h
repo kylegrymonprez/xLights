@@ -236,6 +236,32 @@
                          toMS:(long)endMS
                    numSamples:(int)numSamples;
 
+// Effect-background batch append. Mirrors desktop's
+// `EffectsGrid::DrawEffectBackground` helper — resolves the
+// RenderableEffect + color mask, then calls
+// `RenderableEffect::DrawEffectBackground` with the bridge's current
+// effect-background accumulator. Caller must have wrapped the visible-
+// effects loop in `-beginEffectBackgroundBatch` / `-flushEffectBackgroundBatch`
+// on the bridge. Coordinates are in logical pixel space, top-left
+// origin (matches the grid's coord system — desktop uses bottom-left
+// but the accumulator just stores the numbers, so we stay consistent
+// with the grid's other calls).
+//
+// Returns the draw-icon hint desktop uses:
+//   0 — effect drew a full background, skip the icon
+//   1 — show the normal-size icon
+//   2 — show a smaller icon (leaves room for partial background)
+// Bridge is declared `id` in the header so this file doesn't have to
+// import `XLGridMetalBridge.h`; the .mm casts it back.
+- (int)appendEffectBackgroundForRow:(int)rowIndex
+                            atIndex:(int)effectIndex
+                                 x1:(float)x1
+                                 y1:(float)y1
+                                 x2:(float)x2
+                                 y2:(float)y2
+                             bridge:(id)bridge
+                          drawRamps:(BOOL)drawRamps;
+
 // Effect icons. Returns BGRA-premultiplied pixel data (width*height*4
 // bytes) plus the chosen bucket size — parsed directly from the
 // RenderableEffect's compiled-in XPM data. `desiredSize` is rounded

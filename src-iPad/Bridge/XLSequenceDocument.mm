@@ -9,6 +9,8 @@
  **************************************************************/
 
 #import "XLSequenceDocument.h"
+#import "XLGridMetalBridge.h"
+#import <CoreGraphics/CoreGraphics.h>
 #include "iPadRenderContext.h"
 
 #include "render/Element.h"
@@ -16,6 +18,7 @@
 #include "render/Effect.h"
 #include "effects/RenderableEffect.h"
 #include "effects/EffectManager.h"
+#include "graphics/xlGraphicsAccumulators.h"
 #include "media/AudioManager.h"
 #include "models/Model.h"
 #include "models/ModelManager.h"
@@ -1076,6 +1079,55 @@ static int xpmSizeIndexForDesired(int desired) {
 
 } // namespace
 
+- (int)appendEffectBackgroundForRow:(int)rowIndex
+                            atIndex:(int)effectIndex
+                                 x1:(float)x1
+                                 y1:(float)y1
+                                 x2:(float)x2
+                                 y2:(float)y2
+                             bridge:(id)bridge
+                          drawRamps:(BOOL)drawRamps {
+    if (!bridge || !_context) return 1;
+    auto* layer = [self effectLayerForRow:rowIndex];
+    if (!layer) return 1;
+    if (effectIndex < 0 || effectIndex >= layer->GetEffectCount()) return 1;
+    Effect* e = layer->GetEffect(effectIndex);
+    if (!e) return 1;
+    if (e->GetPaletteSize() == 0) return 1;
+
+    XLGridMetalBridge* b = (XLGridMetalBridge*)bridge;
+    auto* accPtr = (xlVertexColorAccumulator*)[b effectBackgroundAccumulator];
+    if (!accPtr) return 1;
+
+    RenderableEffect* ef = _context->GetEffectManager()[e->GetEffectIndex()];
+    if (!ef) return 1;
+
+    // Mirror EffectsGrid::DrawEffectBackground (EffectsGrid.cpp:6572):
+    // channel-block strands get the strand's node mask; single-color /
+    // node-single-color models get node 0's mask; everything else
+    // passes nullptr (no tint).
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    xlColor colorMask = xlColor::NilColor();
+    if (row && row->element) {
+        Model* m = _context->GetModelManager()[row->element->GetModelName()];
+        if (m) {
+            if (m->GetDisplayAs() == DisplayAsType::ChannelBlock) {
+                auto* se = dynamic_cast<StrandElement*>(row->element);
+                colorMask = se ? m->GetNodeMaskColor(se->GetStrand()) : xlWHITE;
+            } else {
+                const std::string& st = m->GetStringType();
+                if (st.rfind("Single Color", 0) == 0 || st == "Node Single Color") {
+                    colorMask = m->GetNodeMaskColor(0);
+                }
+            }
+        }
+    }
+    xlColor* maskPtr = colorMask.IsNilColor() ? nullptr : &colorMask;
+
+    return ef->DrawEffectBackground(e, (int)x1, (int)y1, (int)x2, (int)y2,
+                                     *accPtr, maskPtr, drawRamps ? true : false);
+}
+
 - (NSData*)iconBGRAForEffectNamed:(NSString*)effectName
                       desiredSize:(int)desiredSize
                         outputSize:(int*)outputSize {
@@ -1083,13 +1135,58 @@ static int xpmSizeIndexForDesired(int desired) {
     std::string name([effectName UTF8String]);
     RenderableEffect* fx = _context->GetEffectManager().GetEffect(name);
     if (!fx) return nil;
+
+    // Grab the XPM at the bucket index (same indexing desktop
+    // uses in `EffectIconCache`). Effects like `On` bind a single
+    // 16-px XPM to every index — we resample below when the
+    // native size doesn't match the requested bucket, mirroring
+    // desktop's `wxImage::Scale` at cache-build time.
     int idx = xpmSizeIndexForDesired(desiredSize);
     const char* const* xpm = fx->GetIconData(idx);
-    int w = 0, h = 0;
-    NSData* data = xpmToBGRA(xpm, &w, &h);
-    if (!data) return nil;
-    if (outputSize) *outputSize = w; // square icons — w == h for xLights set
-    return data;
+    int srcW = 0, srcH = 0;
+    NSData* srcData = xpmToBGRA(xpm, &srcW, &srcH);
+    if (!srcData) return nil;
+
+    // Native size matches the request — no resample needed.
+    if (srcW == desiredSize && srcH == desiredSize) {
+        if (outputSize) *outputSize = srcW;
+        return srcData;
+    }
+
+    // Rescale to desiredSize via CoreGraphics. High-quality
+    // interpolation gives much better results than the GPU's
+    // bilinear filter at display time, especially when scaling
+    // 16 → 48+ for effects that only ship a single XPM size.
+    int dstW = desiredSize;
+    int dstH = desiredSize;
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+
+    // Wrap source bytes in a CGImage.
+    CGDataProviderRef provider = CGDataProviderCreateWithCFData(
+        (__bridge CFDataRef)srcData);
+    CGImageRef srcImage = CGImageCreate(
+        srcW, srcH, 8, 32, srcW * 4, cs,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little,
+        provider, nullptr, true, kCGRenderingIntentDefault);
+    CGDataProviderRelease(provider);
+
+    NSMutableData* outData = [NSMutableData dataWithLength:(NSUInteger)dstW * dstH * 4];
+    CGContextRef ctx = CGBitmapContextCreate(
+        outData.mutableBytes, dstW, dstH, 8, dstW * 4, cs,
+        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+    CGColorSpaceRelease(cs);
+    if (!ctx || !srcImage) {
+        if (ctx) CGContextRelease(ctx);
+        if (srcImage) CGImageRelease(srcImage);
+        return nil;
+    }
+    CGContextSetInterpolationQuality(ctx, kCGInterpolationHigh);
+    CGContextDrawImage(ctx, CGRectMake(0, 0, dstW, dstH), srcImage);
+    CGContextRelease(ctx);
+    CGImageRelease(srcImage);
+
+    if (outputSize) *outputSize = dstW;
+    return outData;
 }
 
 @end
