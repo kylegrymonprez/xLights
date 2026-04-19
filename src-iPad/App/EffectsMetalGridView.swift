@@ -19,6 +19,12 @@ struct EffectsMetalGridView: UIViewRepresentable {
     let selection: SequencerViewModel.EffectSelection?
     let activeDrag: SequencerViewModel.ActiveDrag?
     let timingMarkTimesMS: [Int]
+    /// Bumped by the view model whenever a render kickoff has
+    /// completed. Only purpose on this view is to appear in the
+    /// parameter list so SwiftUI re-runs `updateUIView` (which calls
+    /// `setNeedsDisplay`) and the grid picks up the newly populated
+    /// effect-background display lists for `DrawEffectBackground`.
+    let renderedBackgroundsRevision: Int
 
     // Shared scroll state (pan writes, other canvases read)
     @Binding var scrollOffsetX: CGFloat
@@ -407,14 +413,37 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
             else if screenPx <= 32 { bucket = 32 }
             else if screenPx <= 48 { bucket = 48 }
             else                   { bucket = 64 }
+            let iconTop = e.top + (e.bottom - e.top - iconSize) / 2
+            let iconBottom = iconTop + iconSize
             if let data = c.iconProvider(e.name, bucket) {
                 let key = "\(e.name)@\(bucket)"
                 c.bridge.ensureTextureNamed(key, bgraData: data,
                                              w: Int32(bucket), h: Int32(bucket))
                 c.bridge.drawTextureNamed(key, x: iconLeft,
-                                           y: e.top + (e.bottom - e.top - iconSize) / 2,
+                                           y: iconTop,
                                            w: iconSize, h: iconSize)
             }
+            // Thin outline around the icon rect. Mirrors desktop's
+            // `lines->AddRectAsLines(...)` call on every icon
+            // (EffectsGrid.cpp:6832). Critical for the Off effect —
+            // whose XPM is a solid-black square that would otherwise
+            // vanish against the dark grid — and it visually ties the
+            // other icons to their cell the same way desktop does.
+            bridge.beginLineBatch()
+            let oR = e.stroke.0, oG = e.stroke.1, oB = e.stroke.2
+            bridge.appendLineX1(iconLeft - 0.5, y1: iconTop - 0.5,
+                                 x2: iconRight + 0.5, y2: iconTop - 0.5,
+                                 r: oR, g: oG, b: oB, a: 0.9)
+            bridge.appendLineX1(iconLeft - 0.5, y1: iconBottom + 0.5,
+                                 x2: iconRight + 0.5, y2: iconBottom + 0.5,
+                                 r: oR, g: oG, b: oB, a: 0.9)
+            bridge.appendLineX1(iconLeft - 0.5, y1: iconTop - 0.5,
+                                 x2: iconLeft - 0.5, y2: iconBottom + 0.5,
+                                 r: oR, g: oG, b: oB, a: 0.9)
+            bridge.appendLineX1(iconRight + 0.5, y1: iconTop - 0.5,
+                                 x2: iconRight + 0.5, y2: iconBottom + 0.5,
+                                 r: oR, g: oG, b: oB, a: 0.9)
+            bridge.flushLineBatch()
             if width > 70, !e.name.isEmpty {
                 let nameStartX = iconRight + 4
                 let nameMaxX = e.x2 - 3

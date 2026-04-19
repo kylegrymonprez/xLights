@@ -43,6 +43,16 @@ class SequencerViewModel {
     // Rendering (background)
     var isRendering = false
     var isRenderDone = false
+    /// Bumped whenever a render kickoff has completed. Observed by
+    /// the effect grid so `DrawEffectBackground` picks up newly
+    /// populated `xlDisplayList`s — setting changes (e.g. a
+    /// SingleStrand palette swap) redraw the background the moment
+    /// the render finishes instead of the user having to scroll or
+    /// zoom to force a redraw.
+    var renderedBackgroundsRevision: Int = 0
+    /// Coalesces multiple render kickoffs into one poll. Non-nil
+    /// while `trackRenderCompletion()` has a timer running.
+    @ObservationIgnored private var renderTrackingTimer: Timer?
 
     // Preview
     var showPreview = false
@@ -149,6 +159,19 @@ class SequencerViewModel {
         /// only the first layer (layerIndex == 0) renders the active dot
         /// and the element name. Higher layers show "[N] layerName".
         let timing: TimingRowInfo?
+        /// Mirror of `Row_Information_Struct.submodel` — true for rows
+        /// that live underneath a parent model via ShowStrands().
+        let isSubmodel: Bool
+        /// Visual indentation depth (0 = top-level model, 1 = direct
+        /// submodel / strand, 2 = node row). Matches desktop's
+        /// `nestDepth`.
+        let nestDepth: Int
+        /// -1 for non-strand rows; else the strand index within the
+        /// parent model.
+        let strandIndex: Int
+        /// -1 for non-node rows; else the node index within the parent
+        /// strand.
+        let nodeIndex: Int
     }
 
     struct TimingRowInfo: Equatable {
@@ -157,6 +180,13 @@ class SequencerViewModel {
         let elementName: String
         /// e.g. "Phrases", "Words", "Phonemes" for lyric layers.
         let layerName: String
+        /// Mirror of `TimingElement::GetActive()`. Stored in the
+        /// RowInfo diff so a toggle on the header row flips the
+        /// equality and propagates through SwiftUI body invalidation —
+        /// otherwise the grid's `collectActiveTimingMarkTimes()` would
+        /// stay pinned to its stale result until the next scroll/zoom
+        /// happened to re-evaluate the body for other reasons.
+        let isActive: Bool
     }
 
     struct EffectInfo: Identifiable, Equatable {
@@ -473,6 +503,50 @@ class SequencerViewModel {
         renderPollTimer = nil
     }
 
+    /// Start (or reuse) a short poll that bumps
+    /// `renderedBackgroundsRevision` once `isRenderDone()` returns
+    /// true. Call this after any render kickoff (per-effect edit,
+    /// range re-render, move/delete) so the effect grid redraws once
+    /// the renderer finishes populating effect background geometry.
+    /// Multiple concurrent render kickoffs coalesce into a single
+    /// running timer. Cheap no-op when the bridge reports the render
+    /// is already done at the next poll tick (we bump anyway — an
+    /// extra redraw is free, a stale background is not).
+    @MainActor
+    func trackRenderCompletion() {
+        guard renderTrackingTimer == nil else { return }
+        let doc = document
+        renderTrackingTimer = Timer.scheduledTimer(
+            withTimeInterval: 0.2, repeats: true) { [weak self] timer in
+            guard let self = self else { timer.invalidate(); return }
+            if doc.isRenderDone() {
+                timer.invalidate()
+                Task { @MainActor in
+                    self.renderTrackingTimer = nil
+                    self.renderedBackgroundsRevision &+= 1
+                }
+            }
+        }
+    }
+
+    /// Wrappers around the two `document.render…` entry points that
+    /// always start a completion-tracking poll. Every render-triggering
+    /// call site in this file goes through one of these so the grid
+    /// stays in sync with the renderer.
+    private func renderEffectAndTrack(rowIndex: Int, effectIndex: Int) {
+        document.renderEffect(forRow: Int32(rowIndex), at: Int32(effectIndex))
+        trackRenderCompletion()
+    }
+    private func renderRangeAndTrack(rowIndex: Int,
+                                      startMS: Int, endMS: Int,
+                                      clear: Bool) {
+        document.renderRange(forRow: Int32(rowIndex),
+                              startMS: Int32(startMS),
+                              endMS: Int32(endMS),
+                              clear: clear)
+        trackRenderCompletion()
+    }
+
     func togglePreview() {
         showPreview.toggle()
     }
@@ -666,7 +740,7 @@ class SequencerViewModel {
         }
 
         if changed {
-            document.renderEffect(forRow: Int32(sel.rowIndex), at: Int32(sel.effectIndex))
+            renderEffectAndTrack(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex)
             // Tell the effects canvas that something on this effect
             // changed so it redraws the selected slot (fade bars,
             // colour pickers reflected in brackets, etc.). The render
@@ -704,7 +778,7 @@ class SequencerViewModel {
                 && selectedEffect?.effectIndex == effectIndex {
                 selectedEffectSettings[key] = value
             }
-            document.renderEffect(forRow: Int32(rowIndex), at: Int32(effectIndex))
+            renderEffectAndTrack(rowIndex: rowIndex, effectIndex: effectIndex)
             inspectorRevision &+= 1
             undoManager.registerUndo(withTarget: self) { vm in
                 vm.setSettingValueAt(rowIndex: rowIndex, effectIndex: effectIndex,
@@ -731,10 +805,9 @@ class SequencerViewModel {
 
         if document.deleteEffect(inRow: Int32(rowIndex), at: Int32(effectIndex)) {
             // Clear the removed effect's output from SequenceData.
-            document.renderRange(forRow: Int32(rowIndex),
-                                  startMS: Int32(startMS),
-                                  endMS: Int32(endMS),
-                                  clear: true)
+            renderRangeAndTrack(rowIndex: rowIndex,
+                                 startMS: startMS, endMS: endMS,
+                                 clear: true)
             if selectedEffect?.rowIndex == rowIndex && selectedEffect?.effectIndex == effectIndex {
                 clearSelection()
             }
@@ -779,15 +852,50 @@ class SequencerViewModel {
                 nextStart = min(nextStart, e.startTimeMS)
             }
         }
-        let startMS = max(prevEnd, atMS)
-        let defaultLen = 1000
-        let endMS = min(nextStart, startMS + defaultLen)
+
+        // If a timing track is active, snap the new effect's range to
+        // the timing cell (the mark pair bracketing `atMS`). Desktop
+        // does the same when an active timing track is selected —
+        // you drop an effect and it fills the whole cell. Falls back
+        // to the 1-second default when no track is active or the tap
+        // lands outside any cell.
+        let cell = activeTimingCell(forMS: atMS)
+        let startMS: Int
+        let endMS: Int
+        if let cell = cell {
+            startMS = max(prevEnd, cell.startMS)
+            endMS = min(nextStart, cell.endMS)
+        } else {
+            startMS = max(prevEnd, atMS)
+            let defaultLen = 1000
+            endMS = min(nextStart, startMS + defaultLen)
+        }
         guard endMS > startMS + 10 else { return } // too tight to fit
 
         addEffectWithSettings(rowIndex: rowIndex,
                                name: paletteName,
                                settings: "", palette: "",
                                startMS: startMS, endMS: endMS)
+    }
+
+    /// Return the timing cell (mark pair) on the active timing track
+    /// that brackets `atMS`, or nil if no timing track is active or
+    /// the tap lands outside every cell on the active track.
+    private func activeTimingCell(forMS atMS: Int) -> (startMS: Int, endMS: Int)? {
+        // First active timing track wins. Desktop enforces single-
+        // active so the first hit is the only hit, but we loop
+        // defensively in case the invariant breaks.
+        for r in rows {
+            guard let t = r.timing, t.isActive else { continue }
+            // Timing marks live as effects on the timing row. Find the
+            // effect whose [start, end) brackets the tap time.
+            for e in r.effects {
+                if atMS >= e.startTimeMS && atMS < e.endTimeMS {
+                    return (e.startTimeMS, e.endTimeMS)
+                }
+            }
+        }
+        return nil
     }
 
     /// Add an effect with pre-populated settings/palette (used for paste + undo-of-delete).
@@ -803,10 +911,9 @@ class SequencerViewModel {
                                           startMS: Int32(startMS),
                                           endMS: Int32(endMS)))
         if idx < 0 { return -1 }
-        document.renderRange(forRow: Int32(rowIndex),
-                              startMS: Int32(startMS),
-                              endMS: Int32(endMS),
-                              clear: false)
+        renderRangeAndTrack(rowIndex: rowIndex,
+                             startMS: startMS, endMS: endMS,
+                             clear: false)
         reloadRows()
         undoManager.registerUndo(withTarget: self) { vm in
             vm.deleteEffect(rowIndex: rowIndex, effectIndex: idx)
@@ -822,7 +929,7 @@ class SequencerViewModel {
         let oldEnd = prev.endTimeMS
         if document.moveEffect(inRow: Int32(rowIndex), at: Int32(effectIndex),
                                toStartMS: Int32(newStartMS), toEndMS: Int32(newEndMS)) {
-            document.renderEffect(forRow: Int32(rowIndex), at: Int32(effectIndex))
+            renderEffectAndTrack(rowIndex: rowIndex, effectIndex: effectIndex)
             reloadRows()
             if selectedEffect?.rowIndex == rowIndex && selectedEffect?.effectIndex == effectIndex {
                 selectEffect(rowIndex: rowIndex, effectIndex: effectIndex)
@@ -871,9 +978,9 @@ class SequencerViewModel {
         // user isn't left with a hole.
         guard document.deleteEffect(inRow: Int32(srcRowIndex),
                                      at: Int32(effectIndex)) else { return }
-        document.renderRange(forRow: Int32(srcRowIndex),
-                              startMS: Int32(oldStart),
-                              endMS: Int32(oldEnd), clear: true)
+        renderRangeAndTrack(rowIndex: srcRowIndex,
+                             startMS: oldStart, endMS: oldEnd,
+                             clear: true)
 
         let newIdx = Int(document.addEffect(toRow: Int32(dstRowIndex),
                                              name: name,
@@ -890,13 +997,13 @@ class SequencerViewModel {
                                     palette: palette,
                                     startMS: Int32(oldStart),
                                     endMS: Int32(oldEnd))
-            document.renderEffect(forRow: Int32(srcRowIndex),
-                                   at: Int32(effectIndex))
+            renderEffectAndTrack(rowIndex: srcRowIndex,
+                                  effectIndex: effectIndex)
             reloadRows()
             return
         }
 
-        document.renderEffect(forRow: Int32(dstRowIndex), at: Int32(newIdx))
+        renderEffectAndTrack(rowIndex: dstRowIndex, effectIndex: newIdx)
         reloadRows()
         selectEffect(rowIndex: dstRowIndex, effectIndex: newIdx)
         undoManager.registerUndo(withTarget: self) { vm in
@@ -935,7 +1042,7 @@ class SequencerViewModel {
             }
         }
         guard changed else { return }
-        document.renderEffect(forRow: Int32(rowIndex), at: Int32(effectIndex))
+        renderEffectAndTrack(rowIndex: rowIndex, effectIndex: effectIndex)
         // Don't reloadRows — fade changes don't affect rows[] geometry,
         // and we don't want to invalidate all tiles. The canvas reads
         // live fades via the fadeProvider closure, which hits the
@@ -959,7 +1066,7 @@ class SequencerViewModel {
                                       at: Int32(effectIndex),
                                       edge: Int32(edge),
                                       toMS: Int32(newMS)) {
-            document.renderEffect(forRow: Int32(rowIndex), at: Int32(effectIndex))
+            renderEffectAndTrack(rowIndex: rowIndex, effectIndex: effectIndex)
             reloadRows()
             if selectedEffect?.rowIndex == rowIndex && selectedEffect?.effectIndex == effectIndex {
                 selectEffect(rowIndex: rowIndex, effectIndex: effectIndex)
@@ -1119,7 +1226,7 @@ class SequencerViewModel {
     func toggleDisable(rowIndex: Int, effectIndex: Int) {
         let nowDisabled = document.effectIsRenderDisabled(inRow: Int32(rowIndex), at: Int32(effectIndex))
         document.setEffectRenderDisabled(!nowDisabled, inRow: Int32(rowIndex), at: Int32(effectIndex))
-        document.renderEffect(forRow: Int32(rowIndex), at: Int32(effectIndex))
+        renderEffectAndTrack(rowIndex: rowIndex, effectIndex: effectIndex)
         undoManager.registerUndo(withTarget: self) { vm in
             vm.toggleDisable(rowIndex: rowIndex, effectIndex: effectIndex)
         }
@@ -1243,7 +1350,8 @@ class SequencerViewModel {
                 timingInfo = TimingRowInfo(
                     colorIndex: Int(document.timingRowColorIndex(at: idx)),
                     elementName: elementName,
-                    layerName: layerName
+                    layerName: layerName,
+                    isActive: document.timingRowIsActive(at: idx)
                 )
                 // Timing rows don't always populate displayName (multi-layer
                 // non-collapsed rows leave it blank on the C++ side), so
@@ -1258,7 +1366,18 @@ class SequencerViewModel {
                 }
             } else {
                 timingInfo = nil
-                displayName = rawDisplayName
+                // Strand / node rows may have no assigned name; mirror
+                // desktop's "Strand N" / "Node N" fallback (RowHeading.cpp:
+                // 2035-2039) so the header reads sensibly instead of blank.
+                let strandIndex = Int(document.rowStrandIndex(at: idx))
+                let nodeIndex = Int(document.rowNodeIndex(at: idx))
+                if rawDisplayName.isEmpty && nodeIndex >= 0 {
+                    displayName = "Node \(nodeIndex + 1)"
+                } else if rawDisplayName.isEmpty && strandIndex >= 0 {
+                    displayName = "Strand \(strandIndex + 1)"
+                } else {
+                    displayName = rawDisplayName
+                }
             }
 
             newRows.append(RowInfo(
@@ -1267,7 +1386,11 @@ class SequencerViewModel {
                 layerIndex: layerIndex,
                 isCollapsed: isCollapsed,
                 effects: effects,
-                timing: timingInfo
+                timing: timingInfo,
+                isSubmodel: document.rowIsSubmodel(at: idx),
+                nestDepth: Int(document.rowNestDepth(at: idx)),
+                strandIndex: Int(document.rowStrandIndex(at: idx)),
+                nodeIndex: Int(document.rowNodeIndex(at: idx))
             ))
         }
 

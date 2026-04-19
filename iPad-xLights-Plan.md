@@ -584,7 +584,49 @@ verifiable on device:
   shows "`ModelName [N]`" when the element has more than one layer
   (N = total layer count), and sub-layer rows show just
   "`[layerIndex+1]`" — matching the bracket notation used on the
-  timing side for phrase/word/phoneme rows.]** ->
+  timing side for phrase/word/phoneme rows.
+  Submodel / strand / node disclosure landed: `RowInfo` now carries
+  `isSubmodel` / `nestDepth` / `strandIndex` / `nodeIndex` from the
+  C++ `Row_Information_Struct`, populated via new bridge methods
+  `rowIsSubmodel`, `rowNestDepth`, `rowStrandIndex`, `rowNodeIndex`.
+  `ModelRowHeader` shows a right/down chevron on rows that have
+  submodels (`ModelElement::GetSubModelAndStrandCount() > 0` or
+  ModelGroup) or nodes (`StrandElement::GetNodeLayerCount() > 0`),
+  with single-tap on the chevron or double-tap anywhere on the row
+  flipping the corresponding `ShowStrands` / `ShowNodes` flag — the
+  iPad equivalent of desktop's `RowHeading::leftDoubleClick →
+  ToggleExpand`. New bridge helpers
+  `rowHasSubmodels` / `rowShowsSubmodels` / `toggleRowShowSubmodels`
+  and `rowHasNodes` / `rowShowsNodes` / `toggleRowShowNodes` drive
+  the state. Sub-rows now indent visually by `nestDepth * 10 pt`.
+  Fixed a latent bug in the pre-existing layer `+/-` toggle:
+  `toggleElementCollapsed` flipped the C++ `Element::mCollapsed`
+  state and repopulated `mRowInformation`, but `ModelRowHeader`
+  never called `SequencerViewModel.reloadRows()`, so the Swift-side
+  row cache stayed stale and sub-layer rows didn't hide/show.
+  `ModelRowHeader` now takes an `onRowsChanged` callback the grid
+  wires to `reloadRows()`; both the layer toggle and the new
+  disclosure toggles fire it.
+  Long-press context menus landed (desktop right-click parity).
+  ModelRowHeader menu: Insert Layer Above, Insert Layer Below,
+  Delete Layer (destructive; hidden when the element is down to a
+  single layer to mirror desktop disabling the item), Show/Hide
+  Strands (when the model has submodels/strands), Show/Hide Nodes
+  (when the row is a strand). Delete Layer routes through a
+  confirmation alert so a long-press slip doesn't wipe an entire
+  layer's effects. TimingRowHeader menu (layer 0 only):
+  Rename Timing Track (alert with a text field; wires through
+  `SequenceElements::RenameTimingTrack` so effect settings that
+  reference the old name update in-place; rejects empty strings
+  and colliding names), Delete Timing Track (confirmation alert;
+  wires through `SequenceElements::DeleteElement` after aborting
+  any in-flight render). Bridge additions on `XLSequenceDocument`:
+  `insertEffectLayerAbove` / `insertEffectLayerBelow` /
+  `removeEffectLayer`, `renameTimingTrack:newName:` /
+  `deleteTimingTrack`. All mutating paths call
+  `iPadRenderContext::AbortRender(5000)` before touching the
+  underlying `Element*` when a running render could still be
+  walking it.]** ->
 - B-3 effect drawing (brackets + icons + transitions + vertical
   timing-mark lines) **[landed as `EffectCanvasViews.swift`;
   `ModelEffectsCanvas` draws brackets + centerline + icon +

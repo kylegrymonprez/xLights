@@ -215,7 +215,17 @@
     if (!row || !row->element ||
         row->element->GetType() != ElementType::ELEMENT_TYPE_TIMING) return;
     auto* te = dynamic_cast<TimingElement*>(row->element);
-    if (te) te->SetActive(active ? true : false);
+    if (!te) return;
+    // Desktop enforces single-active (RowHeading.cpp:365-371) —
+    // activating one timing track clears every other. Deactivating
+    // the currently-active one just flips it off.
+    auto& se = _context->GetSequenceElements();
+    if (active) {
+        se.DeactivateAllTimingElements();
+        te->SetActive(true);
+    } else {
+        te->SetActive(false);
+    }
 }
 
 - (int)timingRowColorIndexAtIndex:(int)rowIndex {
@@ -263,6 +273,134 @@
     if (!row || !row->element) return;
     row->element->SetCollapsed(!row->element->GetCollapsed());
     _context->GetSequenceElements().PopulateRowInformation();
+}
+
+- (BOOL)rowIsSubmodelAtIndex:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    return (row && row->submodel) ? YES : NO;
+}
+- (int)rowNestDepthAtIndex:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    return row ? row->nestDepth : 0;
+}
+- (int)rowStrandIndexAtIndex:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    return row ? row->strandIndex : -1;
+}
+- (int)rowNodeIndexAtIndex:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    return row ? row->nodeIndex : -1;
+}
+
+- (BOOL)rowHasSubmodelsAtIndex:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    // Only top-level model rows have a strand/submodel container; sub-
+    // layer rows (layerIndex > 0) forward to the same ModelElement so
+    // the answer is identical, but the disclosure affordance only
+    // makes sense on the element's primary row.
+    auto* me = dynamic_cast<ModelElement*>(row->element);
+    if (!me) return NO;
+    if (me->GetSubModelAndStrandCount() > 0) return YES;
+    // ModelGroups disclose their member models via ShowStrands too.
+    Model* m = _context->GetModelManager()[me->GetModelName()];
+    if (m && m->GetDisplayAs() == DisplayAsType::ModelGroup) return YES;
+    return NO;
+}
+- (BOOL)rowShowsSubmodelsAtIndex:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    auto* me = dynamic_cast<ModelElement*>(row->element);
+    return (me && me->ShowStrands()) ? YES : NO;
+}
+- (void)toggleRowShowSubmodelsAtIndex:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return;
+    auto* me = dynamic_cast<ModelElement*>(row->element);
+    if (!me) return;
+    me->ShowStrands(!me->ShowStrands());
+    _context->GetSequenceElements().PopulateRowInformation();
+}
+
+- (BOOL)rowHasNodesAtIndex:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    auto* se = dynamic_cast<StrandElement*>(row->element);
+    return (se && se->GetNodeLayerCount() > 0) ? YES : NO;
+}
+- (BOOL)rowShowsNodesAtIndex:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    auto* se = dynamic_cast<StrandElement*>(row->element);
+    return (se && se->ShowNodes()) ? YES : NO;
+}
+- (void)toggleRowShowNodesAtIndex:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return;
+    auto* se = dynamic_cast<StrandElement*>(row->element);
+    if (!se) return;
+    se->ShowNodes(!se->ShowNodes());
+    _context->GetSequenceElements().PopulateRowInformation();
+}
+
+- (BOOL)insertEffectLayerAboveAtIndex:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    row->element->InsertEffectLayer(row->layerIndex);
+    _context->GetSequenceElements().PopulateRowInformation();
+    return YES;
+}
+- (BOOL)insertEffectLayerBelowAtIndex:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    int insertAt = row->layerIndex + 1;
+    if (insertAt >= (int)row->element->GetEffectLayerCount()) {
+        row->element->AddEffectLayer();
+    } else {
+        row->element->InsertEffectLayer(insertAt);
+    }
+    _context->GetSequenceElements().PopulateRowInformation();
+    return YES;
+}
+- (BOOL)removeEffectLayerAtIndex:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    if (row->element->GetEffectLayerCount() <= 1) return NO;
+    // Abort render before yanking a layer that may own effects the
+    // renderer is walking; matches desktop's `AbortRender()` guard
+    // before `RemoveEffectLayer` in `RowHeading.cpp`.
+    _context->AbortRender(5000);
+    row->element->RemoveEffectLayer(row->layerIndex);
+    _context->GetSequenceElements().PopulateRowInformation();
+    return YES;
+}
+
+- (BOOL)renameTimingTrackAtIndex:(int)rowIndex newName:(NSString*)newName {
+    if (!newName || newName.length == 0) return NO;
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    if (row->element->GetType() != ElementType::ELEMENT_TYPE_TIMING) return NO;
+    std::string newStr([newName UTF8String]);
+    auto& se = _context->GetSequenceElements();
+    if (se.ElementExists(newStr)) return NO;
+    std::string oldStr = row->element->GetName();
+    if (oldStr == newStr) return YES;
+    se.RenameTimingTrack(oldStr, newStr);
+    row->element->SetName(newStr);
+    se.PopulateRowInformation();
+    return YES;
+}
+
+- (BOOL)deleteTimingTrackAtIndex:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    if (row->element->GetType() != ElementType::ELEMENT_TYPE_TIMING) return NO;
+    std::string name = row->element->GetName();
+    // Some effect settings reference the timing track by name; abort
+    // in-flight render before the element disappears.
+    _context->AbortRender(5000);
+    _context->GetSequenceElements().DeleteElement(name);
+    return YES;
 }
 
 // MARK: - Views

@@ -5,36 +5,69 @@ struct SequencerView: View {
     // Shared with SequencerGridV2View so toolbar zoom and in-grid
     // pinch-to-zoom drive the same state.
     @State private var timeline = TimelineState()
+    // Persisted preview-pane height. Default of 280 reads well on a
+    // 10" iPad; 13" users can drag up to 360-380 pt. Clamp range is
+    // intentionally wide — the drag handle constrains it, and we
+    // also clamp against the live viewport so the grid never gets
+    // squeezed out of view.
+    @AppStorage("previewPaneHeight") private var previewPaneHeight: Double = 280
+    private static let previewMinHeight: Double = 160
+    private static let previewMaxHeight: Double = 800
 
     var body: some View {
-        VStack(spacing: 0) {
-            toolbar
-            Divider()
-
-            if viewModel.showPreview {
-                HStack(spacing: 0) {
-                    ModelPreviewView()
-                        .frame(maxWidth: .infinity)
-                    Divider()
-                    HousePreviewView()
-                        .frame(maxWidth: .infinity)
-                }
-                .frame(height: 350)
+        GeometryReader { geo in
+            // Cap the preview at roughly 2/3 of the viewport so the grid
+            // + palette always have room even after an over-eager drag.
+            // The drag handler also clamps, but honoring the viewport
+            // here keeps stored values sensible across device rotations
+            // and size classes.
+            let cap = max(Self.previewMinHeight,
+                          min(Self.previewMaxHeight,
+                              geo.size.height * 0.65))
+            let effectiveH = min(max(previewPaneHeight,
+                                     Self.previewMinHeight), cap)
+            VStack(spacing: 0) {
+                toolbar
                 Divider()
-            }
 
-            HStack(spacing: 0) {
-                SequencerGridV2View(timeline: timeline)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                if viewModel.showInspector {
-                    Divider()
-                    EffectSettingsView()
-                        .frame(width: 280)
+                if viewModel.showPreview {
+                    HStack(spacing: 0) {
+                        ModelPreviewView()
+                            .frame(maxWidth: .infinity)
+                        Divider()
+                        HousePreviewView()
+                            .frame(maxWidth: .infinity)
+                    }
+                    .frame(height: effectiveH)
+                    previewResizeHandle(cap: cap)
                 }
-            }
 
-            EffectPaletteView()
+                HStack(spacing: 0) {
+                    SequencerGridV2View(timeline: timeline)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    if viewModel.showInspector {
+                        Divider()
+                        EffectSettingsView()
+                            .frame(width: 280)
+                    }
+                }
+
+                EffectPaletteView()
+            }
         }
+    }
+
+    /// Draggable divider below the preview pane. Vertical drag
+    /// updates the persisted `previewPaneHeight`; the `cap` comes
+    /// from the enclosing `GeometryReader` so the handle can never
+    /// let the stored value exceed the current viewport.
+    private func previewResizeHandle(cap: Double) -> some View {
+        PreviewResizeHandle(
+            height: Binding(
+                get: { previewPaneHeight },
+                set: { previewPaneHeight = min(max($0, Self.previewMinHeight), cap) }
+            )
+        )
     }
 
     // MARK: - Toolbar
@@ -229,6 +262,52 @@ struct SequencerView: View {
         let seconds = totalSeconds % 60
         let frac = (ms % 1000) / 10
         return String(format: "%d:%02d.%02d", minutes, seconds, frac)
+    }
+}
+
+/// Thin draggable divider that sits under the preview pane and
+/// resizes it via a vertical drag. Wider hit strip than the visible
+/// divider so it's a comfortable touch target; a three-dot grip
+/// indicator in the middle makes the affordance visible.
+private struct PreviewResizeHandle: View {
+    @Binding var height: Double
+    @State private var dragStartH: Double? = nil
+
+    var body: some View {
+        // Layered as three overlays on a fixed-height rectangle.
+        // Earlier this was a ZStack with a VStack + `Spacer()` inside
+        // it — the Spacer made the ZStack greedy and the handle blew
+        // up to ~1/3 of the screen on first render. Overlays inherit
+        // the Color.clear's height, so the handle stays 14pt tall
+        // regardless of the siblings' layout priority.
+        Color.clear
+            .frame(height: 14)
+            .overlay(alignment: .top) {
+                // Top hairline matches the original fixed Divider.
+                Rectangle()
+                    .fill(Color(white: 0.25))
+                    .frame(height: 0.5)
+            }
+            .overlay {
+                HStack(spacing: 3) {
+                    ForEach(0..<3, id: \.self) { _ in
+                        Circle()
+                            .fill(Color.secondary.opacity(0.6))
+                            .frame(width: 3, height: 3)
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture()
+                    .onChanged { value in
+                        if dragStartH == nil { dragStartH = height }
+                        if let start = dragStartH {
+                            height = start + value.translation.height
+                        }
+                    }
+                    .onEnded { _ in dragStartH = nil }
+            )
     }
 }
 

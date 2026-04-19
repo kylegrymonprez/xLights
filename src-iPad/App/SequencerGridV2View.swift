@@ -340,7 +340,8 @@ struct SequencerGridV2View: View {
                 TimingRowHeader(
                     row: row,
                     height: metrics.timingRowHeight,
-                    document: viewModel.document
+                    document: viewModel.document,
+                    onRowsChanged: { viewModel.reloadRows() }
                 )
             }
         }
@@ -358,7 +359,8 @@ struct SequencerGridV2View: View {
                     row: row,
                     height: h,
                     document: viewModel.document,
-                    onSelect: { viewModel.selectPreviewModel(rowIndex: row.id) }
+                    onSelect: { viewModel.selectPreviewModel(rowIndex: row.id) },
+                    onRowsChanged: { viewModel.reloadRows() }
                 )
             }
             Spacer(minLength: 0)
@@ -423,6 +425,7 @@ struct SequencerGridV2View: View {
             selection: viewModel.selectedEffect,
             activeDrag: viewModel.activeDrag,
             timingMarkTimesMS: collectActiveTimingMarkTimes(),
+            renderedBackgroundsRevision: viewModel.renderedBackgroundsRevision,
             scrollOffsetX: Binding(
                 get: { timeline.hScrollOffsetPx },
                 set: { timeline.hScrollOffsetPx = $0 }),

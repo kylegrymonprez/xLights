@@ -83,6 +83,51 @@
 - (BOOL)rowIsElementCollapsedAtIndex:(int)rowIndex;
 - (void)toggleElementCollapsedAtIndex:(int)rowIndex;
 
+// Submodel / strand / node row metadata (mirrors
+// `Row_Information_Struct.submodel`, `nestDepth`, `strandIndex`,
+// `nodeIndex`). `nestDepth` drives visual indent on the left
+// column; `strandIndex >= 0` and `nodeIndex >= 0` identify
+// strand/node rows for the disclosure affordances below.
+- (BOOL)rowIsSubmodelAtIndex:(int)rowIndex;
+- (int)rowNestDepthAtIndex:(int)rowIndex;
+- (int)rowStrandIndexAtIndex:(int)rowIndex;
+- (int)rowNodeIndexAtIndex:(int)rowIndex;
+
+// Submodel / strand disclosure. A row "has submodels" if its
+// element is a ModelElement with strand/submodel children (desktop
+// `ModelElement::ShowStrands` target); a row "has nodes" if it's a
+// StrandElement with at least one node layer
+// (`StrandElement::ShowNodes` target). Toggle helpers flip the
+// state and repopulate row information so the caller only needs to
+// refresh its row cache afterwards.
+- (BOOL)rowHasSubmodelsAtIndex:(int)rowIndex;
+- (BOOL)rowShowsSubmodelsAtIndex:(int)rowIndex;
+- (void)toggleRowShowSubmodelsAtIndex:(int)rowIndex;
+- (BOOL)rowHasNodesAtIndex:(int)rowIndex;
+- (BOOL)rowShowsNodesAtIndex:(int)rowIndex;
+- (void)toggleRowShowNodesAtIndex:(int)rowIndex;
+
+// Layer management on a model / submodel / strand row. Mirrors
+// the "Insert Layer Above/Below" and "Delete Layer" entries in
+// desktop's `RowHeading` right-click menu
+// (`RowHeading.cpp:751-801`). `insertAbove` / `insertBelow` key
+// off the row's own `layerIndex`; `remove` returns NO if the
+// element is down to its last layer (desktop disables the item in
+// that case too). Repopulates row info on success.
+- (BOOL)insertEffectLayerAboveAtIndex:(int)rowIndex;
+- (BOOL)insertEffectLayerBelowAtIndex:(int)rowIndex;
+- (BOOL)removeEffectLayerAtIndex:(int)rowIndex;
+
+// Timing track rename / delete. `renameTiming…` wires through
+// `SequenceElements::RenameTimingTrack` so effect references to
+// the old name update in-place. `deleteTiming…` goes through
+// `SequenceElements::DeleteElement` (which repopulates row info).
+// Both return NO if the row isn't a timing row. `renameTiming…`
+// also returns NO if `newName` collides with an existing timing
+// track.
+- (BOOL)renameTimingTrackAtIndex:(int)rowIndex newName:(NSString*)newName;
+- (BOOL)deleteTimingTrackAtIndex:(int)rowIndex;
+
 // Views (view picker).
 - (NSArray<NSString*>*)availableViews;
 - (int)currentViewIndex;
