@@ -60,7 +60,7 @@ wxWindow* TextPanel::CreateCustomControl(wxWindow* parentWin, wxSizer* sizer,
         return BuildFileRow(parentWin, sizer, cols);
     }
     if (id == "Text_Font_XL_Row") {
-        return BuildXLFontRow(parentWin, sizer, cols);
+        return BuildXLFontRow(parentWin, sizer, cols, prop);
     }
     return nullptr;
 }
@@ -102,7 +102,8 @@ wxWindow* TextPanel::BuildFileRow(wxWindow* parentWin, wxSizer* sizer, int cols)
     return _filePickerMedia;
 }
 
-wxWindow* TextPanel::BuildXLFontRow(wxWindow* parentWin, wxSizer* sizer, int cols) {
+wxWindow* TextPanel::BuildXLFontRow(wxWindow* parentWin, wxSizer* sizer, int cols,
+                                      const nlohmann::json& prop) {
     // The XL Font choice shares the suffix "Text_Font" with the wxFontPicker
     // above it (different prefix though — CHOICE vs FONTPICKER), which the
     // properties_ map can't represent without collision. Building the choice
@@ -117,13 +118,29 @@ wxWindow* TextPanel::BuildXLFontRow(wxWindow* parentWin, wxSizer* sizer, int col
                                         0, nullptr, 0, wxDefaultValidator,
                                         _T("ID_CHOICE_Text_Font"));
 
-    _xlFontChoice->Append("Use OS Fonts");
-    FontManager& font_mgr(FontManager::instance());
-    const auto& xl_font_names = font_mgr.get_font_names();
-    font_mgr.init();
-    for (const auto& name : xl_font_names) {
-        _xlFontChoice->Append(name);
+    // Prefer the JSON `options` list so desktop + iPad share one source of
+    // truth. FontManager remains the runtime authority for which fonts
+    // are actually renderable; the JSON list must be kept in sync with
+    // `FontManager::get_font_names()` (17 bundled bitmap fonts today).
+    // Fall back to FontManager enumeration when the JSON is missing the
+    // array — forward-compat for sequences loaded against older metadata.
+    bool populated = false;
+    if (prop.contains("options") && prop["options"].is_array()) {
+        for (const auto& opt : prop["options"]) {
+            if (opt.is_string()) {
+                _xlFontChoice->Append(opt.get<std::string>());
+                populated = true;
+            }
+        }
     }
+    if (!populated) {
+        _xlFontChoice->Append("Use OS Fonts");
+        FontManager& font_mgr(FontManager::instance());
+        for (const auto& name : font_mgr.get_font_names()) {
+            _xlFontChoice->Append(name);
+        }
+    }
+    FontManager::instance().init();
     _xlFontChoice->SetSelection(0);
 
     sizer->Add(_xlFontChoice, 1, wxALL | wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL, 2);

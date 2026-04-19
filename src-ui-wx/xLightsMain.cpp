@@ -7208,7 +7208,7 @@ int xLightsFrame::ExportNodes(wxFile& f, StrandElement* e, NodeLayer* nl, int n,
                                  duration / 60000,
                                  (duration % 60000) / 1000,
                                  duration % 1000,
-                                 sm.Contains("X_Effect_Description") ? sm["X_Effect_Description"] : "",
+                                 sm.Contains("X_Effect_Description") ? std::string(sm["X_Effect_Description"]) : std::string(""),
                                  name,
                                  type,
                                  fs));
@@ -7286,7 +7286,7 @@ int xLightsFrame::ExportElement(wxFile& f, Element* e, std::map<std::string, int
                                          duration / 60000,
                                          (duration % 60000) / 1000,
                                          duration % 1000,
-                                         sm.Contains("X_Effect_Description") ? sm["X_Effect_Description"] : "",
+                                         sm.Contains("X_Effect_Description") ? std::string(sm["X_Effect_Description"]) : std::string(""),
                                          (const char*)(e->GetFullName()).c_str(),
                                          type,
                                          fs));

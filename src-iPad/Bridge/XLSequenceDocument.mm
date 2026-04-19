@@ -638,7 +638,13 @@ static bool isPaletteKey(const std::string& key) {
         SettingsMap& map = e->GetPaletteMap();
         if (map.Contains(k) && map[k] == v) return NO;
         map[k] = v;
-        e->IncrementChangeCount();
+        // Rebuild the derived `mColors` / `mCC` vectors — the render
+        // engine reads from those (via `CopyPalette`), not from
+        // `mPaletteMap`. Skipping this step leaves the rendered
+        // effect stale: the user's enable/disable toggle flips the
+        // map entry but the cached colour vector doesn't change, so
+        // nothing visibly updates.
+        e->PaletteMapUpdated();
         return YES;
     } else {
         // SetSetting returns true if the value actually changed.
@@ -656,10 +662,15 @@ static bool isPaletteKey(const std::string& key) {
     if (!e) return NO;
 
     std::string k = [key UTF8String];
-    SettingsMap& map = isPaletteKey(k) ? e->GetPaletteMap() : e->GetSettings();
+    bool palette = isPaletteKey(k);
+    SettingsMap& map = palette ? e->GetPaletteMap() : e->GetSettings();
     if (!map.Contains(k)) return NO;
     map.erase(k);
-    e->IncrementChangeCount();
+    if (palette) {
+        e->PaletteMapUpdated();   // refresh mColors / mCC + IncrementChangeCount
+    } else {
+        e->IncrementChangeCount();
+    }
     return YES;
 }
 

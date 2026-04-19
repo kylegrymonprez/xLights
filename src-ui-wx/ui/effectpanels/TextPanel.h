@@ -33,7 +33,8 @@ protected:
 
 private:
     wxWindow* BuildFileRow(wxWindow* parentWin, wxSizer* sizer, int cols);
-    wxWindow* BuildXLFontRow(wxWindow* parentWin, wxSizer* sizer, int cols);
+    wxWindow* BuildXLFontRow(wxWindow* parentWin, wxSizer* sizer, int cols,
+                              const nlohmann::json& prop);
 
     // Custom-built controls (not in properties_ map).
     wxFilePickerCtrl* _hiddenFilePicker = nullptr;

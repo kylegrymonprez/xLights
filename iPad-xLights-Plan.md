@@ -999,8 +999,9 @@ each row is addressed in the sub-phases below.
 |---|---|---|
 | `controlType: filepicker` | 2 props (Glediator, VUMeter file) | **landed (C-2)** — `FilepickerPropertyView`: `.fileImporter` sheet filtered by UTTypes parsed from `fileFilter`; stores absolute path + registers security-scoped bookmark via `obtainAccessToPath:` |
 | `controlType: fontpicker` | 1 prop (Text_Font) | **landed (C-2)** — `FontpickerPropertyView` sheet over `UIFont.familyNames` + size stepper + bold/italic; stores wx `NativeFontInfo` user-desc (e.g. `"bold Arial 26 utf-8"`) that the Phase A-2 `ParseFontString` already round-trips |
-| `controlType: custom` beyond PaletteHeaderRow | 38 props, 15 effects | **in progress (C-6)** — 27 custom ids landed + ResetPanelRow hidden (28/38). Pending: DMX_ChannelsNotebook / DMX_ButtonsRow, Sketch_Info / Sketch_DefRow / Sketch_BackgroundRow, Video_DurationRow, Text_Font_XL_Row |
+| `controlType: custom` beyond PaletteHeaderRow | ~41 props, 15 effects | **complete (C-6)** — every JSON-declared custom preserves its setting on touch. Full-fidelity: SubBuffer (interactive rect canvas + preset menu). Minimal-fidelity rows that still need dedicated editors: DMX_ChannelsNotebook (per-channel VC), DMX_ButtonsRow (Remap / Save State / Load State), Sketch_DefRow (polyline editor), Video_DurationRow (AVAsset probe + match-length), Text_Font_XL_Row (bitmap font enumerator), RotoZoomPreset (more presets). See "Remaining polish" table below |
 | `controlType: point2d` | shader dynamic params (per `.fs`) | **landed** — `Point2DPropertyView` synthesises two sibling slider rows keyed `<id>X` / `<id>Y` with per-axis bounds |
+| Generic `custom` / unsupported-controlType placeholder | — | **enhanced** — previously showed a mystery "(custom)" tag with no value; now displays the stored value read-only + `.textSelection(.enabled)` so schema-drift (desktop adds a property our iPad metadata copy doesn't know about) doesn't hide data. No write path, so unknown types can't be corrupted |
 | `separator: true` | 3 uses | **landed (C-2)** — `Divider` inserted before property |
 | `suppressIfDefault: true` | 35 uses | **landed (C-2)** — write equal-to-default removes the key via bridge `removeEffectSettingForKey:` |
 | `lockable: true` | 261 uses | no lock UI |
@@ -1037,11 +1038,17 @@ Per-tab work summary:
   bloat. Runtime enable/disable of Adjust/Reverse based on
   fade==0 or type∈`kTransitionsNoAdjust`/`kTransitionsNoReverse`
   is a follow-up polish item.
-- **Buffer** -- layout cleanup on `shared/Buffer.json`; most
-  controls are standard `slider` / `choice` / `checkbox` and already
-  render -- they just need to live in the Buffer tab. The roto-zoom
-  notebook group needs the `tabs` group type to render (already
-  supported).
+- **Buffer** -- **landed.** Standard `slider` / `choice` / `checkbox`
+  controls render into the Buffer tab via the shared metadata panel.
+  Buffer / Roto-Zoom tabs render as a segmented notebook (C-1 /
+  notebook rework). `SubBuffer` has a full interactive rectangle
+  editor (`SubBufferEditorView`) with draggable corner handles, a
+  preset menu (Full / Halves / Thirds / Quarters), editable number
+  fields per edge, and correct desktop format parity (`x`-delimited
+  six-slot string with VC preservation on round-trip).
+  `RotoZoomPreset` wired with 5 presets (Full parity deferred —
+  see polish table). `BrightnessLevelRow` exposed as a single
+  checkbox.
 
 Tab identity is preserved across selections so the user returns to the
 tab they were on, not always "Effect" (persist in
@@ -1303,6 +1310,33 @@ then C-2 + C-3 in parallel (both small), then C-5 (the big one;
 unblocks VC-aware custom controls in C-6), then C-4 (feeds C-5's
 timing-track picker -- C-5 can ship without it and pick up the
 option list when C-4 lands), then C-6 effect-by-effect, then C-7.
+
+### Phase C remaining polish
+
+Every effect property in the tree today has a control that at minimum
+preserves its stored value. This table tracks the remaining work to
+lift minimal-fidelity rows to full-fidelity editors, plus assorted
+polish deferred from the sub-phase landings.
+
+| Item | Effect / panel | Current state | What's needed for full parity |
+|---|---|---|---|
+| `DMX_ChannelsNotebook` per-channel VC | DMX | Slider + invert toggle + editable number field per channel, grouped 1-16/17-32/33-48 | VC button per channel (48×) — wire `ValueCurveButton` against each channel's `E_VALUECURVE_DMX<N>` key |
+| `DMX_ButtonsRow` actions | DMX | Disabled stubs | Remap dialog, Save-As-State / Load-From-State paths — both depend on model-state read/write bridge that doesn't yet exist on iPad |
+| `Sketch_DefRow` | Sketch | Read-only summary (`"N chars · M segments"`) | Interactive polyline editor (equivalent of desktop Effect Assist's sketch tool) |
+| `Video_DurationRow` | Video | Filename display + disabled "match effect length" button | Bridge that probes file duration via `AVAsset`; wire the button to resize the effect on the timeline |
+| ~~`Text_Font_XL_Row`~~ | ~~Text~~ | **landed** — options moved into `Text.json` (single source of truth for both platforms); desktop's `TextPanel::BuildXLFontRow` now consumes JSON options with FontManager fallback; iPad renders a Picker bound to `E_CHOICE_Text_Font` | — |
+| ~~`RotoZoomPreset`~~ | ~~Buffer panel~~ | **landed** — all 8 desktop presets (None-Reset / 1-Rev CW / 1-Rev CCW / Explode / Collapse / Explode+Spin CW / Shake / Spin CW Accelerate) ported 1:1 from `BufferPanel::OnPresetSelect`. Resets every Roto-Zoom slider + clears every Roto-Zoom VC before applying, then writes Ramp / Sine value-curve strings via `XLValueCurve` with matching min/max/divisor. Resets `RZ_RotationOrder` to `X-Y-Z` after every preset | — |
+| `SubBuffer` x/y center offsets | Buffer panel | Preserved on round-trip | Expose in the editor UI (desktop hides these behind an advanced option too) |
+| `SubBuffer` VC per slot | Buffer panel | Preserved on round-trip, shown as `(curve)` in value row | Wire `ValueCurveButton` per slot so iPad can author animated sub-buffers |
+| `Sparkles` VC button | Color panel | Frequency slider + music toggle + colour picker | Add VC button on frequency slider, keyed `C_VALUECURVE_SparkleFrequency` |
+| Blending Adjust/Reverse runtime disable | Blending | Always enabled | Disable when `Fade == 0` OR the transition type is in `kTransitionsNoAdjust` / `kTransitionsNoReverse` (desktop handles this in `BlendingPanel::ValidateWindow`) |
+| ChromaKey sensitivity range | Color panel | 0..100 | Verify against desktop — desktop passes `sens * 402 / 255` to `ColourDistance`, so the user-visible range might actually be narrower |
+| `ValueCurvesPanel` preset gallery | VC editor | Not available | Load/save named VC presets from the same on-disk store desktop uses |
+| `radiobutton` controlType | — | Unhandled — schema-allowed but 0 real uses today | 15-line handler the day a JSON property actually uses it |
+| `lockable: true` | all effects | No lock UI (C-7) | Small lock glyph per property, writes `LOCK_<id>=1`. Low priority — only relevant for desktop-style bulk-edit workflows iPad may never grow |
+| `ShapeChar` glyph preview | Shape | 32pt live-preview area | Cosmetic polish — larger preview, better typography fallback when the code isn't a registered glyph |
+| `StatePanel.State_Mode` / similar | State | Rendered as standard choice | Verify the enum values round-trip correctly with `dynamicOptions: "states"` resolution |
+| Inspector header "time" row | Effect | Shows start/end time static text | Should update live during a selection-scoped scrub loop |
 
 **Detaching tabs into windows.** On desktop xLights each of these four
 panes is a separate dockable pane. iPadOS 26 can't float palettes the

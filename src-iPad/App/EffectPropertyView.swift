@@ -137,6 +137,26 @@ struct EffectPropertyView: View {
             ShapeSVGRowView()
         case "Ripple_SVG":
             RippleSVGRowView()
+        case "BrightnessLevelRow":
+            BrightnessLevelRowView()
+        case "SubBuffer":
+            SubBufferEditorView()
+        case "RotoZoomPreset":
+            RotoZoomPresetRowView()
+        case "Text_Font_XL_Row":
+            TextFontXLRowView(property: property)
+        case "Sketch_Info":
+            SketchInfoRowView()
+        case "Sketch_DefRow":
+            SketchDefRowView()
+        case "Sketch_BackgroundRow":
+            SketchBackgroundRowView()
+        case "Video_DurationRow":
+            VideoDurationRowView()
+        case "DMX_ChannelsNotebook":
+            DMXChannelsNotebookView()
+        case "DMX_ButtonsRow":
+            DMXButtonsRowView()
         case "ResetPanelRow":
             // Desktop's "Reset panel when changing effects" preference
             // checkbox — persisted to wxConfig (xLightsResetColorPanel /
@@ -314,28 +334,43 @@ struct EffectPropertyView: View {
 
     // MARK: - Custom / Unsupported
 
+    /// Preserve-on-touch fallback for any JSON property whose
+    /// controlType we don't dispatch. Shows the property's current
+    /// stored value (read-only) so the user can verify their
+    /// desktop-authored setting survived the round-trip. Nothing
+    /// here writes, so unknown types can't be corrupted.
     private var customPlaceholder: some View {
-        HStack {
-            Text(property.label.isEmpty ? property.id : property.label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text("(custom)")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 2)
+        placeholderRow(kind: "custom")
     }
 
     private var unsupportedPlaceholder: some View {
-        HStack {
-            Text(property.label.isEmpty ? property.id : property.label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text("(\(property.controlType))")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+        placeholderRow(kind: property.controlType)
+    }
+
+    @ViewBuilder
+    private func placeholderRow(kind: String) -> some View {
+        let stored = rawValue
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(property.label.isEmpty ? property.id : property.label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("(\(kind))")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            // Surface the stored value so the user knows nothing was
+            // silently dropped. Empty stored → omit the row rather
+            // than showing a mysterious blank.
+            if !stored.isEmpty {
+                Text(stored)
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
         }
         .padding(.vertical, 2)
     }
