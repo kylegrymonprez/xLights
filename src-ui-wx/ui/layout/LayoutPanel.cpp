@@ -602,7 +602,7 @@ LayoutPanel::LayoutPanel(wxWindow* parent, xLightsFrame *xl, wxPanel* sequencer)
 	LeftPanelSizer->Add(ButtonSavePreview, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
 	LeftPanel->SetSizer(LeftPanelSizer);
 	PreviewGLPanel = new wxPanel(SplitterWindow2, ID_PANEL1, wxDefaultPosition, wxDefaultSize, 0, _T("ID_PANEL1"));
-	PreviewGLSizer = new wxFlexGridSizer(2, 1, 0, 0);
+	PreviewGLSizer = new wxFlexGridSizer(3, 1, 0, 0);
 	PreviewGLSizer->AddGrowableCol(0);
 	PreviewGLSizer->AddGrowableRow(1);
 	FlexGridSizer1 = new wxFlexGridSizer(0, 6, 0, 0);
@@ -944,7 +944,7 @@ LayoutPanel::LayoutPanel(wxWindow* parent, xLightsFrame *xl, wxPanel* sequencer)
         lcbSizer->Add(ButtonSavePreview, 0, wxALL|wxALIGN_CENTER_VERTICAL, 5);
         layoutControlsBar->SetSizer(lcbSizer);
     }
-    PreviewGLPanel->GetSizer()->Add(layoutControlsBar, 0, wxALIGN_CENTER_HORIZONTAL|wxBOTTOM, 3);
+    PreviewGLPanel->GetSizer()->Add(layoutControlsBar, 0, wxALIGN_CENTER_HORIZONTAL | wxALIGN_BOTTOM, 3);
     PreviewGLPanel->Layout();
 
     TreeListViewModels->SetColumnWidth(0, wxCOL_WIDTH_AUTOSIZE);
@@ -1147,34 +1147,41 @@ void LayoutPanel::SaveModelsListColumns()
     config->Write("LayoutModelListCols", colOrder);
 }
 
+void LayoutPanel::SaveLayoutPerspective()
+{
+    if (layout_mgr == nullptr) {
+        return;
+    }
+    // If panels were hidden by HideFloatingPanes() (tab-switch stash), restore
+    // their info so we can inspect and dock them below.  Pass false to skip
+    // the UI update — the frame may be tearing down and rendering could fail.
+    if (!_savedFloatingPerspective.empty()) {
+        layout_mgr->LoadPerspective(_savedFloatingPerspective, false);
+        _savedFloatingPerspective.clear();
+    }
+    // Dock any floating panels before saving so the perspective always
+    // starts with panels docked on the next launch.  GetAllPanes() returns
+    // a reference to the internal m_panes array; mutations here are read
+    // directly by SavePerspective() without needing Update() (which would
+    // try to render to a partially-destroyed window).
+    wxAuiPaneInfoArray& panes = layout_mgr->GetAllPanes();
+    for (size_t i = 0; i < panes.GetCount(); i++) {
+        if (panes[i].IsFloating()) {
+            if (panes[i].name == "ModelList") {
+                panes[i].Top().Dock();
+            } else {
+                panes[i].Center().Dock();
+            }
+        }
+    }
+    auto* config = GetXLightsConfig();
+    auto perspective = layout_mgr->SavePerspective();
+    config->Write("LayoutAUIPerspective2", perspective);
+}
+
 LayoutPanel::~LayoutPanel()
 {
     if (layout_mgr != nullptr) {
-        // If panels were hidden by HideFloatingPanes() (tab-switch stash), restore
-        // their info so we can inspect and dock them below.  Pass false to skip
-        // the UI update — we are in the destructor and the window may be partially
-        // destroyed already.
-        if (!_savedFloatingPerspective.empty()) {
-            layout_mgr->LoadPerspective(_savedFloatingPerspective, false);
-            _savedFloatingPerspective.clear();
-        }
-        // Dock any floating panels before saving so the perspective always
-        // starts with panels docked on the next launch.  GetAllPanes() returns
-        // a reference to the internal m_panes array; mutations here are read
-        // directly by SavePerspective() without needing Update() (which would
-        // try to render to a partially-destroyed window).
-        wxAuiPaneInfoArray& panes = layout_mgr->GetAllPanes();
-        for (size_t i = 0; i < panes.GetCount(); i++) {
-            if (panes[i].IsFloating()) {
-                if (panes[i].name == "ModelList") {
-                    panes[i].Top().Dock();
-                } else {
-                    panes[i].Center().Dock();
-                }
-            }
-        }
-        auto* config = GetXLightsConfig();
-        config->Write("LayoutAUIPerspective2", layout_mgr->SavePerspective());
         layout_mgr->UnInit();
         delete layout_mgr;
         layout_mgr = nullptr;

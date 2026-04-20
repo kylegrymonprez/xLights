@@ -318,6 +318,7 @@ class LayoutPanel: public wxPanel
         void RestoreFloatingPanes();
         void OnLayoutPaneClose(wxAuiManagerEvent& event);
         void DockAndRefresh(bool setModelListHeight);
+        void SaveLayoutPerspective();
 
 		DECLARE_EVENT_TABLE()
 

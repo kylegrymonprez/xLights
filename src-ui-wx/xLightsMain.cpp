@@ -2479,6 +2479,10 @@ xLightsFrame::~xLightsFrame()
 
     SaveDockable();
 
+    if (layoutPanel != nullptr) {
+        layoutPanel->SaveLayoutPerspective();
+    }
+
     xlColourData::INSTANCE.Save(config);
 
     // definitely not outputting data anymore
