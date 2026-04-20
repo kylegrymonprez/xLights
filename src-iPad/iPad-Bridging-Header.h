@@ -3,3 +3,4 @@
 #import "Metal/XLGridMetalBridge.h"
 #import "Bridge/XLSequenceDocument.h"
 #import "Bridge/XLValueCurve.h"
+#import "Bridge/XLColorCurve.h"

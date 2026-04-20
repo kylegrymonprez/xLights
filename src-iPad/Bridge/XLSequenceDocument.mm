@@ -628,6 +628,37 @@
     return [self _timingTrackNamesWithLayerCount:3 acceptLessThan:NO];
 }
 
+- (NSArray<NSString*>*)perPreviewCameraNames {
+    NSMutableArray<NSString*>* out = [NSMutableArray arrayWithObject:@"2D"];
+    if (!_context) return out;
+    auto& vm = _context->GetViewpointMgr();
+    for (int i = 0; i < vm.GetNum3DCameras(); ++i) {
+        if (auto* cam = vm.GetCamera3D(i)) {
+            NSString* name = [NSString stringWithUTF8String:cam->GetName().c_str()];
+            if (name.length) [out addObject:name];
+        }
+    }
+    return out;
+}
+
+- (NSDictionary<NSString*, NSNumber*>*)colorCurveModeSupportForRow:(int)rowIndex
+                                                            atIndex:(int)effectIndex {
+    if (!_context) return @{};
+    EffectLayer* layer = [self effectLayerForRow:rowIndex];
+    if (!layer || effectIndex < 0 || effectIndex >= (int)layer->GetEffectCount()) return @{};
+    Effect* effect = layer->GetEffect(effectIndex);
+    if (!effect) return @{};
+    RenderableEffect* fx = _context->GetEffectManager().GetEffect(effect->GetEffectName());
+    if (!fx) return @{};
+    const SettingsMap& settings = effect->GetSettings();
+    bool linear = fx->SupportsLinearColorCurves(settings);
+    bool radial = fx->SupportsRadialColorCurves(settings);
+    return @{
+        @"linear": @(linear),
+        @"radial": @(radial),
+    };
+}
+
 /// Resolve the target Model for a row's effect, unwrapping ModelGroups
 /// the same way desktop does (JsonEffectPanel.cpp:1815-1818). Returns
 /// nullptr on any lookup failure.

@@ -701,6 +701,11 @@ class SequencerViewModel {
             return (document.timingTrackNames() as? [String]) ?? []
         case "lyricTimingTracks":
             return (document.lyricTimingTrackNames() as? [String]) ?? []
+        case "cameras":
+            // PerPreviewCamera: "2D" plus every 3D camera defined in
+            // the show's ViewpointMgr. Populated by Phase D-3's
+            // ViewpointMgr bridging at show-load time.
+            return (document.perPreviewCameraNames() as? [String]) ?? []
         default:
             break
         }

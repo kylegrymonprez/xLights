@@ -142,6 +142,28 @@
 // Timing tracks with exactly 3 layers (phrase / word / phoneme).
 - (NSArray<NSString*>*)lyricTimingTrackNames;
 
+// Per-preview cameras available for `B_CHOICE_PerPreviewCamera`:
+// always starts with "2D", followed by each 3D camera name from the
+// show's `ViewpointMgr` (loaded from `<Viewpoints>` in
+// `xlights_rgbeffects.xml` during Phase D-3). Mirrors desktop's
+// `BufferPanel::OnBufferStyleChoiceSelect` population.
+- (NSArray<NSString*>*)perPreviewCameraNames;
+
+// Per-effect ColorCurve mode availability (G16 — C5). Some
+// effects only make sense with linear time-curves, others only
+// radial, a handful support both. Desktop calls
+// `RenderableEffect::SupportsLinearColorCurves` /
+// `SupportsRadialColorCurves` with the current effect's settings
+// map; iPad's ColorCurve editor uses the same flags to grey out
+// unavailable mode groups in the time/spatial picker.
+//
+// Returns @{@"linear": NSNumber (BOOL), @"radial": NSNumber (BOOL)}
+// for the selected effect. Nil (empty dict) when no effect is
+// selected. Always returns linear+radial true for now on iPad
+// because the iPad doesn't track an "active palette slot" yet.
+- (NSDictionary<NSString*, NSNumber*>*)colorCurveModeSupportForRow:(int)rowIndex
+                                                            atIndex:(int)effectIndex;
+
 // Model-scoped sources. Uses the effect's parent element's ModelName to
 // resolve a Model; ModelGroups are unwrapped to their first contained
 // model, matching desktop (JsonEffectPanel.cpp:1815-1818). Empty on

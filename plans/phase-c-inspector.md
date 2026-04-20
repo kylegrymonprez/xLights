@@ -226,10 +226,26 @@ active/inactive; double-click switches a slot into colour-curve mode.
 matches desktop. Wide-gamut Display P3 → sRGB conversion handled
 before emitting hex.
 
-- **Gap G16 — Palette ColorCurve editor (with integrated time /
-  spatial mode selector).** Slots containing a ColorCurve string
-  render as a grey tile with "(curve)" label today; the stored value
-  round-trips but the user can't edit it.
+- ~~**Gap G16 — Palette ColorCurve editor (with integrated time /
+  spatial mode selector).**~~ **Landed 2026-04-20.** New ObjC++
+  bridge `XLColorCurve` wraps `src-core/render/ColorCurve` (active,
+  mode, points, `setPoint(x:color:)` / `deletePoint(x:)` / `flip()` /
+  `colorAt(offset:)`, serialise / deserialise). New bridge method
+  `colorCurveModeSupport(forRow:at:)` returns the selected effect's
+  `SupportsLinearColorCurves` / `SupportsRadialColorCurves` flags.
+  SwiftUI `ColorCurveEditorSheet` has: active toggle, live gradient
+  strip with tap-to-add / drag-to-move / long-press-to-delete
+  control points, per-point colour picker, time / linear (R/D/L/U) /
+  radial (In/Out) / rotation (CW/CCW) mode picker with grey-out on
+  unsupported groups, and a Flip Horizontally action. `ColorPaletteView`
+  slots holding a curve now render the actual gradient thumbnail
+  with a mode-hint badge (↔ / ↕ / ◎ / ↻) overlaid top-right;
+  tap-to-edit, long-press context menu also offers "Convert to
+  Plain Colour" to revert back to a hex slot. The desktop-side
+  cycle-button is consolidated into the sheet as designed.
+  Original description follows for reference.
+
+  
 
   The full editor is a modal sheet along the same lines as
   `ValueCurveEditor.swift` — draggable gradient control points,
@@ -318,17 +334,18 @@ Buffer tab is largely at parity. SubBuffer canvas is interactive
 curves). RotoZoomPreset menu writes the same slider + VC strings as
 desktop's `BufferPanel::OnPresetSelect`.
 
-- **Gap G21 — PerPreviewCamera dynamic list.** Code-side audit
-  2026-04-20: blocked on Phase D-3 (ViewpointMgr bridging), not a
-  bug in the inspector. `Buffer.json` declares
-  `options: ["2D"]` with no `dynamicOptions` source; desktop
-  populates at runtime from `ViewpointMgr::GetNum3DCameras()` +
-  `GetCamera3D(i)->GetName()`, and iPad's `iPadRenderContext`
-  doesn't bridge `ViewpointMgr` yet. When D-3 lands, add a
-  `"cameras"` dynamicOptions source wired to a new bridge method
-  (`cameraNames` returning `["2D"] + 3D camera names`) and drop the
-  static `options` array from the schema. Until then the picker
-  shows a single-entry "2D" on iPad — that's today's expected state.
+- ~~**Gap G21 — PerPreviewCamera dynamic list.**~~ **Landed
+  2026-04-20.** Phase D-3 landed `ViewpointMgr` on iPad
+  (`iPadRenderContext::GetViewpointMgr`), so the camera list is
+  now reachable. New bridge method
+  `-[XLSequenceDocument perPreviewCameraNames]` returns `["2D"]`
+  plus each `GetCamera3D(i)->GetName()`, mirroring desktop's
+  `BufferPanel::OnBufferStyleChoiceSelect` population. New
+  `"cameras"` source wired into `SequencerViewModel.dynamicOptions`.
+  `Buffer.json` gains `"dynamicOptions": "cameras"` on
+  `PerPreviewCamera`; static `options: ["2D"]` stays as a desktop
+  fallback (desktop's hand-written BufferPanel populates the same
+  list via its own code path, so the JSON source is a no-op there).
 
 Note: "Reset panel when changing effects" (desktop wxConfig preference)
 is intentionally suppressed on iPad — the iPad doesn't reset state on
@@ -628,11 +645,11 @@ Severity key:
 | G13 | Per-setting Copy / Paste from inspector | Effect settings | P2 |
 | G14 | "Update all like this" batch update | Effect settings | P2 |
 | G15 | Keyboard shortcuts in inspector | Effect settings | P2 |
-| G16 | Palette ColorCurve editor (incl. integrated time / spatial mode selector + on-slot mode badge) | Color | P1 |
+| ~~G16~~ | ~~Palette ColorCurve editor (incl. integrated time / spatial mode selector + on-slot mode badge)~~ | ~~Color~~ | ~~landed~~ |
 | G17 | Palette shift / reverse / import / export / save-as | Color | P1 |
 | G18 | Drag colours between palette slots | Color | P2 |
 | G19 | Verify HSV adjustment sliders render | Color | P1 |
-| G21 | Verify PerPreviewCamera dynamic options | Buffer | P1 |
+| ~~G21~~ | ~~Verify PerPreviewCamera dynamic options~~ | ~~Buffer~~ | ~~landed~~ |
 | ~~G23~~ | ~~Transition Adjust + Reverse interactivity (supported types)~~ | ~~Blending~~ | ~~landed~~ |
 | G24 | Transition live preview thumbnail | Blending | P2 |
 | G25 | Verify SuppressUntil / FreezeAtFrame render | Blending | P1 |

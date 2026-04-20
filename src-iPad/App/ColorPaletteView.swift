@@ -2,14 +2,18 @@ import SwiftUI
 
 // 8-slot color palette picker used by the Color shared panel. Each slot has:
 //   - An enable toggle (C_CHECKBOX_Palette1..8)
-//   - A color picker (C_BUTTON_Palette1..8, stored as "#RRGGBB")
+//   - A color picker OR a ColorCurve gradient editor
+//     (C_BUTTON_Palette1..8, stored as either "#RRGGBB" hex or a
+//     ColorCurve `Active=TRUE|…` serialised blob)
 // Disabled slots are ignored by the renderer but their color is preserved.
 //
-// ValueCurve/ColorCurve blobs in a palette slot are not supported yet —
-// slots that contain a ColorCurve show gray and a "(curve)" hint and are
-// read-only.
+// Slots containing a ColorCurve render the gradient inline + a mode
+// badge (↔ for linear, ◎ for radial, ↻ for rotation). Tap the
+// gradient strip or long-press any slot → ColorCurveEditorSheet.
 struct ColorPaletteView: View {
     @Environment(SequencerViewModel.self) var viewModel
+
+    @State private var editingSlot: Int? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -25,6 +29,37 @@ struct ColorPaletteView: View {
             }
         }
         .padding(.vertical, 4)
+        .sheet(item: Binding(
+            get: { editingSlot.map { SlotRef(id: $0) } },
+            set: { editingSlot = $0?.id }
+        )) { ref in
+            let support = colorCurveSupport()
+            ColorCurveEditorSheet(
+                slot: ref.id,
+                storedString: viewModel.settingValue(
+                    forKey: "C_BUTTON_Palette\(ref.id)",
+                    defaultValue: ""),
+                supportsLinear: support.linear,
+                supportsRadial: support.radial
+            )
+            .environment(viewModel)
+        }
+    }
+
+    private struct SlotRef: Identifiable { let id: Int }
+
+    /// Probe the currently-selected effect's ColorCurve mode support.
+    /// If nothing is selected, assume both are supported (editor
+    /// behaves permissively rather than locking out controls for
+    /// no reason).
+    private func colorCurveSupport() -> (linear: Bool, radial: Bool) {
+        guard let sel = viewModel.selectedEffect else { return (true, true) }
+        let dict = viewModel.document.colorCurveModeSupport(
+            forRow: Int32(sel.rowIndex),
+            at: Int32(sel.effectIndex)) as? [String: NSNumber] ?? [:]
+        let linear = dict["linear"]?.boolValue ?? true
+        let radial = dict["radial"]?.boolValue ?? true
+        return (linear, radial)
     }
 
     private func paletteRow(slot: Int) -> some View {
@@ -50,13 +85,13 @@ struct ColorPaletteView: View {
             set: { viewModel.setSettingValue($0 ? "1" : "0", forKey: checkboxKey) }
         )
 
-        let rawHex = viewModel.settingValue(forKey: buttonKey, defaultValue: defaultHex)
-        let isColorCurve = rawHex.hasPrefix("Active=")  // ColorCurve serialized form starts with "Active=..."
+        let rawValue = viewModel.settingValue(forKey: buttonKey, defaultValue: defaultHex)
+        let isColorCurve = rawValue.hasPrefix("Active=TRUE")
 
         let colorBinding = Binding<Color>(
             get: {
                 if isColorCurve { return .gray }
-                return colorFromHex(rawHex) ?? .black
+                return colorFromHex(rawValue) ?? .black
             },
             set: { newColor in
                 if let hex = hexFromColor(newColor) {
@@ -77,18 +112,40 @@ struct ColorPaletteView: View {
                 .frame(width: 12)
 
             if isColorCurve {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.gray)
-                    .frame(height: 24)
-                    .overlay(
-                        Text("(curve)")
-                            .font(.caption2)
-                            .foregroundStyle(.white)
-                    )
+                // Render the actual gradient so the user can tell
+                // gradients apart at a glance instead of every
+                // curve-slot looking like every other curve-slot.
+                // A mode badge in the top-right shows whether it's
+                // time / linear / radial / rotational so they don't
+                // have to open the editor to check.
+                CurveSlotPreview(serialised: rawValue,
+                                 identifier: "Palette\(slot)")
+                    .frame(height: 28)
+                    .onTapGesture { editingSlot = slot }
             } else {
                 ColorPicker("", selection: colorBinding, supportsOpacity: false)
                     .labelsHidden()
                     .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        // Long-press any slot → open editor. For plain-hex slots this
+        // is how the user converts the slot into a curve (editor
+        // toggle opens in "Use gradient = off" state; flipping it on
+        // seeds a black→white ramp).
+        .contextMenu {
+            Button {
+                editingSlot = slot
+            } label: {
+                Label(isColorCurve ? "Edit Gradient…" : "Edit as Gradient…",
+                      systemImage: "paintpalette")
+            }
+            if isColorCurve {
+                Button(role: .destructive) {
+                    // Strip the curve back to a plain colour.
+                    viewModel.setSettingValue(defaultHex, forKey: buttonKey)
+                } label: {
+                    Label("Convert to Plain Colour", systemImage: "circle.fill")
+                }
             }
         }
     }
@@ -108,6 +165,65 @@ struct ColorPaletteView: View {
             b = Double(val & 0xFF) / 255.0
         }
         return Color(red: r, green: g, blue: b)
+    }
+
+    // Inline gradient thumbnail for palette slots holding a
+    // ColorCurve. Samples the curve along its x axis via
+    // `XLColorCurve.colorAt(offset:)` and overlays a mode-hint
+    // glyph (↔, ↕, ◎, ↻) in the top-right.
+    struct CurveSlotPreview: View {
+        let serialised: String
+        let identifier: String
+
+        var body: some View {
+            let core = XLColorCurve(serialised: serialised,
+                                    identifier: identifier)
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.clear)
+                .overlay(
+                    Canvas { ctx, size in
+                        let w = Int(size.width)
+                        guard w > 0 else { return }
+                        for px in 0..<w {
+                            let frac = Float(px) / Float(w)
+                            let c = Color(uiColor: core.color(atOffset: frac))
+                            let r = CGRect(x: CGFloat(px), y: 0,
+                                           width: 1, height: size.height)
+                            ctx.fill(Path(r), with: .color(c))
+                        }
+                    }
+                )
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .overlay(alignment: .topTrailing) {
+                    if let glyph = badgeGlyph(for: core.mode) {
+                        Text(glyph)
+                            .font(.caption2.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(
+                                Capsule()
+                                    .fill(Color.black.opacity(0.55))
+                            )
+                            .padding(3)
+                    }
+                }
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.secondary.opacity(0.3), lineWidth: 0.5)
+                )
+        }
+
+        private func badgeGlyph(for mode: XLColorCurveMode) -> String? {
+            switch mode {
+            case .time:       return nil      // default — no badge
+            case .right, .left: return "↔"
+            case .up, .down:  return "↕"
+            case .radialIn, .radialOut: return "◎"
+            case .cw, .ccw:   return "↻"
+            @unknown default: return nil
+            }
+        }
     }
 
     private func hexFromColor(_ color: Color) -> String? {
