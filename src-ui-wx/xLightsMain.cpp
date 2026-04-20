@@ -3088,6 +3088,7 @@ void xLightsFrame::OnNotebook1PageChanging(wxAuiNotebookEvent& event)
         layoutPanel->UnSelectAllModels();
     } else if (event.GetOldSelection() == LAYOUTTAB) {
         _housePreviewPanel->Set3d(layoutPanel->Is3d());
+        layoutPanel->HideFloatingPanes();
     }
     if (event.GetSelection() == SETUPTAB) {
         DoSetupWork();
@@ -3110,6 +3111,7 @@ void xLightsFrame::OnNotebook1PageChanged1(wxAuiNotebookEvent& event)
         SetStatusText(_(""));
         MenuItem_File_Save->Enable(true);
         MenuItem_File_Save->SetItemLabel("Save Layout\tCTRL-s");
+        layoutPanel->RestoreFloatingPanes();
     } else if (pagenum == NEWSEQUENCER) {
         InitSequencer();
         ShowHideAllSequencerWindows(true);
