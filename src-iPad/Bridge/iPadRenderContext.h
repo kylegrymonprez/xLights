@@ -28,11 +28,13 @@
 #include "models/OutputModelManager.h"
 #include "models/ViewObjectManager.h"
 #include "utils/JobPool.h"
+#include "utils/xlImage.h"
 
 #include <list>
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 class iPadRenderContext : public RenderContext {
 public:
@@ -93,6 +95,40 @@ public:
     void SetModelColors(int frameMS);
     SequenceData& GetSequenceData() { return _sequenceData; }
     bool IsRenderDone();
+
+    // === Preset model / preview rendering =================================
+    // Mirrors xLightsFrame's standalone preset-render scaffolding: a 64×64
+    // RGB `MatrixModel` owned by its own `ModelManager`, plus a dedicated
+    // `SequenceElements` / `SequenceData` pair. Used to render an effect
+    // in isolation for media-picker thumbnails (shader previews, future
+    // preset GIFs, etc.) without touching the user's real sequence.
+    void EnsurePresetModel();
+    Model* GetPresetModel() { EnsurePresetModel(); return _presetModel; }
+    SequenceElements& GetPresetSequenceElements() { return _presetSequenceElements; }
+    SequenceData& GetPresetSequenceData() { return _presetSequenceData; }
+
+    // Render an effect sitting in `seqElements` on `matrixModel` for
+    // `numFrames` frames at `frameTimeMs`. Returns the per-frame RGBA
+    // rasterisation as `xlImage`s (same layout `ShaderPreviewGenerator`
+    // stores via `MediaCacheEntry::SetPreviewFrames`). Synchronously
+    // blocks the calling thread until the render completes (iPad path:
+    // call from a utility queue, not the main thread). Ports
+    // `xLightsFrame::RenderEffectToFrames` from
+    // `src-ui-wx/app-shell/TabConvert.cpp:856`.
+    std::vector<std::shared_ptr<xlImage>> RenderEffectToFrames(
+        Model* matrixModel,
+        SequenceData& seqData,
+        SequenceElements& seqElements,
+        size_t numFrames,
+        int frameTimeMs);
+
+    // Fill a `ShaderMediaCacheEntry`'s preview-frame strip by rendering
+    // the shader on the preset matrix model at default parameter
+    // values. No-op if the entry already has a preview cached. Ports
+    // `GenerateShaderPreview` from
+    // `src-ui-wx/media/ShaderPreviewGenerator.cpp`. Synchronous; call
+    // from a utility-priority thread.
+    void GenerateShaderPreview(class ShaderMediaCacheEntry* entry);
 
     // Memory-pressure response. Called from Swift when the system signals
     // memory warning / critical. Aborts any in-flight render and purges the
@@ -242,4 +278,14 @@ private:
     std::string _activeLayoutGroup = "Default";
 
     ViewpointMgr _viewpointMgr;
+
+    // Preset model scaffolding — lazily built on first preview render.
+    Model* _presetModel = nullptr;
+    std::unique_ptr<ModelManager> _presetModelManager;
+    SequenceElements _presetSequenceElements{ this };
+    SequenceData _presetSequenceData;
+
+    // Ensures the render engine + its pool are ready before using them
+    // from a preview render path (before `RenderAll` has been called).
+    void EnsureRenderEngine();
 };

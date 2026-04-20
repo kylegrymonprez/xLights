@@ -11,13 +11,32 @@ import UniformTypeIdentifiers
 // destination and the file is copied there before the path is
 // committed. Nothing outside the enforced roots is ever stored.
 struct FilepickerPropertyView: View {
+    @Environment(SequencerViewModel.self) private var viewModel
     let property: PropertyMetadata
     let currentPath: String
     let onChoose: (String) -> Void
     let onClear: () -> Void
 
     @State private var presentingPicker = false
+    @State private var presentingMediaSheet = false
     @State private var pendingPick: URL?
+
+    /// Derive the SequenceMedia type string from the fileFilter so
+    /// the "used in this sequence" list is scoped. Glediator (.gled)
+    /// stores as binary; VUMeter SVG stores as svg. Unknown filters
+    /// show everything — better than silently hiding matches.
+    private var mediaType: String? {
+        let filter = (property.fileFilter ?? "").lowercased()
+        if filter.contains(".gled") { return "binary" }
+        if filter.contains(".svg")  { return "svg" }
+        if filter.contains(".fs")   { return "shader" }
+        if filter.contains(".png") || filter.contains(".jpg") ||
+           filter.contains(".gif") || filter.contains(".bmp") { return "image" }
+        if filter.contains(".mp4") || filter.contains(".mov") ||
+           filter.contains(".m4v") { return "video" }
+        if filter.contains(".txt") { return "text" }
+        return nil
+    }
 
     private var filename: String {
         if currentPath.isEmpty { return "(none)" }
@@ -49,7 +68,7 @@ struct FilepickerPropertyView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Select…") { presentingPicker = true }
+                Button("Select…") { presentingMediaSheet = true }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 if !currentPath.isEmpty {
@@ -73,6 +92,19 @@ struct FilepickerPropertyView: View {
             subdirectory: subdirectory
         ) { storedPath in
             onChoose(storedPath)
+        }
+        .sheet(isPresented: $presentingMediaSheet) {
+            MediaPickerSheet(
+                title: "Choose \(property.label)",
+                mediaType: mediaType,
+                currentPath: currentPath,
+                onPick: { storedPath in
+                    onChoose(storedPath)
+                },
+                onBrowse: { presentingPicker = true },
+                onClear: { onClear() }
+            )
+            .environment(viewModel)
         }
     }
 

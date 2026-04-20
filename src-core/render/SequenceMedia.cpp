@@ -15,6 +15,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 
 #include <log.h>
 
@@ -1264,6 +1265,28 @@ std::shared_ptr<xlImage> VideoMediaCacheEntry::GetThumbnail(int maxWidth, int ma
     return _thumbnail;
 }
 
+int VideoMediaCacheEntry::GetDurationMS() {
+    int cached = _durationMS.load();
+    if (cached >= 0) return cached;
+
+    std::string path;
+    {
+        std::scoped_lock lock(_cacheMutex);
+        path = _resolvedPath;
+    }
+    if (path.empty() || !FileExists(path)) {
+        _durationMS.store(0);
+        return 0;
+    }
+    // Static VideoReader probe — doesn't open decoders, just reads
+    // the container header. Much cheaper than constructing a full
+    // VideoReader when duration is the only thing needed.
+    long ms = VideoReader::GetVideoLength(path);
+    int val = (ms > 0 && ms < std::numeric_limits<int>::max()) ? (int)ms : 0;
+    _durationMS.store(val);
+    return val;
+}
+
 void VideoMediaCacheEntry::GeneratePreview(int maxWidth, int maxHeight) {
     {
         std::scoped_lock lock(_cacheMutex);
@@ -1290,6 +1313,9 @@ void VideoMediaCacheEntry::GeneratePreview(int maxWidth, int maxHeight) {
 
     // Extract first 1 second of frames at 50ms intervals
     int lengthMS = reader.GetLengthMS();
+    // Free side-effect: cache the full duration here so a subsequent
+    // `GetDurationMS()` doesn't have to reopen the file.
+    _durationMS.store(lengthMS > 0 ? lengthMS : 0);
     int maxMS = std::min(lengthMS, 1000);
     int frameTimeMS = 50;
 

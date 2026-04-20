@@ -1,5 +1,4 @@
 import SwiftUI
-import AVFoundation
 
 // Final batch of `controlType: "custom"` handlers (C-6 tail). Every row
 // in here preserves whatever the user's desktop-authored sequence had
@@ -377,11 +376,13 @@ struct SketchBackgroundRowView: View {
 // MARK: - Video_DurationRow
 
 /// `Video_DurationRow` — shows the picked video's duration (probed
-/// via `AVAsset`) and a "Match effect length" button that resizes
-/// the effect's end time so `end - start == video.duration`. Matches
-/// desktop's `VideoPanel::OnMatchToVideoDuration` behaviour.
+/// via the `videoDurationMS` bridge, which shares the duration
+/// cached on the `VideoMediaCacheEntry` with the render engine) and
+/// a "Match effect length" button that resizes the effect's end
+/// time so `end - start == video.duration`. Matches desktop's
+/// `VideoPanel::OnMatchToVideoDuration` behaviour.
 ///
-/// The AVAsset probe is async + off the main thread; re-runs whenever
+/// The probe runs async off the main thread and re-runs whenever
 /// the `E_FILEPICKERCTRL_Video_Filename` setting changes. "Duration
 /// unknown" stays visible while the probe is in flight or if the
 /// file can't be resolved.
@@ -396,17 +397,6 @@ struct VideoDurationRowView: View {
 
     private var storedPath: String {
         viewModel.settingValue(forKey: videoKey, defaultValue: "")
-    }
-
-    /// Resolve a stored path to an absolute URL that AVAsset can load.
-    /// Paths relative to the show folder (`Videos/foo.mp4`) get
-    /// show-folder-prepended; absolute paths pass through unchanged.
-    private func absoluteURL(for path: String) -> URL? {
-        if path.isEmpty { return nil }
-        if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
-        guard let showDir = viewModel.document.showFolderPath(),
-              !showDir.isEmpty else { return nil }
-        return URL(fileURLWithPath: showDir).appendingPathComponent(path)
     }
 
     private var filename: String {
@@ -461,21 +451,24 @@ struct VideoDurationRowView: View {
         probedPath = path
         durationMS = nil
         probeError = nil
-        guard !path.isEmpty, let url = absoluteURL(for: path) else {
-            probeError = path.isEmpty ? nil : "Could not resolve path."
-            return
-        }
-        do {
-            let asset = AVURLAsset(url: url)
-            let d = try await asset.load(.duration)
-            let seconds = CMTimeGetSeconds(d)
-            if seconds.isFinite && seconds > 0 {
-                durationMS = Int((seconds * 1000).rounded())
-            } else {
-                probeError = "Video reported zero / infinite duration."
+        guard !path.isEmpty else { return }
+        let doc = viewModel.document
+        // Route through the bridge: it resolves the path via
+        // FixFile, honours the show/media folder security-scoped
+        // bookmark, and reuses the duration cached on the entry's
+        // `VideoMediaCacheEntry` when the video has already been
+        // loaded for preview / render. First call is cheap (just a
+        // container-header probe via `VideoReader::GetVideoLength`);
+        // repeat calls hit the atomic cache.
+        let ms: Int = await withCheckedContinuation { cont in
+            DispatchQueue.global(qos: .utility).async {
+                cont.resume(returning: Int(doc.videoDurationMS(forPath: path)))
             }
-        } catch {
-            probeError = "AVAsset couldn't open the file."
+        }
+        if ms > 0 {
+            durationMS = ms
+        } else {
+            probeError = "Couldn't read video duration."
         }
     }
 
@@ -520,8 +513,11 @@ struct DMXChannelsNotebookView: View {
     private static let channelCount = 48
 
     // Expand groups one-at-a-time so the inspector sidebar doesn't
-    // become a 48-row monster by default.
-    @State private var expandedGroup: Int? = 0
+    // become a 48-row monster by default. Persisted via @AppStorage
+    // so a user editing banks 17-32 across a pile of DMX effects
+    // doesn't have to re-expand the bank on every selection change
+    // (G2-b). -1 = all collapsed; 0/1/2 = that bank expanded.
+    @AppStorage("DMXExpandedGroup") private var expandedGroupRaw: Int = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -537,8 +533,8 @@ struct DMXChannelsNotebookView: View {
                 let end = min(start + 15, Self.channelCount)
                 DisclosureGroup(
                     isExpanded: Binding(
-                        get: { expandedGroup == group },
-                        set: { expandedGroup = $0 ? group : nil }
+                        get: { expandedGroupRaw == group },
+                        set: { expandedGroupRaw = $0 ? group : -1 }
                     )
                 ) {
                     VStack(spacing: 0) {

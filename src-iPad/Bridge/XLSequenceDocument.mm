@@ -16,16 +16,20 @@
 #include "render/Element.h"
 #include "render/EffectLayer.h"
 #include "render/Effect.h"
+#include "render/SequenceElements.h"
+#include "render/SequenceMedia.h"
 #include "effects/RenderableEffect.h"
 #include "effects/EffectManager.h"
 #include "effects/ShaderEffect.h"
 #include "graphics/xlGraphicsAccumulators.h"
 #include "media/AudioManager.h"
+#include "media/VideoReader.h"
 #include "models/Model.h"
 #include "models/ModelManager.h"
 #include "models/ModelGroup.h"
 #include "utils/FileUtils.h"
 #include "utils/ExternalHooks.h"
+#include "utils/xlImage.h"
 
 #include <nlohmann/json.hpp>
 
@@ -1381,6 +1385,192 @@ static int xpmSizeIndexForDesired(int desired) {
 
     return ef->DrawEffectBackground(e, (int)x1, (int)y1, (int)x2, (int)y2,
                                      *accPtr, maskPtr, drawRamps ? true : false);
+}
+
+// MARK: - Media picker helpers
+
+namespace {
+
+NSString* mediaTypeToString(MediaType t) {
+    switch (t) {
+        case MediaType::Image:      return @"image";
+        case MediaType::SVG:        return @"svg";
+        case MediaType::Shader:     return @"shader";
+        case MediaType::TextFile:   return @"text";
+        case MediaType::BinaryFile: return @"binary";
+        case MediaType::Video:      return @"video";
+    }
+    return @"";
+}
+
+std::optional<MediaType> stringToMediaType(NSString* s) {
+    if ([s isEqualToString:@"image"])  return MediaType::Image;
+    if ([s isEqualToString:@"svg"])    return MediaType::SVG;
+    if ([s isEqualToString:@"shader"]) return MediaType::Shader;
+    if ([s isEqualToString:@"text"])   return MediaType::TextFile;
+    if ([s isEqualToString:@"binary"]) return MediaType::BinaryFile;
+    if ([s isEqualToString:@"video"])  return MediaType::Video;
+    return std::nullopt;
+}
+
+// Locate a cache entry by path scoped to the caller-provided media
+// type. Only consults the cache that matches `type`, so we never
+// create a stray wrong-type entry — the per-type `Get…` accessors are
+// create-on-access, which used to mint an `ImageCacheEntry` for every
+// video path the media picker enumerated and then log
+// "Error loading image file: …mp4" when the image decoder failed on
+// MPEG-4 bytes. `HasMedia` / `HasImage` are non-creating presence
+// checks; once we know the path is present, the type-specific
+// accessor safely returns the existing entry.
+std::shared_ptr<MediaCacheEntry> lookupMediaEntry(SequenceMedia& media,
+                                                   const std::string& path,
+                                                   MediaType type) {
+    switch (type) {
+        case MediaType::Image:
+            if (!media.HasImage(path)) return nullptr;
+            if (auto e = media.GetImage(path))
+                return std::static_pointer_cast<MediaCacheEntry>(e);
+            return nullptr;
+        case MediaType::SVG:
+            if (!media.HasMedia(path)) return nullptr;
+            if (auto e = media.GetSVG(path))
+                return std::static_pointer_cast<MediaCacheEntry>(e);
+            return nullptr;
+        case MediaType::Shader:
+            if (!media.HasMedia(path)) return nullptr;
+            if (auto e = media.GetShader(path))
+                return std::static_pointer_cast<MediaCacheEntry>(e);
+            return nullptr;
+        case MediaType::TextFile:
+            if (!media.HasMedia(path)) return nullptr;
+            if (auto e = media.GetTextFile(path))
+                return std::static_pointer_cast<MediaCacheEntry>(e);
+            return nullptr;
+        case MediaType::BinaryFile:
+            if (!media.HasMedia(path)) return nullptr;
+            if (auto e = media.GetBinaryFile(path))
+                return std::static_pointer_cast<MediaCacheEntry>(e);
+            return nullptr;
+        case MediaType::Video:
+            if (!media.HasMedia(path)) return nullptr;
+            if (auto e = media.GetVideo(path))
+                return std::static_pointer_cast<MediaCacheEntry>(e);
+            return nullptr;
+    }
+    return nullptr;
+}
+
+} // namespace
+
+- (NSArray<NSDictionary<NSString*, NSString*>*>*)mediaPathsInSequence {
+    if (!_context) return @[];
+    auto& elements = _context->GetSequenceElements();
+    auto& media = elements.GetSequenceMedia();
+    auto paths = media.GetAllMediaPaths();
+    NSMutableArray<NSDictionary<NSString*, NSString*>*>* out =
+        [NSMutableArray arrayWithCapacity:paths.size()];
+    for (const auto& p : paths) {
+        NSString* pathStr = [NSString stringWithUTF8String:p.first.c_str()];
+        NSString* typeStr = mediaTypeToString(p.second);
+        if (pathStr && typeStr.length) {
+            [out addObject:@{@"path": pathStr, @"type": typeStr}];
+        }
+    }
+    return out;
+}
+
+- (int)ensureThumbnailPreviewForPath:(NSString*)path
+                            mediaType:(NSString*)mediaType
+                            maxWidth:(int)maxWidth
+                           maxHeight:(int)maxHeight {
+    if (!_context || !path) return 0;
+    auto typeOpt = stringToMediaType(mediaType);
+    if (!typeOpt) return 0;
+    auto& media = _context->GetSequenceElements().GetSequenceMedia();
+    std::string spath([path UTF8String]);
+    auto entry = lookupMediaEntry(media, spath, *typeOpt);
+    if (!entry) return 0;
+    if (!entry->isLoaded()) {
+        entry->Load();
+        if (!entry->IsOk()) return 0;
+    }
+    if (!entry->HasPreview()) {
+        if (entry->GetType() == MediaType::Shader) {
+            // `MediaCacheEntry::GeneratePreview` is a no-op for shader
+            // entries — shader frames come from actually running the
+            // shader through the render engine at default params
+            // against a 64×64 matrix model. Route through the
+            // dedicated path (iPadRenderContext::GenerateShaderPreview
+            // mirrors desktop's ShaderPreviewGenerator).
+            auto* shaderEntry = static_cast<ShaderMediaCacheEntry*>(entry.get());
+            _context->GenerateShaderPreview(shaderEntry);
+        } else {
+            entry->GeneratePreview(maxWidth, maxHeight);
+        }
+    }
+    return (int)entry->GetPreviewFrameCount();
+}
+
+- (NSData*)thumbnailPNGForPath:(NSString*)path
+                     mediaType:(NSString*)mediaType
+                    frameIndex:(int)frameIndex {
+    if (!_context || !path || frameIndex < 0) return nil;
+    auto typeOpt = stringToMediaType(mediaType);
+    if (!typeOpt) return nil;
+    auto& media = _context->GetSequenceElements().GetSequenceMedia();
+    std::string spath([path UTF8String]);
+    auto entry = lookupMediaEntry(media, spath, *typeOpt);
+    if (!entry || !entry->HasPreview()) return nil;
+    if ((size_t)frameIndex >= entry->GetPreviewFrameCount()) return nil;
+    auto frame = entry->GetPreviewFrame((size_t)frameIndex);
+    if (!frame || !frame->IsOk()) return nil;
+    std::vector<uint8_t> png;
+    if (!frame->SaveAsPNG(png)) return nil;
+    return [NSData dataWithBytes:png.data() length:png.size()];
+}
+
+- (long)videoDurationMSForPath:(NSString*)path {
+    if (!_context || !path) return 0;
+    std::string spath([path UTF8String]);
+    auto& media = _context->GetSequenceElements().GetSequenceMedia();
+
+    // Prefer the existing VideoMediaCacheEntry — its duration is
+    // cached on the entry (populated free-of-charge by
+    // `GeneratePreview`'s VideoReader, or lazily by the first
+    // `GetDurationMS` call). Non-creating lookup via `HasMedia`
+    // first so we don't mint an accidental entry for a non-video
+    // path.
+    if (media.HasMedia(spath)) {
+        if (auto entry = media.GetVideo(spath)) {
+            if (!entry->isLoaded()) entry->Load();
+            return (long)entry->GetDurationMS();
+        }
+    }
+
+    // The path has never been referenced by an effect (so the cache
+    // never loaded it). Fall back to a fresh FixFile + VideoReader
+    // probe. Calling ObtainAccessToURL first activates the ancestor
+    // bookmark's security scope so AVFoundation / FFmpeg can read
+    // the bytes even when the file lives in iCloud Drive.
+    std::string resolved = FileUtils::FixFile("", spath);
+    if (resolved.empty()) resolved = spath;
+    ObtainAccessToURL(resolved, false);
+    long ms = VideoReader::GetVideoLength(resolved);
+    return (ms > 0) ? ms : 0;
+}
+
+- (long)thumbnailFrameTimeMSForPath:(NSString*)path
+                          mediaType:(NSString*)mediaType
+                         frameIndex:(int)frameIndex {
+    if (!_context || !path || frameIndex < 0) return 0;
+    auto typeOpt = stringToMediaType(mediaType);
+    if (!typeOpt) return 0;
+    auto& media = _context->GetSequenceElements().GetSequenceMedia();
+    std::string spath([path UTF8String]);
+    auto entry = lookupMediaEntry(media, spath, *typeOpt);
+    if (!entry || !entry->HasPreview()) return 0;
+    if ((size_t)frameIndex >= entry->GetPreviewFrameCount()) return 0;
+    return entry->GetPreviewFrameTime((size_t)frameIndex);
 }
 
 - (NSData*)iconBGRAForEffectNamed:(NSString*)effectName

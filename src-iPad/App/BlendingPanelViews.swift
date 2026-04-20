@@ -53,9 +53,13 @@ let kTransitionsNoAdjust: Set<String> = [
     "Circular Swirl", "Zoom", "Doorway", "Swap", "Shatter",
 ]
 
-/// Transitions that ignore the Reverse checkbox.
+/// Transitions that ignore the Reverse checkbox. Kept in sync with
+/// desktop `BlendingPanel.cpp:76` (`TRANSITIONS_NO_REVERSE`) so the
+/// Reverse row enables / disables for the same types on both
+/// platforms.
 let kTransitionsNoReverse: Set<String> = [
-    "Fade", "Dissolve", "Blend", "Blobs", "Shatter",
+    "Fade", "Slide Bars", "Blend", "Dissolve", "Circular Swirl", "Zoom",
+    "Doorway", "Blobs", "Pinwheel", "Swap", "Shatter", "Circles",
 ]
 
 /// Common preset fade times (seconds) shown in the drop-down — matches

@@ -58,19 +58,40 @@ Desktop lets users dock Color, Buffer, Blending as separate wx panels.
 iPad plan routes this through Phase F ("Open in new window"). Not a
 correctness gap; noted here so it isn't lost.
 
-**Gap G2 — Information architecture doesn't scale.**
-Faces / DMX / Text / Shader / Moving Head each have 30-100+
-properties. Current mitigations (segmented → menu picker for >4 tabs,
-`DisclosureGroup` for DMX channel banks) are partial. Desktop doesn't
-solve this either — it's a known rough edge on both sides — but
-desktop at least has dockable sub-panels, keyboard focus flow, and
-right-click access to every frequently-used affordance without
-hunting. iPad has none of that yet.
+**Gap G2 — Information architecture (rescoped 2026-04-20).**
+Original framing assumed generic search / collapse-all / pin across
+every tab. A property-count audit showed that's overkill: the four
+C/T/B/Effect tabs plus the `tabs` / `section` / `xyCenter` groups
+authored into each effect's JSON already break almost every effect
+down to < 10 properties per tab. Liquid (44 props) renders as 4
+internal tabs of 7-8 props; Morph (21) as 3 tabs; Pictures / Text
+(17) as tabs + xyCenter groups; etc.
 
-Targets for this gap:
-- Collapsible sections-by-default with remembered state.
-- Simple filter / search field at the top of each tab.
-- "Pinned" properties surfaced first (follow-up).
+What actually remains:
+
+- ~~**G2-a — Shape.json grouping.**~~ **Landed 2026-04-20.** Added a
+  4-tab layout (Shape / Size / Motion / Triggers) plus an xyCenter
+  group for Shape_CentreX / Shape_CentreY to `Shape.json`. All 27
+  properties land inside a tab; no ungrouped flat scroll remains.
+  Renders through the shared schema path on both desktop
+  (`JsonEffectPanel`) and iPad (`EffectMetadataPanel`) without code
+  changes. README.txt has a corresponding `-enh` line since it's a
+  user-visible desktop layout change.
+- ~~**G2-b — Remembered DMX bank state.**~~ **Landed 2026-04-20.**
+  `DMXChannelsNotebookView.expandedGroupRaw` is now
+  `@AppStorage("DMXExpandedGroup")` (Int, -1 sentinel for all
+  collapsed), so the currently-expanded bank survives selection
+  changes and app relaunches.
+- **G2-c — Shader uniform grouping.** Usually fine (most .fs files
+  declare < 10 uniforms), but large shader packs with 20+ uniforms
+  turn into a flat scroll. If `GLSL_GROUP:` comment conventions
+  exist in desktop's shader parser, respect them in
+  `ShaderConfig::GetDynamicPropertiesJson()` so the schema already
+  carries section structure by the time iPad sees it. Deferred
+  until a real complaint surfaces.
+
+Generic inspector-wide search / collapse-all / pin is no longer
+planned.
 
 ---
 
@@ -280,8 +301,13 @@ The HSV adjustment sliders (`C_SLIDER_Brightness`,
 defined in `shared/Color.json` and should fall through the generic
 metadata path.
 
-- **Gap G19 — Verify HSV adjustment sliders render.** Manual check on
-  device that all five sliders appear with value curves attached.
+- **Gap G19 — Verify HSV adjustment sliders render.** Code-side audit
+  2026-04-20: schema correct, all five declared as sliders. Four have
+  `valueCurve: true` (Brightness, HueAdjust, SaturationAdjust,
+  ValueAdjust); Contrast does not (desktop parity — no VC on Contrast
+  either, so the original gap description was imprecise). Device
+  check: select any effect → Colors tab → 5 sliders past the palette,
+  4 with the VC pill. Close once verified.
 
 ---
 
@@ -292,11 +318,17 @@ Buffer tab is largely at parity. SubBuffer canvas is interactive
 curves). RotoZoomPreset menu writes the same slider + VC strings as
 desktop's `BufferPanel::OnPresetSelect`.
 
-- **Gap G21 — PerPreviewCamera dynamic list.** The `choice`'s options
-  need to come from the model's available 3D cameras at runtime.
-  Confirm the dynamic-options bridge
-  (`SequencerViewModel.dynamicOptions`) feeds this particular
-  property. Not verified.
+- **Gap G21 — PerPreviewCamera dynamic list.** Code-side audit
+  2026-04-20: blocked on Phase D-3 (ViewpointMgr bridging), not a
+  bug in the inspector. `Buffer.json` declares
+  `options: ["2D"]` with no `dynamicOptions` source; desktop
+  populates at runtime from `ViewpointMgr::GetNum3DCameras()` +
+  `GetCamera3D(i)->GetName()`, and iPad's `iPadRenderContext`
+  doesn't bridge `ViewpointMgr` yet. When D-3 lands, add a
+  `"cameras"` dynamicOptions source wired to a new bridge method
+  (`cameraNames` returning `["2D"] + 3D camera names`) and drop the
+  static `options` array from the schema. Until then the picker
+  shows a single-entry "2D" on iPad — that's today's expected state.
 
 Note: "Reset panel when changing effects" (desktop wxConfig preference)
 is intentionally suppressed on iPad — the iPad doesn't reset state on
@@ -312,21 +344,32 @@ headers with fade-time presets. Runtime disable of Adjust / Reverse
 when `fade == 0` or type ∈ `kTransitionsNoAdjust` /
 `kTransitionsNoReverse` has landed.
 
-- **Gap G23 — Transition Adjust slider for supported types.** The
-  disable side is wired. For transitions that DO support Adjust
-  (Slide Bars, Wipe, Blinds, Star, etc.), the slider should be active
-  and VC-editable; today the supported-adjust case isn't fully
-  connected — same for `T_CHECKBOX_In_Transition_Reverse` /
-  `Out_Transition_Reverse` enable logic per transition type.
+- ~~**Gap G23 — Transition Adjust slider for supported types.**~~
+  **Landed 2026-04-20.** Code-side audit showed the supported-adjust
+  path was already functional — `EffectPropertyView.runtimeDisabled`
+  returns false when the selected transition is not in
+  `kTransitionsNoAdjust` / `kTransitionsNoReverse` with a non-zero
+  fade, so the slider / checkbox / VC button all enable normally in
+  that state. One actual gap found: iPad's `kTransitionsNoReverse`
+  was a 5-entry subset of desktop's 12-entry `TRANSITIONS_NO_REVERSE`
+  (`BlendingPanel.cpp:76`), so Reverse was mis-enabled for Slide
+  Bars / Circular Swirl / Zoom / Doorway / Pinwheel / Swap / Circles.
+  Synced the list to match desktop verbatim so the enable / disable
+  decision is identical on both platforms. Reactivity was already in
+  place via the observable `selectedEffectSettings` dict — changing
+  the Type picker auto-refreshes sibling Adjust / Reverse rows.
 
 - **Gap G24 — Transition live preview thumbnail.** Desktop renders a
   small animated thumb of the current transition. iPad: none. Can
   ship first as a static icon per type and land the live thumb later.
 
-- **Gap G25 — `SuppressEffectUntil` / `FreezeEffectAtFrame`.** Defined
-  in `shared/Blending.json` as `spin` controls; should fall through
-  the metadata renderer. Needs a device check that they show up
-  correctly with the 0-999999 range.
+- **Gap G25 — `SuppressEffectUntil` / `FreezeEffectAtFrame`.** Code-
+  side audit 2026-04-20: schema correct (`spin` 0..999999,
+  `suppressIfDefault: true` for both), `EffectPropertyView.spinView`
+  handles the range (`EditableNumberField` for typed input + Stepper
+  ±1). Device check: select any effect → Blending tab → both appear,
+  typed value accepted, returning to default (0 / 999999) removes
+  the setting. Close once verified.
 
 ---
 
@@ -570,7 +613,9 @@ Severity key:
 | # | Gap | Area | Severity |
 |---|---|---|---|
 | G1 | Tear-out / docking of tabs into separate windows | Scaffolding | P2 |
-| G2 | IA doesn't scale for 30+-property effects (search, collapse, pin) | Scaffolding | P0 |
+| ~~G2-a~~ | ~~Shape.json needs `tabs`/`section` grouping (only flat-scroll effect in the tree)~~ | ~~Scaffolding~~ | ~~landed~~ |
+| ~~G2-b~~ | ~~Remembered DMX channel-bank expansion state across effect changes~~ | ~~Scaffolding~~ | ~~landed~~ |
+| G2-c | Shader dynamic uniform grouping for large .fs files | Scaffolding | P2 |
 | G3 | Moving Head fixture editor | Effect settings | P1 |
 | G4 | Sketch path editor | Effect settings | P1 |
 | G5 | Morph line editor | Effect settings | P1 |
@@ -588,19 +633,19 @@ Severity key:
 | G18 | Drag colours between palette slots | Color | P2 |
 | G19 | Verify HSV adjustment sliders render | Color | P1 |
 | G21 | Verify PerPreviewCamera dynamic options | Buffer | P1 |
-| G23 | Transition Adjust + Reverse interactivity (supported types) | Blending | P1 |
+| ~~G23~~ | ~~Transition Adjust + Reverse interactivity (supported types)~~ | ~~Blending~~ | ~~landed~~ |
 | G24 | Transition live preview thumbnail | Blending | P2 |
 | G25 | Verify SuppressUntil / FreezeAtFrame render | Blending | P1 |
-| G26 | No thumbnail on effect-panel file picker | Media | P0 |
-| G27 | No "already used in this sequence" quick-pick list | Media | P0 |
+| ~~G26~~ | ~~No thumbnail on effect-panel file picker~~ | ~~Media~~ | ~~landed~~ |
+| ~~G27~~ | ~~No "already used in this sequence" quick-pick list~~ | ~~Media~~ | ~~landed~~ |
 | G28 | No sequence-wide media manager view | Media | P1 |
 | G29 | No embed / extract UI | Media | P1 |
 | G30 | No rename-embedded with reference update | Media | P2 |
 | G31 | No "Remove unused media" action | Media | P2 |
 | G32 | No video compat check / transcode | Media | P1 |
 | G33 | No AI image generation entry point | Media | P2 |
-| G34 | No animated-GIF / video thumbnail cycling | Media | P2 |
-| G35 | Generic `FilepickerPropertyView` also needs thumbnail + reuse list | Media | P0 |
+| ~~G34~~ | ~~No animated-GIF / video thumbnail cycling~~ | ~~Media~~ | ~~landed (images/video/GIF)~~; shader preview deferred |
+| ~~G35~~ | ~~Generic `FilepickerPropertyView` also needs thumbnail + reuse list~~ | ~~Media~~ | ~~landed~~ |
 | G36 | Value-curve preset load / save from disk | Value Curve | P2 |
 | G37 | Value-curve copy / paste | Value Curve | P2 |
 | G38 | Value-curve Flip / Mirror / Repeat shortcut buttons | Value Curve | P2 |
@@ -612,22 +657,52 @@ Severity key:
 ## 11. Suggested phasing
 
 **C1 — Discoverability + quick wins (1-2 weeks)**
-- G2: Add collapsible sections-by-default, remember collapsed state,
-  add a simple filter field at the top of each tab.
-- G9: Long-press context menu on every `EffectPropertyView` row →
-  Value Curve (if applicable), Copy, Paste, Reset.
-- G13: Per-setting copy / paste (falls out of G9).
+- ~~G9~~ **landed** — long-press context menu on slider / checkbox /
+  choice / spin / text rows exposes Copy / Paste / Reset / Edit VC.
+- ~~G13~~ **landed** — per-setting copy / paste falls out of G9 via
+  the `xlprop:v1:` pasteboard prefix.
+- ~~G2-a~~ **landed** — Shape.json now uses 4-tab grouping + xyCenter.
+- ~~G2-b~~ **landed** — DMX channel-bank expansion persists via
+  `@AppStorage`.
 - G19 / G21 / G25: Verify auto-rendered sliders on device; file small
-  issues if any fail.
+  issues if any fail. Code-side audits done 2026-04-20; G21 is
+  blocked on Phase D-3 (ViewpointMgr bridging).
 
-**C2 — Media picker reuse + thumbnails (1-2 weeks)**
-- G26 + G27 + G35: Replace `Select…` in both
-  `EffectFilenameBlockView` and `FilepickerPropertyView` with a sheet
-  that shows sequence-referenced media first (with thumbnails,
-  one-tap) and `Browse…` second. Bridge: vend
-  `SequenceMedia::GetAllMediaPaths()` and thumbnails. Single biggest
-  day-to-day friction the user flagged.
-- G34: Animated-GIF / video thumbnail cycling on the same view.
+**C2 — Media picker reuse + thumbnails**
+- ~~G26 + G27 + G35~~ **landed 2026-04-20.** `MediaPickerSheet.swift`
+  replaces the plain Select… button on both `EffectFilenameBlockView`
+  and `FilepickerPropertyView`. Top section lists every media file
+  referenced by an effect in this sequence, filtered by type (image /
+  video / shader / svg / binary / text), with async thumbnails and
+  one-tap commit. Bottom section keeps Browse… (current fileImporter
+  behaviour) and Clear. Bridge additions on `XLSequenceDocument`:
+  `mediaPathsInSequence`, `ensureThumbnailPreview(forPath:…)`,
+  `thumbnailPNG(forPath:frameIndex:)`,
+  `thumbnailFrameTimeMS(forPath:frameIndex:)`. Backed by
+  `SequenceMedia::GetAllMediaPaths()` + `MediaCacheEntry::GeneratePreview`
+  (already-shared core API). Thumbnails load on a utility queue so
+  cold caches don't block main.
+- ~~G34~~ **landed 2026-04-20.** `MediaThumbnailView` cycles
+  multi-frame content (animated GIF / WebP / video) at the cadence
+  the underlying format declares, via a cooperative `Task`. Cycle
+  pauses on scene-phase change and on view disappear.
+- ~~G2-c~~ **landed 2026-04-20.** Shader preview generation ported
+  from desktop `ShaderPreviewGenerator.cpp` — not wxGLCanvas-based as
+  I'd initially miscategorised; it goes through the shared render
+  engine against a standalone preset matrix model. iPad side:
+  `iPadRenderContext` gained a preset scaffolding (`MatrixModel`
+  64×64 RGB + dedicated `ModelManager` / `SequenceElements` /
+  `SequenceData`), a `RenderEffectToFrames` helper ported verbatim
+  from `xLightsFrame::RenderEffectToFrames`
+  (`TabConvert.cpp:856`) — including the local `FillXlImage` /
+  `RenderModelOnXlImage` raster helpers — plus
+  `GenerateShaderPreview(ShaderMediaCacheEntry*)` which builds the
+  default settings string (including all dynamic uniforms via
+  `ShaderConfig::GetParms()`), adds a 1-second shader effect to the
+  preset sequence, and fills the preview-frame strip. Bridge
+  `ensureThumbnailPreviewForPath` routes shader entries through the
+  new path; non-shader entries keep using `MediaCacheEntry::GeneratePreview`.
+  Shader thumbnails cycle alongside GIFs / video in the picker.
 
 **C3 — Multi-effect operations (2-3 weeks)**
 - G11 + G41: Wire the grid's multi-select to the inspector. Add "N
@@ -661,8 +736,8 @@ Severity key:
 - G18: Drag colours between slots.
 
 **C6 — Blending / Transitions polish (1 week)**
-- G23: Wire `Transition Adjust` slider + `Reverse` checkbox to the
-  per-transition capability tables.
+- ~~G23~~ **landed** — per-transition Adjust / Reverse enable tables
+  synced with desktop.
 - G24: Transition preview thumbnail (can be a static icon per type
   initially; live thumb later).
 

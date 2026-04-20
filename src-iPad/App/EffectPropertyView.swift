@@ -283,6 +283,7 @@ struct EffectPropertyView: View {
                 .disabled(disabled)
         }
         .padding(.vertical, 2)
+        .propertyContextMenu(property: property, prefix: metadataPrefix)
     }
 
     // MARK: - Checkbox
@@ -304,6 +305,7 @@ struct EffectPropertyView: View {
         .disabled(runtimeDisabled)
         .opacity(runtimeDisabled ? 0.5 : 1.0)
         .padding(.vertical, 2)
+        .propertyContextMenu(property: property, prefix: metadataPrefix)
     }
 
     // MARK: - Choice / Combobox
@@ -344,6 +346,7 @@ struct EffectPropertyView: View {
             .labelsHidden()
         }
         .padding(.vertical, 2)
+        .propertyContextMenu(property: property, prefix: metadataPrefix)
     }
 
     // MARK: - Spin (Stepper)
@@ -375,6 +378,7 @@ struct EffectPropertyView: View {
                 .labelsHidden()
         }
         .padding(.vertical, 2)
+        .propertyContextMenu(property: property, prefix: metadataPrefix)
     }
 
     // MARK: - Text
@@ -392,6 +396,7 @@ struct EffectPropertyView: View {
                 .font(.caption2)
         }
         .padding(.vertical, 2)
+        .propertyContextMenu(property: property, prefix: metadataPrefix)
     }
 
     // MARK: - Custom / Unsupported

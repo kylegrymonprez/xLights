@@ -11,7 +11,8 @@ Issue Tracker is found here: www.github.com/xLightsSequencer/xLights/issues
 XLIGHTS/NUTCRACKER RELEASE NOTES
 ---------------------------------
 2026.07  April ??, 2026
-    -enh (charlie)              Improve macOS House Preview 
+    -enh (dkulp)                Shape effect: Effect panel now organises its 27 properties into Shape / Size / Motion /
+                                Triggers tabs instead of a flat scroll, matching the grouped layout other large effects use.
     -enh (PB)                   Value curve Exponential, Logarithmic, and Parabolic types now support Start/End.
     -enh (scott)                Add "Show Names" and "Show Start Channel" checkboxes to Layout tab to display model names
                                 and controller/port or start channel in the layout preview
@@ -39,6 +40,7 @@ XLIGHTS/NUTCRACKER RELEASE NOTES
     -bug (derwin12)             Random Value Curve now holds the value properly (#4803)
     -bug (scott)                Fix some values not being stored in (new) settings file (#6134)
     -bug (dkulp)                Fix layout render glitches by sorting pixels back-to-front by camera-space Z (#6126)
+    -enh (charlie)              Restore performance of House Preview Export to Video
 
 2026.06  April 16, 2026
     -enh (dkulp)                Media-compatibility warning on sequence load now offers "Convert Videos Now" —

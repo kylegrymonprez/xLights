@@ -25,13 +25,27 @@ struct XLightsApp: App {
                 .environment(viewModel)
         }
         .onChange(of: scenePhase) { _, newPhase in
-            // Going to .background typically precedes termination; iOS
-            // may kill the process without further notice. Abort the
-            // render and block briefly so the worker threads exit
-            // cleanly before the teardown race — otherwise they crash
-            // mid-frame on freed SequenceElements/SequenceData.
-            if newPhase == .background {
+            switch newPhase {
+            case .inactive:
+                // Temporary suspension (app switcher, incoming call,
+                // Control Center). Pause playback + scrub so the
+                // frame timers and audio stop burning energy;
+                // keep render state so returning to .active is
+                // instant. `.background` follows if the app really
+                // goes away — that's handled below.
+                viewModel.quiesceForInactive()
+            case .background:
+                // May precede termination; iOS can kill the process
+                // without further notice. Pause playback, stop scrub,
+                // then abort the render and block briefly so worker
+                // threads exit cleanly before the teardown race —
+                // otherwise they crash mid-frame on freed
+                // SequenceElements / SequenceData.
                 viewModel.shutdownForBackground()
+            case .active:
+                break
+            @unknown default:
+                break
             }
         }
     }

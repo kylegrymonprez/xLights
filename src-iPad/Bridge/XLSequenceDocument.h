@@ -357,6 +357,60 @@
                              bridge:(id)bridge
                           drawRamps:(BOOL)drawRamps;
 
+// Media picker — sequence-wide enumeration + thumbnails.
+// `mediaPathsInSequence` returns every media file referenced by effects
+// in the currently-open sequence as a list of
+// @{@"path": NSString, @"type": NSString (image|svg|shader|text|binary|video)}
+// dictionaries. Backed by `SequenceMedia::GetAllMediaPaths()`, which
+// walks the media cache — iPad renders once on sequence open, so every
+// referenced file has landed there by the time the user opens a picker.
+- (NSArray<NSDictionary<NSString*, NSString*>*>*)mediaPathsInSequence;
+
+// Ensure a preview-frame bundle exists for `path` at the requested
+// thumbnail bounds. Loads the entry if not yet loaded and calls
+// `GeneratePreview`; subsequent calls with matching bounds re-use the
+// cached frames. Returns the frame count (>= 1 on success, 0 if the
+// path can't be resolved or has no preview support).
+//
+// `mediaType` must match the value returned for this path in
+// `mediaPathsInSequence` ("image" / "video" / "svg" / "shader" /
+// "text" / "binary"). The bridge uses the type to look up the right
+// cache; without it, the per-type `Get…` accessors (which
+// create-on-access) would otherwise mint a fresh cache entry of the
+// wrong type for the path and corrupt the media inventory.
+- (int)ensureThumbnailPreviewForPath:(NSString*)path
+                            mediaType:(NSString*)mediaType
+                            maxWidth:(int)maxWidth
+                           maxHeight:(int)maxHeight;
+
+// PNG-encoded pixel data for one frame of a path's preview strip.
+// Caller must have called `ensureThumbnailPreviewForPath` first so the
+// frame exists. Returns nil if the path / index is invalid or PNG
+// encoding fails. `mediaType` disambiguates the cache lookup (see
+// above).
+- (NSData*)thumbnailPNGForPath:(NSString*)path
+                     mediaType:(NSString*)mediaType
+                    frameIndex:(int)frameIndex;
+
+// Duration of the frame at `frameIndex` in milliseconds. Driven by the
+// underlying format: animated-GIF / WebP frame delays, video frame
+// intervals from the container, SVG / still-image entries return 0
+// (single-frame content).
+- (long)thumbnailFrameTimeMSForPath:(NSString*)path
+                          mediaType:(NSString*)mediaType
+                         frameIndex:(int)frameIndex;
+
+// Probe a video file's total duration in milliseconds. Resolves the
+// path via `FileUtils::FixFile` (so relative / cross-machine paths
+// relocate onto the current show/media folders) and goes through
+// core `VideoReader::GetVideoLength` — the same code path the render
+// engine uses successfully. Swift's direct `AVURLAsset` probe fails
+// on iCloud-hosted files because it doesn't carry the security-
+// scoped bookmark the show folder was opened with; routing through
+// the bridge keeps everything on the sandboxed-access path that
+// already works for playback. Returns 0 on failure.
+- (long)videoDurationMSForPath:(NSString*)path;
+
 // Effect icons. Returns BGRA-premultiplied pixel data (width*height*4
 // bytes) plus the chosen bucket size — parsed directly from the
 // RenderableEffect's compiled-in XPM data. `desiredSize` is rounded

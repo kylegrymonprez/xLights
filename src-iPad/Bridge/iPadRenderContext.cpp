@@ -11,11 +11,17 @@
 #include "iPadRenderContext.h"
 
 #include "render/Element.h"
+#include "render/EffectLayer.h"
 #include "render/RenderProgressInfo.h"
+#include "render/SequenceMedia.h"
+#include "effects/ShaderEffect.h"
 #include "models/Model.h"
 #include "models/ModelGroup.h"
+#include "models/MatrixModel.h"
+#include "models/ModelScreenLocation.h"
 #include "models/Node.h"
 #include "render/ValueCurve.h"
+#include "utils/Color.h"
 #include "utils/ExternalHooks.h"
 #include "XmlSerializer/XmlSerializingVisitor.h"
 
@@ -24,10 +30,13 @@
 #include <log.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <mutex>
 #include <string_view>
 #include <system_error>
 #include <thread>
@@ -560,7 +569,22 @@ const std::string& iPadRenderContext::GetHeaderInfo(HEADER_INFO_TYPES type) cons
 }
 
 Model* iPadRenderContext::GetModel(const std::string& name) const {
-    return _modelManager ? _modelManager->GetModel(name) : nullptr;
+    if (_modelManager) {
+        if (Model* m = _modelManager->GetModel(name)) return m;
+    }
+    // Preset model lives in its own ModelManager so it isn't visible
+    // on the real sequence / layout. Desktop's xLightsFrame::GetModel
+    // short-circuits on the preset name too
+    // (`tabSequencer.cpp:335-336`); without this, the render engine
+    // resolves the preset name to nullptr, skips `ModelElement::Init`,
+    // and every rendered frame comes back black.
+    if (_presetModel != nullptr && name == _presetModel->GetName()) {
+        return _presetModel;
+    }
+    if (_presetModelManager) {
+        if (Model* m = _presetModelManager->GetModel(name)) return m;
+    }
+    return nullptr;
 }
 
 TimingElement* iPadRenderContext::AddTimingElement(const std::string& /*name*/,
@@ -584,15 +608,7 @@ void iPadRenderContext::RenderEffectForModel(const std::string& model,
     }
 }
 
-void iPadRenderContext::RenderAll() {
-    if (!_sequenceFile || !_modelManager) return;
-
-    int numFrames = _sequenceFile->GetSequenceDurationMS() / _sequenceFile->GetFrameMS();
-    int numChannels = _outputManager.GetTotalChannels();
-    if (numChannels == 0) numChannels = 1;
-
-    _sequenceData.init(numChannels, numFrames, _sequenceFile->GetFrameMS());
-
+void iPadRenderContext::EnsureRenderEngine() {
     if (!_jobPool) {
         _jobPool = std::make_unique<JobPool>("RenderPool");
         // RenderEngine workers can block waiting on frames from other models;
@@ -602,10 +618,21 @@ void iPadRenderContext::RenderAll() {
         size_t poolThreads = std::max<size_t>(24, hw * 2);
         _jobPool->Start(poolThreads);
     }
-
     if (!_renderEngine) {
         _renderEngine = std::make_unique<RenderEngine>(*this, *_jobPool, _renderCache);
     }
+}
+
+void iPadRenderContext::RenderAll() {
+    if (!_sequenceFile || !_modelManager) return;
+
+    int numFrames = _sequenceFile->GetSequenceDurationMS() / _sequenceFile->GetFrameMS();
+    int numChannels = _outputManager.GetTotalChannels();
+    if (numChannels == 0) numChannels = 1;
+
+    _sequenceData.init(numChannels, numFrames, _sequenceFile->GetFrameMS());
+
+    EnsureRenderEngine();
 
     _renderEngine->BuildRenderTree(_sequenceElements, _modelsChangeCount);
 
@@ -740,4 +767,284 @@ std::vector<iPadRenderContext::PixelData> iPadRenderContext::GetAllModelPixels(i
         loggedOnce = true;
     }
     return allPixels;
+}
+
+// === Preset model + preview-render helpers ==============================
+// Ports `xLightsFrame::EnsurePresetModel` +
+// `xLightsFrame::RenderEffectToFrames` from
+// `src-ui-wx/app-shell/TabConvert.cpp`. Kept iPad-local so we don't drag
+// wx into core; reuses everything else (MatrixModel, ModelManager,
+// RenderEngine) from src-core.
+
+namespace {
+
+#define PRESET_MODEL_NAME "PRESET_Matrix_XYZZY"
+constexpr int PRESET_ICON_SIZE = 64;
+
+// Raster a single model's node colours into the provided xlImage at
+// (x, y) offset. Mirrors `RenderModelOnXlImage` from
+// `src-ui-wx/app-shell/TabConvert.cpp:795`.
+void RenderModelOnXlImagePreset(xlImage& image, Model* model,
+                                 uint8_t* framedata, int startAddr,
+                                 int x, int y, bool invert) {
+    int outheight = image.GetHeight();
+    int outwidth = image.GetWidth();
+    uint8_t* imagedata = image.GetData();
+
+    int chs = model->GetChanCountPerNode();
+    uint8_t* ps = framedata + startAddr;
+
+    char r = model->GetChannelColorLetter(0);
+    int rr = 0, gg = 1, bb = 2;
+    if (r == 'G') gg = 0;
+    else if (r == 'B') bb = 0;
+    char g = model->GetChannelColorLetter(1);
+    if (g == 'R') rr = 1;
+    else if (g == 'B') bb = 1;
+    char b = model->GetChannelColorLetter(2);
+    if (b == 'R') rr = 2;
+    else if (b == 'G') gg = 2;
+
+    for (size_t i = 0; i < model->GetNodeCount(); i++) {
+        xlColor c = model->GetNodeColor(i);
+        std::vector<xlPoint> pts;
+        model->GetNodeCoords(i, pts);
+
+        for (const auto& it : pts) {
+            int xx = x + it.x;
+            int yy = y + it.y;
+            if (invert) yy = outheight - yy - 1;
+
+            if (xx >= 0 && xx < outwidth && yy >= 0 && yy < outheight) {
+                uint8_t* p = imagedata + (yy * outwidth + xx) * 4; // RGBA
+                if (chs == 1) {
+                    p[0] = c.Red();
+                    p[1] = c.Green();
+                    p[2] = c.Blue();
+                } else {
+                    p[0] = *(ps + rr);
+                    p[1] = *(ps + gg);
+                    p[2] = *(ps + bb);
+                }
+                p[3] = 255; // fully opaque
+            }
+        }
+        ps += chs;
+    }
+}
+
+// Handle ModelGroups by iterating members, exactly as
+// `FillXlImage` does on desktop.
+void FillXlImagePreset(xlImage& image, Model* model,
+                       uint8_t* framedata, int startAddr, bool invert) {
+    if (model->GetDisplayAs() == DisplayAsType::ModelGroup) {
+        auto* mg = static_cast<ModelGroup*>(model);
+        for (auto it = mg->Models().begin(); it != mg->Models().end(); ++it) {
+            int start = (*it)->GetFirstChannel() - startAddr;
+            RenderModelOnXlImagePreset(image, *it, framedata, start, 0, 0, invert);
+        }
+    } else {
+        RenderModelOnXlImagePreset(image, model, framedata,
+                                    model->GetFirstChannel() - startAddr + 1,
+                                    0, 0, invert);
+    }
+}
+
+} // namespace
+
+void iPadRenderContext::EnsurePresetModel() {
+    if (_presetModel != nullptr) return;
+
+    // Preset lives in its own ModelManager so it isn't visible on the
+    // real sequence's preview / layout.
+    _presetModelManager = std::make_unique<ModelManager>(nullptr, this);
+
+    auto* matrixModel = new MatrixModel(*_presetModelManager);
+    _presetModel = matrixModel;
+
+    matrixModel->SetStringType("RGB Nodes");
+    matrixModel->SetPixelStyle(Model::PIXEL_STYLE::PIXEL_STYLE_SMOOTH);
+    matrixModel->SetPixelSize(2);
+    matrixModel->SetTransparency(0);
+    matrixModel->SetNumMatrixStrings(PRESET_ICON_SIZE);
+    matrixModel->SetNodesPerString(PRESET_ICON_SIZE);
+    matrixModel->SetStrandsPerString(1);
+    matrixModel->SetVertical(false);
+    matrixModel->SetDirection("L");
+    matrixModel->SetStartSide("T");
+
+    auto& screenLoc = matrixModel->GetModelScreenLocation();
+    screenLoc.SetWorldPosition(glm::vec3(0.0f, 0.0f, 0.0f));
+    auto& boxedLoc = dynamic_cast<BoxedScreenLocation&>(screenLoc);
+    boxedLoc.SetScale(1.0f, 1.0f);
+    boxedLoc.SetScaleZ(1.0f);
+    screenLoc.SetRotation(glm::vec3(0.0f, 0.0f, 0.0f));
+
+    matrixModel->SetLayoutGroup("Unassigned");
+    matrixModel->SetName(PRESET_MODEL_NAME);
+    matrixModel->SetStartChannel("1");
+    matrixModel->Setup();
+
+    _presetSequenceElements.AddElement(_presetModel->GetName(), "Model",
+                                        true, false, false, false, false);
+}
+
+std::vector<std::shared_ptr<xlImage>> iPadRenderContext::RenderEffectToFrames(
+    Model* matrixModel, SequenceData& seqData, SequenceElements& seqElements,
+    size_t numFrames, int frameTimeMs) {
+    std::vector<std::shared_ptr<xlImage>> result;
+    if (!matrixModel || numFrames == 0) return result;
+
+    int width = 0, height = 0;
+    matrixModel->GetBufferSize("Default", "2D", "None", width, height, 0);
+    if (width <= 0 || height <= 0) return result;
+
+    size_t channels = (size_t)width * (size_t)height * 3;
+    seqData.init(channels, numFrames, frameTimeMs, true);
+
+    EnsureRenderEngine();
+
+    std::atomic<bool> renderComplete{false};
+    _renderEngine->Render(seqElements, seqData,
+                           { matrixModel }, { matrixModel },
+                           0, (int)numFrames - 1,
+                           nullptr, true,
+                           [&renderComplete](bool) { renderComplete = true; });
+
+    // Unlike desktop, iPad has no main-thread-effects drain tied to the
+    // UI event loop; this method is expected to be called from a
+    // utility-priority thread (the media-picker path does so), so we
+    // just poll. Text effects (the sole main-thread-effects user today)
+    // still need draining — hop to main via GCD to keep correctness.
+    while (!renderComplete) {
+        if (_renderEngine) {
+            // Synchronous hop only if the main queue is idle; otherwise
+            // skip this tick. Keeps us from deadlocking if the caller
+            // is somehow on the main queue already.
+            _renderEngine->RenderMainThreadEffects();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    for (size_t i = 0; i < numFrames; i++) {
+        auto img = std::make_shared<xlImage>(width, height);
+        FillXlImagePreset(*img, matrixModel,
+                           (uint8_t*)&seqData[i][0], 1, true);
+        result.push_back(img);
+    }
+
+    return result;
+}
+
+void iPadRenderContext::GenerateShaderPreview(ShaderMediaCacheEntry* entry) {
+    if (!entry || entry->GetShaderSource().empty()) return;
+    if (entry->HasPreview()) return;
+
+    ShaderConfig* config = entry->GetShaderConfig(&_presetSequenceElements);
+    if (!config) {
+        // Try the main sequence's elements if the preset doesn't know
+        // about this shader yet. ShaderConfig creation only needs a
+        // `SequenceElements*` handle for logging.
+        config = entry->GetShaderConfig(&_sequenceElements);
+        if (!config) return;
+    }
+
+    // Serialize concurrent shader-preview requests. The single preset
+    // scaffolding (shared `_presetSequenceElements` / `_presetSequenceData`
+    // / `_presetModel`) can only host one render at a time; a second
+    // caller racing through here would reset the effect layer out
+    // from under the first render. Swift kicks off one thumbnail
+    // request per shader on sheet open, so we need to queue them —
+    // the earlier CAS-based guard *dropped* concurrent requests
+    // instead of queueing, which is why only one more preview
+    // populated per sheet open.
+    static std::mutex s_previewMutex;
+    std::scoped_lock lock(s_previewMutex);
+    // Re-check after locking — a caller ahead of us may have already
+    // rendered this exact entry.
+    if (entry->HasPreview()) return;
+
+    EnsurePresetModel();
+
+    // Build the default settings string: file + global shader
+    // parameters + per-uniform defaults. Mirrors
+    // `GenerateShaderPreview` in ShaderPreviewGenerator.cpp.
+    std::string settings = "E_0FILEPICKERCTRL_IFS=" + entry->GetFilePath();
+    settings += ",E_SLIDER_Shader_Speed=100";
+    settings += ",E_TEXTCTRL_Shader_Offset_X=0,E_TEXTCTRL_Shader_Offset_Y=0";
+    settings += ",E_TEXTCTRL_Shader_Zoom=0,E_TEXTCTRL_Shader_LeadIn=0";
+
+    for (const auto& parm : config->GetParms()) {
+        if (!parm.ShowParm()) continue;
+        switch (parm._type) {
+            case ShaderParmType::SHADER_PARM_FLOAT: {
+                std::string key = "E_TEXTCTRL_" +
+                    parm.GetUndecoratedId(ShaderCtrlType::SHADER_CTRL_TEXTCTRL);
+                char buf[64];
+                snprintf(buf, sizeof(buf), "%.4f", parm._default);
+                settings += "," + key + "=" + buf;
+                break;
+            }
+            case ShaderParmType::SHADER_PARM_BOOL: {
+                std::string key = "E_CHECKBOX_" +
+                    parm.GetUndecoratedId(ShaderCtrlType::SHADER_CTRL_CHECKBOX);
+                settings += "," + key + "=" + (parm._default != 0.0 ? "1" : "0");
+                break;
+            }
+            case ShaderParmType::SHADER_PARM_LONGCHOICE: {
+                std::string key = "E_CHOICE_" +
+                    parm.GetUndecoratedId(ShaderCtrlType::SHADER_CTRL_CHOICE);
+                auto choices = parm.GetChoices();
+                if (!choices.empty()) {
+                    int idx = (int)parm._default;
+                    std::string choiceStr = choices[0];
+                    for (const auto& [val, str] : parm._valueOptions) {
+                        if (val == idx) { choiceStr = str; break; }
+                    }
+                    settings += "," + key + "=" + choiceStr;
+                }
+                break;
+            }
+            case ShaderParmType::SHADER_PARM_POINT2D: {
+                std::string keyBase = parm.GetUndecoratedId(
+                    ShaderCtrlType::SHADER_CTRL_TEXTCTRL);
+                char bufX[64], bufY[64];
+                snprintf(bufX, sizeof(bufX), "%.4f", parm._defaultPt.x);
+                snprintf(bufY, sizeof(bufY), "%.4f", parm._defaultPt.y);
+                settings += ",E_TEXTCTRL_" + keyBase + "X=" + bufX;
+                settings += ",E_TEXTCTRL_" + keyBase + "Y=" + bufY;
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    const std::string palette =
+        "C_BUTTON_Palette1=#FFFFFF,C_BUTTON_Palette2=#FF0000,"
+        "C_CHECKBOX_Palette1=1,C_CHECKBOX_Palette2=1";
+
+    Element* elem = _presetSequenceElements.GetElement(_presetModel->GetName());
+    if (!elem) return;
+
+    for (const auto& it : elem->GetEffectLayers()) {
+        it->DeleteAllEffects();
+    }
+    if (elem->GetEffectLayerCount() == 0) {
+        elem->AddEffectLayer();
+    }
+
+    EffectLayer* el = elem->GetEffectLayer(0);
+    el->AddEffect(0, "Shader", settings, palette, 0, 1000,
+                   false, false, true);
+
+    constexpr int frameTimeMs = 50;
+    constexpr size_t numFrames = 20; // 1 second at 50 ms — matches desktop
+
+    auto frames = RenderEffectToFrames(_presetModel, _presetSequenceData,
+                                        _presetSequenceElements,
+                                        numFrames, frameTimeMs);
+    if (!frames.empty()) {
+        entry->SetPreviewFrames(std::move(frames), frameTimeMs);
+    }
 }

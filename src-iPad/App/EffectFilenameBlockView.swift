@@ -28,6 +28,7 @@ struct EffectFilenameBlockView: View {
     let subdirectory: String
 
     @State private var presentingPicker = false
+    @State private var presentingMediaSheet = false
     @State private var pendingPick: URL?
 
     private var currentPath: String {
@@ -37,6 +38,18 @@ struct EffectFilenameBlockView: View {
     private var filename: String {
         if currentPath.isEmpty { return "(none)" }
         return (currentPath as NSString).lastPathComponent
+    }
+
+    /// Derive the SequenceMedia type string from the canonical
+    /// subdirectory the effect's files live in. Keeps the
+    /// "used in this sequence" list scoped to the right media type.
+    private var mediaType: String? {
+        switch subdirectory {
+        case "Images":   return "image"
+        case "Videos":   return "video"
+        case "Shaders":  return "shader"
+        default:         return nil
+        }
     }
 
     var body: some View {
@@ -50,7 +63,7 @@ struct EffectFilenameBlockView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                Button("Select…") { presentingPicker = true }
+                Button("Select…") { presentingMediaSheet = true }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 if !currentPath.isEmpty {
@@ -74,6 +87,24 @@ struct EffectFilenameBlockView: View {
             subdirectory: subdirectory
         ) { storedPath in
             viewModel.setSettingValue(storedPath, forKey: settingKey)
+        }
+        .sheet(isPresented: $presentingMediaSheet) {
+            MediaPickerSheet(
+                title: "Choose \(label)",
+                mediaType: mediaType,
+                currentPath: currentPath,
+                // In-sequence files already sit under show / media
+                // folders (that's an iPad invariant), so commit the
+                // path as-is without re-running MediaRelocation.
+                onPick: { storedPath in
+                    viewModel.setSettingValue(storedPath, forKey: settingKey)
+                },
+                onBrowse: { presentingPicker = true },
+                onClear: {
+                    viewModel.setSettingValue("", forKey: settingKey)
+                }
+            )
+            .environment(viewModel)
         }
     }
 

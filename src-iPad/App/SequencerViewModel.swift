@@ -249,10 +249,31 @@ class SequencerViewModel {
     /// the process at any time from that point. Abort all in-flight
     /// render jobs and wait briefly so the workers unwind before we
     /// (or the system) tear down the sequence data they're reading.
+    /// Also pause playback / scrub so the 30fps UI timers, audio
+    /// playback, and preview display-links (which key off `isPlaying`
+    /// / `isScrubbing`) all stop burning energy in the background.
+    /// Pauses rather than stops so the playhead position is preserved
+    /// if the user returns without the app being killed.
     func shutdownForBackground() {
+        quiesceForInactive()
         guard isSequenceLoaded else { return }
         cancelBackgroundRender()
         _ = document.abortRenderAndWait(3.0)
+    }
+
+    /// Called on `.inactive` (multitasking switcher, incoming call,
+    /// Control Center pulled down, etc.) — temporary suspension. Stop
+    /// anything that drives continuous work but keep the render state
+    /// intact so a return to `.active` doesn't have to rebuild it.
+    /// `.background` follows `.inactive` if the app goes away for
+    /// real; that path also calls this via `shutdownForBackground()`.
+    func quiesceForInactive() {
+        if isPlaying {
+            pause()
+        }
+        if isScrubbing {
+            stopScrub()
+        }
     }
 
     func closeSequence() {
