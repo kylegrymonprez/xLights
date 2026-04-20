@@ -164,6 +164,76 @@
 - (NSDictionary<NSString*, NSNumber*>*)colorCurveModeSupportForRow:(int)rowIndex
                                                             atIndex:(int)effectIndex;
 
+// Palette save / load / import / export (G17 — C5). Palette files
+// are plain-text `.xpalette` under `<showFolder>/Palettes/` plus
+// any bundled-in-resources `palettes/` folder. The serialised
+// format is the 8-slot comma-separated string that desktop's
+// `ColorPanel::GetCurrentPalette` produces: each slot is either a
+// `#RRGGBB` hex colour or an `Active=TRUE|…` ColorCurve blob.
+// Round-trips byte-for-byte with desktop.
+
+// List every saved palette visible to the app. Each entry is
+// @{@"filename": <basename>.xpalette, @"palette": <8-slot string>}.
+// Scans `<showFolder>/Palettes/` first, then app-bundled
+// `palettes/` in Resources. Duplicates (same palette string
+// already loaded) are dropped.
+- (NSArray<NSDictionary<NSString*, NSString*>*>*)savedPalettes;
+
+// Write `paletteString` to `<showFolder>/Palettes/<name>.xpalette`.
+// `name` is sanitized for filesystem safety. Pass nil / empty to
+// auto-generate `PAL001.xpalette` (incrementing to avoid collisions).
+// Returns the on-disk filename on success, nil on failure (no
+// show folder, unwritable, invalid input).
+- (NSString*)savePaletteString:(NSString*)paletteString
+                        asName:(NSString*)name;
+
+// Remove a previously-saved palette file. `filename` is the
+// basename returned by `savedPalettes`. Only removes files under
+// the show folder — bundled palettes are read-only. Returns YES
+// on successful delete.
+- (BOOL)deleteSavedPalette:(NSString*)filename;
+
+// Assemble the current 8-slot palette for the effect at row/index
+// into the desktop-compatible serialised string
+// ("#RRGGBB,#RRGGBB,...," or with `Active=TRUE|…` blobs for curve
+// slots). Reads directly from the effect's settings map so the
+// output matches what the renderer sees. Empty string if no effect
+// is selected.
+- (NSString*)currentPaletteStringForRow:(int)rowIndex
+                                atIndex:(int)effectIndex;
+
+// Apply a serialised palette string to the effect at row/index:
+// parses slots and writes `C_BUTTON_Palette1..8` — mirrors
+// desktop's `LoadColorsToButtons`. Leaves the per-slot enable
+// checkboxes (`C_CHECKBOX_Palette1..8`) untouched, same as desktop.
+// Returns YES on successful parse + apply.
+- (BOOL)applyPaletteString:(NSString*)paletteString
+                     toRow:(int)rowIndex
+                   atIndex:(int)effectIndex;
+
+// Value-curve preset load / save (G36 — C6). `.xvc` files are the
+// same XML format desktop reads/writes
+// (`<valuecurve data="<serialised>"/>`), stored under
+// `<showFolder>/valuecurves/` plus any bundled `valuecurves/` in
+// app resources.
+
+// List every saved value curve visible to the app. Each entry is
+// @{@"filename": <basename>.xvc, @"serialised": <VC string>}.
+// Duplicates (same serialised body already loaded) are dropped.
+- (NSArray<NSDictionary<NSString*, NSString*>*>*)savedValueCurves;
+
+// Write `serialised` (a ValueCurve::Serialise() string) into an
+// `.xvc` under `<showFolder>/valuecurves/<name>.xvc`. Name is
+// sanitised to alphanumerics; pass nil / empty to auto-generate
+// `VC001.xvc`. Returns the on-disk filename, or nil on failure.
+- (NSString*)saveValueCurveSerialised:(NSString*)serialised
+                                asName:(NSString*)name;
+
+// Delete a saved value curve by basename. Only removes files
+// under `<showFolder>/valuecurves/`; bundled presets are read-
+// only. Returns YES on success.
+- (BOOL)deleteSavedValueCurve:(NSString*)filename;
+
 // Model-scoped sources. Uses the effect's parent element's ModelName to
 // resolve a Model; ModelGroups are unwrapped to their first contained
 // model, matching desktop (JsonEffectPanel.cpp:1815-1818). Empty on

@@ -661,6 +661,26 @@ class SequencerViewModel {
         stopScrub()
     }
 
+    /// Re-read the selected effect's settings + palette map from the
+    /// document and kick the SwiftUI observables. Used when a bulk
+    /// write happens outside the usual per-setting `setSettingValue`
+    /// path — e.g. applying a saved palette file replaces all 8
+    /// `C_BUTTON_Palette*` at once on the native side.
+    func refreshSelectedEffectSettings() {
+        guard let sel = selectedEffect else { return }
+        var merged: [String: String] = [:]
+        if let settings = document.effectSettings(forRow: Int32(sel.rowIndex),
+                                                   at: Int32(sel.effectIndex)) as? [String: String] {
+            for (k, v) in settings { merged[k] = v }
+        }
+        if let palette = document.effectPalette(forRow: Int32(sel.rowIndex),
+                                                 at: Int32(sel.effectIndex)) as? [String: String] {
+            for (k, v) in palette { merged[k] = v }
+        }
+        selectedEffectSettings = merged
+        renderEffectAndTrack(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex)
+    }
+
     // MARK: - Metadata Loading
 
     private func loadEffectMetadata(_ effectName: String) -> EffectMetadata? {

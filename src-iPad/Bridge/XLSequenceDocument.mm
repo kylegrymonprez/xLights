@@ -24,6 +24,7 @@
 #include "graphics/xlGraphicsAccumulators.h"
 #include "media/AudioManager.h"
 #include "media/VideoReader.h"
+#include "render/ValueCurve.h"
 #include "models/Model.h"
 #include "models/ModelManager.h"
 #include "models/ModelGroup.h"
@@ -657,6 +658,376 @@
         @"linear": @(linear),
         @"radial": @(radial),
     };
+}
+
+#pragma mark - Palette save / load / import / export
+
+namespace {
+
+// Strip characters that can't safely live in a filename. Desktop's
+// equivalent is `RemoveNonAlphanumeric`; we match that shape so the
+// filenames we produce round-trip visually with what desktop writes.
+NSString* sanitisePaletteName(NSString* raw) {
+    if (raw.length == 0) return @"";
+    NSMutableCharacterSet* allowed = [NSMutableCharacterSet alphanumericCharacterSet];
+    NSMutableString* out = [NSMutableString string];
+    for (NSUInteger i = 0; i < raw.length; i++) {
+        unichar c = [raw characterAtIndex:i];
+        if ([allowed characterIsMember:c]) {
+            [out appendFormat:@"%C", c];
+        }
+    }
+    return out;
+}
+
+NSString* autogenPaletteName(NSString* paletteDir) {
+    NSFileManager* fm = [NSFileManager defaultManager];
+    int i = 1;
+    while (i < 1000) {
+        NSString* candidate = [NSString stringWithFormat:@"PAL%03d.xpalette", i];
+        NSString* full = [paletteDir stringByAppendingPathComponent:candidate];
+        if (![fm fileExistsAtPath:full]) {
+            return candidate;
+        }
+        i++;
+    }
+    return @"PAL999.xpalette";
+}
+
+// Strip the trailing filename that desktop appends to each loaded
+// palette entry (`<palette-string>,<filename>.xpalette`) so our
+// list shows the clean palette itself. We track the filename
+// separately.
+NSString* trimPaletteStringSuffix(NSString* raw) {
+    NSRange lastComma = [raw rangeOfString:@"," options:NSBackwardsSearch];
+    if (lastComma.location == NSNotFound) return raw;
+    NSString* tail = [raw substringFromIndex:lastComma.location + 1];
+    if ([tail.lowercaseString hasSuffix:@".xpalette"]) {
+        return [raw substringToIndex:lastComma.location + 1]; // keep trailing comma
+    }
+    return raw;
+}
+
+} // namespace
+
+- (NSArray<NSDictionary<NSString*, NSString*>*>*)savedPalettes {
+    NSMutableArray<NSDictionary<NSString*, NSString*>*>* out =
+        [NSMutableArray array];
+    NSMutableSet<NSString*>* seen = [NSMutableSet set];  // dedupe by palette string
+
+    auto scanDir = ^(NSString* dir, BOOL recurse) {
+        NSFileManager* fm = [NSFileManager defaultManager];
+        BOOL isDir = NO;
+        if (![fm fileExistsAtPath:dir isDirectory:&isDir] || !isDir) return;
+        NSArray<NSString*>* entries = [fm contentsOfDirectoryAtPath:dir error:nil];
+        for (NSString* name in entries) {
+            NSString* full = [dir stringByAppendingPathComponent:name];
+            BOOL sub = NO;
+            [fm fileExistsAtPath:full isDirectory:&sub];
+            if (sub) {
+                if (recurse) {
+                    NSArray* subEntries = [fm contentsOfDirectoryAtPath:full error:nil];
+                    for (NSString* subName in subEntries) {
+                        if (![subName.lowercaseString hasSuffix:@".xpalette"]) continue;
+                        NSString* p = [full stringByAppendingPathComponent:subName];
+                        NSString* content = [NSString stringWithContentsOfFile:p
+                                                                      encoding:NSUTF8StringEncoding
+                                                                         error:nil];
+                        if (content.length == 0) continue;
+                        NSString* firstLine = [[content componentsSeparatedByString:@"\n"] firstObject];
+                        NSString* palette = trimPaletteStringSuffix(firstLine);
+                        if (palette.length > 0 && ![seen containsObject:palette]) {
+                            [seen addObject:palette];
+                            [out addObject:@{@"filename": subName, @"palette": palette}];
+                        }
+                    }
+                }
+                continue;
+            }
+            if (![name.lowercaseString hasSuffix:@".xpalette"]) continue;
+            NSString* content = [NSString stringWithContentsOfFile:full
+                                                          encoding:NSUTF8StringEncoding
+                                                             error:nil];
+            if (content.length == 0) continue;
+            NSString* firstLine = [[content componentsSeparatedByString:@"\n"] firstObject];
+            NSString* palette = trimPaletteStringSuffix(firstLine);
+            if (palette.length > 0 && ![seen containsObject:palette]) {
+                [seen addObject:palette];
+                [out addObject:@{@"filename": name, @"palette": palette}];
+            }
+        }
+    };
+
+    // Show-folder palettes first (user-writable), then bundled.
+    NSString* show = [self showFolderPath];
+    if (show.length > 0) {
+        scanDir([show stringByAppendingPathComponent:@"Palettes"], YES);
+    }
+    NSString* bundled = [[NSBundle mainBundle] pathForResource:@"palettes" ofType:nil];
+    if (bundled.length > 0) {
+        scanDir(bundled, YES);
+    }
+    return out;
+}
+
+- (NSString*)savePaletteString:(NSString*)paletteString
+                        asName:(NSString*)name {
+    if (paletteString.length == 0) return nil;
+    NSString* show = [self showFolderPath];
+    if (show.length == 0) return nil;
+
+    NSString* paletteDir = [show stringByAppendingPathComponent:@"Palettes"];
+    NSFileManager* fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:paletteDir isDirectory:&isDir] || !isDir) {
+        if (![fm createDirectoryAtPath:paletteDir
+           withIntermediateDirectories:YES
+                            attributes:nil
+                                 error:nil]) {
+            return nil;
+        }
+    }
+
+    NSString* filename;
+    NSString* sanitised = sanitisePaletteName(name);
+    if (sanitised.length == 0) {
+        filename = autogenPaletteName(paletteDir);
+    } else {
+        filename = [sanitised stringByAppendingString:@".xpalette"];
+    }
+    NSString* full = [paletteDir stringByAppendingPathComponent:filename];
+
+    // Desktop appends the filename as the "identity" trailer after
+    // the palette string — preserve that so the files iPad writes
+    // are indistinguishable from desktop's.
+    NSString* fileContents = [NSString stringWithFormat:@"%@%@",
+                              paletteString, filename];
+    NSError* err = nil;
+    if (![fileContents writeToFile:full
+                        atomically:YES
+                          encoding:NSUTF8StringEncoding
+                             error:&err]) {
+        return nil;
+    }
+    return filename;
+}
+
+- (BOOL)deleteSavedPalette:(NSString*)filename {
+    if (filename.length == 0) return NO;
+    NSString* show = [self showFolderPath];
+    if (show.length == 0) return NO;
+    NSString* full = [[show stringByAppendingPathComponent:@"Palettes"]
+                      stringByAppendingPathComponent:filename];
+    NSFileManager* fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:full]) return NO;
+    return [fm removeItemAtPath:full error:nil];
+}
+
+- (NSString*)currentPaletteStringForRow:(int)rowIndex
+                                atIndex:(int)effectIndex {
+    if (!_context) return @"";
+    EffectLayer* layer = [self effectLayerForRow:rowIndex];
+    if (!layer || effectIndex < 0 || effectIndex >= (int)layer->GetEffectCount()) return @"";
+    Effect* effect = layer->GetEffect(effectIndex);
+    if (!effect) return @"";
+    const SettingsMap& settings = effect->GetPaletteMap();
+    // Fallback defaults match `ColorPaletteView` so a new / partly-
+    // populated palette still serialises as 8 slots.
+    static const char* defaults[8] = {
+        "#FF0000", "#00FF00", "#0000FF", "#FFFF00",
+        "#FFFFFF", "#000000", "#FFA500", "#800080",
+    };
+    NSMutableString* out = [NSMutableString string];
+    for (int i = 0; i < 8; i++) {
+        std::string key = "C_BUTTON_Palette" + std::to_string(i + 1);
+        std::string v = settings.Get(key, defaults[i]);
+        [out appendFormat:@"%s,", v.c_str()];
+    }
+    return out;
+}
+
+- (BOOL)applyPaletteString:(NSString*)paletteString
+                     toRow:(int)rowIndex
+                   atIndex:(int)effectIndex {
+    if (!_context || paletteString.length == 0) return NO;
+    EffectLayer* layer = [self effectLayerForRow:rowIndex];
+    if (!layer || effectIndex < 0 || effectIndex >= (int)layer->GetEffectCount()) return NO;
+    Effect* effect = layer->GetEffect(effectIndex);
+    if (!effect) return NO;
+
+    // Palette slot values can themselves contain commas when they
+    // hold a ColorCurve blob (`Active=TRUE|Id=…|Values=x=0.000^c=#FF00@FF;…|`).
+    // Split on top-level commas only — walk the string tracking
+    // whether we're inside an `Active=TRUE|…|` block. Trailing
+    // filename trailer (".xpalette") is ignored.
+    std::string src([paletteString UTF8String]);
+    std::vector<std::string> slots;
+    size_t start = 0;
+    bool inCurve = false;
+    for (size_t i = 0; i < src.size(); ++i) {
+        char c = src[i];
+        if (!inCurve && c == ',') {
+            slots.push_back(src.substr(start, i - start));
+            start = i + 1;
+        } else if (!inCurve && src.compare(i, 12, "Active=TRUE|") == 0) {
+            inCurve = true;
+            i += 11;
+        } else if (inCurve && c == '|') {
+            // A curve ends with "|..." — we treat the trailing `|`
+            // that closes the `Values=` section as the curve
+            // terminator. The ColorCurve serialiser writes the
+            // final `|` after the values block, so when we see
+            // `|,` (end-of-curve followed by slot separator) close
+            // the curve.
+            if (i + 1 < src.size() && src[i + 1] == ',') {
+                inCurve = false;
+            }
+        }
+    }
+    if (start < src.size()) {
+        slots.push_back(src.substr(start));
+    }
+
+    int applied = 0;
+    for (size_t i = 0; i < slots.size() && applied < 8; ++i) {
+        std::string v = slots[i];
+        if (v.empty()) continue;
+        // Drop the trailer "PAL001.xpalette" if it slipped in.
+        if (v.find(".xpalette") != std::string::npos) continue;
+
+        std::string key = "C_BUTTON_Palette" + std::to_string(applied + 1);
+        effect->GetPaletteMap()[key] = v;
+        applied++;
+    }
+    effect->PaletteMapUpdated();
+    return applied > 0;
+}
+
+#pragma mark - Value-curve preset save / load
+
+namespace {
+
+NSString* sanitiseVCName(NSString* raw) {
+    if (raw.length == 0) return @"";
+    NSMutableString* out = [NSMutableString string];
+    for (NSUInteger i = 0; i < raw.length; i++) {
+        unichar c = [raw characterAtIndex:i];
+        if ((c >= '0' && c <= '9') ||
+            (c >= 'a' && c <= 'z') ||
+            (c >= 'A' && c <= 'Z')) {
+            [out appendFormat:@"%C", c];
+        }
+    }
+    return out;
+}
+
+NSString* autogenVCName(NSString* dir) {
+    NSFileManager* fm = [NSFileManager defaultManager];
+    for (int i = 1; i < 1000; i++) {
+        NSString* candidate = [NSString stringWithFormat:@"VC%03d.xvc", i];
+        if (![fm fileExistsAtPath:[dir stringByAppendingPathComponent:candidate]]) {
+            return candidate;
+        }
+    }
+    return @"VC999.xvc";
+}
+
+} // namespace
+
+- (NSArray<NSDictionary<NSString*, NSString*>*>*)savedValueCurves {
+    NSMutableArray<NSDictionary<NSString*, NSString*>*>* out = [NSMutableArray array];
+    NSMutableSet<NSString*>* seen = [NSMutableSet set];
+
+    auto scanDir = ^(NSString* dir, BOOL recurse) {
+        NSFileManager* fm = [NSFileManager defaultManager];
+        BOOL isDir = NO;
+        if (![fm fileExistsAtPath:dir isDirectory:&isDir] || !isDir) return;
+        NSArray* entries = [fm contentsOfDirectoryAtPath:dir error:nil];
+        for (NSString* name in entries) {
+            NSString* full = [dir stringByAppendingPathComponent:name];
+            BOOL sub = NO;
+            [fm fileExistsAtPath:full isDirectory:&sub];
+            if (sub) {
+                if (recurse) {
+                    NSArray* subEntries = [fm contentsOfDirectoryAtPath:full error:nil];
+                    for (NSString* subName in subEntries) {
+                        if (![subName.lowercaseString hasSuffix:@".xvc"]) continue;
+                        ValueCurve vc("");
+                        vc.LoadXVC([[full stringByAppendingPathComponent:subName] UTF8String]);
+                        std::string s = vc.Serialise();
+                        NSString* serialised = [NSString stringWithUTF8String:s.c_str()];
+                        if (serialised.length > 0 && ![seen containsObject:serialised]) {
+                            [seen addObject:serialised];
+                            [out addObject:@{@"filename": subName, @"serialised": serialised}];
+                        }
+                    }
+                }
+                continue;
+            }
+            if (![name.lowercaseString hasSuffix:@".xvc"]) continue;
+            ValueCurve vc("");
+            vc.LoadXVC([full UTF8String]);
+            std::string s = vc.Serialise();
+            NSString* serialised = [NSString stringWithUTF8String:s.c_str()];
+            if (serialised.length > 0 && ![seen containsObject:serialised]) {
+                [seen addObject:serialised];
+                [out addObject:@{@"filename": name, @"serialised": serialised}];
+            }
+        }
+    };
+
+    NSString* show = [self showFolderPath];
+    if (show.length > 0) {
+        scanDir([show stringByAppendingPathComponent:@"valuecurves"], YES);
+    }
+    NSString* bundled = [[NSBundle mainBundle] pathForResource:@"valuecurves" ofType:nil];
+    if (bundled.length > 0) {
+        scanDir(bundled, YES);
+    }
+    return out;
+}
+
+- (NSString*)saveValueCurveSerialised:(NSString*)serialised
+                                asName:(NSString*)name {
+    if (serialised.length == 0) return nil;
+    NSString* show = [self showFolderPath];
+    if (show.length == 0) return nil;
+
+    NSString* dir = [show stringByAppendingPathComponent:@"valuecurves"];
+    NSFileManager* fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:dir isDirectory:&isDir] || !isDir) {
+        if (![fm createDirectoryAtPath:dir
+           withIntermediateDirectories:YES
+                            attributes:nil
+                                 error:nil]) {
+            return nil;
+        }
+    }
+
+    NSString* sanitised = sanitiseVCName(name);
+    NSString* filename = sanitised.length == 0
+        ? autogenVCName(dir)
+        : [sanitised stringByAppendingString:@".xvc"];
+    NSString* full = [dir stringByAppendingPathComponent:filename];
+
+    // Reuse core's `SaveXVC` — it applies the ID / limits
+    // normalisation desktop expects, so files round-trip.
+    ValueCurve vc([serialised UTF8String]);
+    vc.SaveXVC([full UTF8String]);
+    if (![fm fileExistsAtPath:full]) return nil;
+    return filename;
+}
+
+- (BOOL)deleteSavedValueCurve:(NSString*)filename {
+    if (filename.length == 0) return NO;
+    NSString* show = [self showFolderPath];
+    if (show.length == 0) return NO;
+    NSString* full = [[show stringByAppendingPathComponent:@"valuecurves"]
+                      stringByAppendingPathComponent:filename];
+    NSFileManager* fm = [NSFileManager defaultManager];
+    if (![fm fileExistsAtPath:full]) return NO;
+    return [fm removeItemAtPath:full error:nil];
 }
 
 /// Resolve the target Model for a row's effect, unwrapping ModelGroups

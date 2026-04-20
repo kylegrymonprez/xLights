@@ -171,6 +171,33 @@ final class EditableValueCurve {
         persist()
     }
 
+    // MARK: Transforms (G38)
+
+    func reverse() {
+        core.reverse()
+        bump()
+        persist()
+    }
+
+    func flip() {
+        core.flip()
+        bump()
+        persist()
+    }
+
+    // MARK: Preset / clipboard replace (G36 / G37)
+
+    /// Swap in a new serialised payload (from a preset file or the
+    /// pasteboard). Forces active on reload so the caller doesn't
+    /// have to toggle it manually — matches desktop's
+    /// `OnButtonLoadClick` behaviour.
+    func replaceWithSerialised(_ serialised: String) {
+        core.reload(fromSerialised: serialised)
+        core.active = true
+        bump()
+        persist()
+    }
+
     // MARK: Evaluation (for preview strip)
 
     func valueAt(offset: Double) -> Double {
@@ -259,6 +286,8 @@ struct ValueCurveEditorSheet: View {
     var customPersist: ((String) -> Void)? = nil
 
     @State private var vc: EditableValueCurve?
+    @State private var showingLoadPreset = false
+    @State private var showingSavePreset = false
 
     var body: some View {
         NavigationStack {
@@ -410,6 +439,84 @@ struct ValueCurveEditorSheet: View {
                         Toggle("Regex", isOn: $vc.filterIsRegex).toggleStyle(.switch)
                     }
                 }
+
+                // Transforms (G38) + clipboard (G37). Buttons live
+                // under the parameter / option sections so the user
+                // lands on them after scrolling through the curve
+                // definition.
+                Section {
+                    HStack {
+                        Button {
+                            vc.reverse()
+                        } label: {
+                            Label("Reverse",
+                                  systemImage: "arrow.left.arrow.right")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        Button {
+                            vc.flip()
+                        } label: {
+                            Label("Flip",
+                                  systemImage: "arrow.up.arrow.down")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    HStack {
+                        Button {
+                            UIPasteboard.general.string =
+                                ValueCurveClipboard.wrap(vc.core.serialise())
+                        } label: {
+                            Label("Copy", systemImage: "doc.on.doc")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        Button {
+                            if let payload = ValueCurveClipboard.unwrap(
+                                UIPasteboard.general.string) {
+                                vc.replaceWithSerialised(payload)
+                            }
+                        } label: {
+                            Label("Paste", systemImage: "doc.on.clipboard")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!ValueCurveClipboard.isValid(
+                            UIPasteboard.general.string))
+                    }
+                } header: {
+                    Text("Transforms & Clipboard")
+                }
+
+                // Presets (G36). Bundled + `<showFolder>/valuecurves`.
+                Section {
+                    Button {
+                        showingLoadPreset = true
+                    } label: {
+                        Label("Load Preset…", systemImage: "folder")
+                    }
+                    Button {
+                        showingSavePreset = true
+                    } label: {
+                        Label("Save As Preset…",
+                              systemImage: "square.and.arrow.down")
+                    }
+                } header: {
+                    Text("Presets")
+                }
+            }
+        }
+        .sheet(isPresented: $showingLoadPreset) {
+            ValueCurveLoadPresetSheet { serialised in
+                vc.replaceWithSerialised(serialised)
+            }
+            .environment(viewModel)
+        }
+        .sheet(isPresented: $showingSavePreset) {
+            ValueCurveSaveAsSheet { name in
+                _ = viewModel.document.saveValueCurveSerialised(
+                    vc.core.serialise(), asName: name)
             }
         }
     }

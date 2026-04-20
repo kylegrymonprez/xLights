@@ -221,4 +221,11 @@
     return [type isEqualToString:@"Custom"] || [type isEqualToString:@"Random"];
 }
 
+- (void)reverse { _vc->Reverse(); }
+- (void)flip    { _vc->Flip(); }
+
+- (void)reloadFromSerialised:(NSString*)serialised {
+    _vc->Deserialise(std::string([serialised UTF8String]), /*holdminmax*/ false);
+}
+
 @end

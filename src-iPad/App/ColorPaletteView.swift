@@ -14,13 +14,27 @@ struct ColorPaletteView: View {
     @Environment(SequencerViewModel.self) var viewModel
 
     @State private var editingSlot: Int? = nil
+    @State private var showingLoadSheet = false
+    @State private var showingImportSheet = false
+    @State private var showingSaveAsSheet = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("Palette")
-                .font(.caption)
-                .fontWeight(.medium)
-                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Text("Palette")
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Menu {
+                    paletteMenuContent()
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .menuStyle(.borderlessButton)
+            }
 
             VStack(spacing: 4) {
                 ForEach(1...8, id: \.self) { slot in
@@ -44,6 +58,69 @@ struct ColorPaletteView: View {
             )
             .environment(viewModel)
         }
+        .sheet(isPresented: $showingLoadSheet) {
+            PaletteLoadSheet(onApply: applyPalette)
+                .environment(viewModel)
+        }
+        .sheet(isPresented: $showingImportSheet) {
+            PaletteImportSheet(onImport: applyPalette)
+        }
+        .sheet(isPresented: $showingSaveAsSheet) {
+            PaletteSaveAsSheet { name in
+                _ = viewModel.document.savePaletteString(
+                    currentPaletteString(), asName: name)
+            }
+        }
+    }
+
+    // MARK: - Palette menu (save / load / import / export)
+
+    @ViewBuilder
+    private func paletteMenuContent() -> some View {
+        Button {
+            _ = viewModel.document.savePaletteString(
+                currentPaletteString(), asName: nil)
+        } label: {
+            Label("Save Palette", systemImage: "square.and.arrow.down")
+        }
+        Button {
+            showingSaveAsSheet = true
+        } label: {
+            Label("Save Palette As…", systemImage: "square.and.arrow.down.on.square")
+        }
+        Button {
+            showingLoadSheet = true
+        } label: {
+            Label("Load Saved Palette…", systemImage: "folder")
+        }
+        Divider()
+        Button {
+            showingImportSheet = true
+        } label: {
+            Label("Import from Text…", systemImage: "text.badge.plus")
+        }
+        Button {
+            UIPasteboard.general.string = currentPaletteString()
+        } label: {
+            Label("Copy Palette String", systemImage: "doc.on.doc")
+        }
+    }
+
+    private func currentPaletteString() -> String {
+        guard let sel = viewModel.selectedEffect else { return "" }
+        return viewModel.document.currentPaletteString(
+            forRow: Int32(sel.rowIndex),
+            at: Int32(sel.effectIndex)) ?? ""
+    }
+
+    private func applyPalette(_ paletteString: String) {
+        guard let sel = viewModel.selectedEffect else { return }
+        _ = viewModel.document.applyPaletteString(
+            paletteString,
+            toRow: Int32(sel.rowIndex),
+            at: Int32(sel.effectIndex))
+        // Kick the view-model's settings cache so SwiftUI redraws.
+        viewModel.refreshSelectedEffectSettings()
     }
 
     private struct SlotRef: Identifiable { let id: Int }

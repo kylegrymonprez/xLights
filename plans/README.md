@@ -15,6 +15,10 @@ questions) and links here for the details.
 | [phase-g-document.md](phase-g-document.md) | G — Document / iCloud polish | Not started |
 | [phase-h-app-store.md](phase-h-app-store.md) | H — App Store readiness | Not started |
 | [followups.md](followups.md) | Cross-phase small items | In progress |
+| [future-effect-presets.md](future-effect-presets.md) | Deferred — G12 effect presets | Not first-pass |
+| [future-pictures-frame-editor.md](future-pictures-frame-editor.md) | Deferred — G6 Pictures / GIF frame-timing editor | Desktop needs redesign too |
+| [future-ai-palette-generate.md](future-ai-palette-generate.md) | Deferred — AI palette generation | Needs iOS AI bridge first |
+| [future-palette-drag.md](future-palette-drag.md) | Deferred — G18 drag colours between palette slots | Low impact |
 
 Phase A (core-path hardening) and B-Metal (grid render pipeline
 migration) are complete and intentionally have no sub-plan. Phase B

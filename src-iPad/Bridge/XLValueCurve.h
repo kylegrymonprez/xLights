@@ -80,4 +80,18 @@
 // Convenience: does this type write `Values=` (Custom / Random)?
 + (BOOL)typeHasCustomPoints:(nonnull NSString*)type;
 
+// Transforms (G38). `reverse` mirrors across the time (X) axis;
+// `flip` mirrors across the value (Y) axis. Each touches just the
+// underlying type's parameters / points.
+- (void)reverse;
+- (void)flip;
+
+// Replace this curve's entire state from a serialised string
+// (G36 preset load). Useful for loading a `.xvc` preset over the
+// current editing session without tearing down the observable
+// wrapper. The caller's min/max/divisor scaling is preserved via
+// the core's `Deserialise(..., holdminmax=false)` path — same as
+// a fresh `initWithSerialised:…` would do.
+- (void)reloadFromSerialised:(nonnull NSString*)serialised;
+
 @end

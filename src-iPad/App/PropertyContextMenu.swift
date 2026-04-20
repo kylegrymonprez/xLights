@@ -99,6 +99,38 @@ struct PropertyContextMenu: ViewModifier {
             } label: {
                 Label("Edit Value Curve…", systemImage: "chart.xyaxis.line")
             }
+
+            // G37 — serialised VC round-trip via pasteboard. Copy
+            // is enabled only when this property actually has a
+            // stored curve (active); Paste is enabled when the
+            // clipboard carries our `xlvc:v1:` prefix.
+            let vcKey = property.valueCurveKey(prefix: metadataPrefix)
+            let stored = viewModel.settingValue(forKey: vcKey,
+                                                defaultValue: "")
+            let hasActiveVC = stored.hasPrefix("Active=TRUE")
+            if hasActiveVC {
+                Button {
+                    UIPasteboard.general.string =
+                        ValueCurveClipboard.wrap(stored)
+                } label: {
+                    Label("Copy Value Curve",
+                          systemImage: "doc.on.doc")
+                }
+            }
+            Button {
+                // Read at tap time only (see Copy / Paste / Reset
+                // above — building the menu eagerly would fire the
+                // iOS pasteboard banner on every inspector load).
+                guard let payload = ValueCurveClipboard.unwrap(
+                    UIPasteboard.general.string) else { return }
+                viewModel.setSettingValue(
+                    payload,
+                    forKey: vcKey,
+                    suppressIfDefault: "Active=FALSE|")
+            } label: {
+                Label("Paste Value Curve",
+                      systemImage: "doc.on.clipboard")
+            }
         }
     }
 }
