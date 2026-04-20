@@ -70,7 +70,7 @@ Adding `-configuration Debug` builds only for the native architecture in Debug m
 
 ### Core Application (`src-core/`) and UI (`src-ui-wx/`)
 - **Entry point**: `src-ui-wx/xLightsApp.cpp` (wxApp subclass) → `src-ui-wx/xLightsMain.cpp` (`xLightsFrame`, the main window)
-- **Sequencer**: `src-ui-wx/ui/sequencer/` — timeline UI, effect grid, effect layers, undo manager. `MainSequencer` is the primary sequencer widget; `tabSequencer.cpp` handles sequencer-related event handlers on xLightsFrame.
+- **Sequencer**: `src-ui-wx/sequencer/` — timeline UI, effect grid, effect layers, undo manager. `MainSequencer` is the primary sequencer widget; `tabSequencer.cpp` handles sequencer-related event handlers on xLightsFrame.
 - **Effects**: `src-core/effects/` — 55 effects, each as a pair: `FooEffect.cpp` (rendering logic, `adjustSettings` for migration) + `FooPanel.cpp` (UI controls). All inherit from `RenderableEffect`. See [Effects Reference](#effects-reference) below.
 - **Models**: `src-core/models/` — 20+ model types plus 9 DMX models. All inherit from `Model`. See [Models Reference](#models-reference) below.
 - **Outputs**: `src-core/outputs/` — protocol handlers and controller connection config. See [Outputs & Controllers Reference](#outputs--controllers-reference) below.
@@ -94,7 +94,7 @@ The codebase physically separates wx-free core logic from wxWidgets UI code. Cor
 - `xlImage.h` — wx-free RGBA pixel class (see also `utils/xlImage.h`)
 - `xlMesh.h/.cpp` — 3D mesh loading (std::filesystem, no wx)
 
-**`src-ui-wx/ui/graphics/`** — wx-dependent canvas implementations (NOT core):
+**`src-ui-wx/graphics/`** — wx-dependent canvas implementations (NOT core):
 - `xlGraphicsBase.h` — selects Metal vs OpenGL canvas at compile time; defines `GRAPHICS_BASE_CLASS`
 - `opengl/xlGLCanvas.h/.cpp` — OpenGL canvas (wxGLCanvas subclass)
 - `opengl/xlOGL3GraphicsContext.h/.cpp` — OpenGL graphics context implementation
@@ -102,9 +102,9 @@ The codebase physically separates wx-free core logic from wxWidgets UI code. Cor
 - `metal/xlMetalGraphicsContext.h/.mm` — Metal graphics context implementation
 
 **Include conventions:**
-- Core files (`graphics/`, `models/`, etc.) include `graphics/IModelPreview.h` — never `ui/layout/ModelPreview.h`
-- Canvas/UI files include `ui/graphics/xlGraphicsBase.h` — never `graphics/xlGraphicsBase.h` (that forwarder was removed)
-- wx↔core conversion helpers (e.g., `wxImageToXlImage()`, `wxImagesToXlImages()`) live in `ui/wxUtilities.h`
+- Core files (`graphics/`, `models/`, etc.) include `graphics/IModelPreview.h` — never `layout/ModelPreview.h` (which is the wx-dependent subclass)
+- Canvas/UI files include `graphics/xlGraphicsBase.h` — this resolves to `src-ui-wx/graphics/xlGraphicsBase.h` because `src-core/graphics/` has no file by that name
+- wx↔core conversion helpers (e.g., `wxImageToXlImage()`, `wxImagesToXlImages()`) live in `shared/utils/wxUtilities.h`
 
 ### Key Patterns
 - **Settings/SettingsMap**: Effects store settings as string key-value pairs (e.g., `E_TEXTCTRL_Pictures_Filename`). Prefix conventions: `E_` for effect settings, `T_` for transitions, `B_` for buffer settings, `C_` for color.
@@ -138,7 +138,7 @@ Core data types and algorithms should use standard C++ equivalents rather than w
 - **Strings**: Use `std::string` instead of `wxString`. Convert at wx API boundaries with `.ToStdString()` / `wxString(str)`.
 - **Collections**: Use `std::vector`, `std::map`, `std::unordered_map`, etc. instead of `wxArrayString`, `wxList`, etc.
 - **Colors**: Use `xlColor` (defined in `src-core/utils/Color.h`) instead of `wxColour`. `xlColor` is now wx-free.
-- **wx↔std conversions**: Place any `wxColour`/`wxString`/wx-collection ↔ std conversion helpers in `src-ui-wx/ui/wxUtilities.h` (and `.cpp` for non-inline implementations). Currently provides:
+- **wx↔std conversions**: Place any `wxColour`/`wxString`/wx-collection ↔ std conversion helpers in `src-ui-wx/shared/utils/wxUtilities.h` (and `.cpp` for non-inline implementations). Currently provides:
   - `xlColorToWxColour(const xlColor&) → wxColour`
   - `wxColourToXlColor(const wxColour&) → xlColor`
 - **When wx constants suffice**: If a wx API accepts a wx constant directly (e.g. `*wxBLACK`, `*wxWHITE` for `SetTextForeground`), use the wx constant rather than converting an `xl*` constant through `xlColorToWxColour`.

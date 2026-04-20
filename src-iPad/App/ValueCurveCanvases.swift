@@ -8,7 +8,7 @@ import SwiftUI
 
 /// Strokes the curve 0..1 → 0..1 using the same evaluator the renderer
 /// uses. Replicates the algorithm of
-/// `src-ui-wx/ui/shared/utils/ValueCurveRendering.cpp:27-70` but with
+/// `src-ui-wx/shared/utils/ValueCurveRendering.cpp:27-70` but with
 /// SwiftUI Canvas instead of wxMemoryDC.
 struct ValueCurvePreviewStrip: View {
     let vc: EditableValueCurve

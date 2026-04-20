@@ -72,7 +72,7 @@ bool iPadModelPreview::StartDrawing(double pointSize, bool fromPaint) {
     _ctx->SetViewport(0, h, w, 0, _is3d);
 
     // Mirror desktop ModelPreview::StartDrawing matrix construction
-    // (src-ui-wx/ui/layout/ModelPreview.cpp). 2D uses an orthographic
+    // (src-ui-wx/layout/ModelPreview.cpp). 2D uses an orthographic
     // projection driven by zoom + panx/pany/zoom_corr; 3D uses perspective
     // with the camera's view matrix from PreviewCamera::GetViewMatrix().
     PreviewCamera& cam = ActiveCamera();
@@ -124,7 +124,7 @@ bool iPadModelPreview::StartDrawing(double pointSize, bool fromPaint) {
     // Mirrors desktop ModelPreview which keeps separate solid/transparent
     // programs for models and view objects so draws can be ordered
     // solid-VO → solid-models → transparent-VO → transparent-models
-    // (see ModelPreview::EndDrawing in src-ui-wx/ui/layout/ModelPreview.cpp).
+    // (see ModelPreview::EndDrawing in src-ui-wx/layout/ModelPreview.cpp).
     _solidProgram = _ctx->createGraphicsProgram();
     _transparentProgram = _ctx->createGraphicsProgram();
     _solidViewObjectProgram = _ctx->createGraphicsProgram();

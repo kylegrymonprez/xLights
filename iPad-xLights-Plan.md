@@ -141,7 +141,7 @@ verified" guarantee hold up under load.
 2. **Text effect** -- **done.** Abstraction is shared:
    `src-core/render/TextDrawingContext.{h,cpp}` (platform-neutral
    interface + factory), desktop uses
-   `src-ui-wx/ui/graphics/wxTextDrawingContext`, iPad uses
+   `src-ui-wx/graphics/wxTextDrawingContext`, iPad uses
    `src-iPad/Bridge/CoreGraphicsTextDrawingContext.mm` (CoreText +
    CGBitmapContext), and `XLiPadInit::initialize` registers the CG
    factory at startup. `TextEffect.cpp` has no wx includes. Font /
@@ -277,7 +277,7 @@ is the replacement target, not the starting point.
    - SwiftUI view-graph buckles past ~100 effects; real sequences
      carry thousands.
    - Core Graphics gives pixel-accurate parity with desktop's
-     `DrawEffects` (`src-ui-wx/ui/sequencer/EffectsGrid.cpp:6619`).
+     `DrawEffects` (`src-ui-wx/sequencer/EffectsGrid.cpp:6619`).
    - `UIScrollView` provides real pinch-zoom via `setZoomScale` +
      `viewForZooming`, and handles momentum / rubber-banding the way
      users expect.

@@ -47,7 +47,7 @@ struct BrightnessLevelRowView: View {
 /// curves) into the other Roto-Zoom sliders on the Buffer panel. Not
 /// serialised itself; the menu itself resets to idle after applying.
 /// Matches `BufferPanel::OnPresetSelect` in
-/// `src-ui-wx/ui/sequencer/BufferPanel.cpp:313-416` — same reset
+/// `src-ui-wx/sequencer/BufferPanel.cpp:313-416` — same reset
 /// values, same VC shapes, same presets.
 struct RotoZoomPresetRowView: View {
     @Environment(SequencerViewModel.self) var viewModel

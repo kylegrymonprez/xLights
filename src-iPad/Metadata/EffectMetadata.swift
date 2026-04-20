@@ -10,7 +10,7 @@ import Foundation
 //                                                   (T_ prefix; file was
 //                                                   previously Timing.json)
 //
-// The desktop wx UI consumes these via src-ui-wx/ui/effectpanels/JsonEffectPanel.cpp;
+// The desktop wx UI consumes these via src-ui-wx/effectpanels/JsonEffectPanel.cpp;
 // this Swift layer re-implements the same controls for the iPad.
 
 struct EffectMetadata: Codable {
