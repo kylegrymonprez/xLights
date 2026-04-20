@@ -30,6 +30,56 @@ struct EffectPropertyView: View {
                                    suppressIfDefault: suppressDefault)
     }
 
+    /// Runtime disable state for a property driven by OTHER properties'
+    /// current values. Mirrors desktop's `BlendingPanel::ValidateWindow`
+    /// (can't be expressed via the JSON visibility engine — needs a
+    /// compound `fade==0 OR type ∈ set` check).
+    ///
+    /// Today only the transition Adjust / Reverse rows on the Blending
+    /// tab consult this; any future runtime-disable rule hangs off the
+    /// same switch.
+    private var runtimeDisabled: Bool {
+        switch property.id {
+        case "In_Transition_Adjust":
+            return transitionAdjustDisabled(isIn: true)
+        case "Out_Transition_Adjust":
+            return transitionAdjustDisabled(isIn: false)
+        case "In_Transition_Reverse":
+            return transitionReverseDisabled(isIn: true)
+        case "Out_Transition_Reverse":
+            return transitionReverseDisabled(isIn: false)
+        default:
+            return false
+        }
+    }
+
+    private func transitionAdjustDisabled(isIn: Bool) -> Bool {
+        if fadeIsZero(isIn: isIn) { return true }
+        let type = currentTransitionType(isIn: isIn)
+        return kTransitionsNoAdjust.contains(type)
+    }
+
+    private func transitionReverseDisabled(isIn: Bool) -> Bool {
+        if fadeIsZero(isIn: isIn) { return true }
+        let type = currentTransitionType(isIn: isIn)
+        return kTransitionsNoReverse.contains(type)
+    }
+
+    private func fadeIsZero(isIn: Bool) -> Bool {
+        let key = isIn ? "T_TEXTCTRL_Fadein" : "T_TEXTCTRL_Fadeout"
+        let v = viewModel.settingValue(forKey: key, defaultValue: "0.00")
+            .trimmingCharacters(in: .whitespaces)
+        return v.isEmpty || v == "0" || v == "0.0" || v == "0.00"
+            || (Double(v) ?? 0) == 0
+    }
+
+    private func currentTransitionType(isIn: Bool) -> String {
+        let key = isIn ? "T_CHOICE_In_Transition_Type"
+                        : "T_CHOICE_Out_Transition_Type"
+        let v = viewModel.settingValue(forKey: key, defaultValue: "Fade")
+        return v.isEmpty ? "Fade" : v
+    }
+
     var body: some View {
         switch property.controlType {
         case "slider":
@@ -198,6 +248,14 @@ struct EffectPropertyView: View {
             && viewModel.settingValue(forKey: vcKey, defaultValue: "")
                 .hasPrefix("Active=TRUE")
 
+        // `runtimeDisabled` flips on when a sibling property's value
+        // makes this one meaningless (e.g. fade==0 disables Adjust /
+        // Reverse on a Blending transition). The slider still renders
+        // so the user sees the setting exists + its current value —
+        // just dimmed + non-editable. Separate from vcActive because
+        // they have different triggers + different meanings.
+        let disabled = vcActive || runtimeDisabled
+
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Text(property.label)
@@ -214,14 +272,15 @@ struct EffectPropertyView: View {
                     divisor: divisor,
                     commit: { newInt in writeValue(String(newInt)) }
                 )
-                .disabled(vcActive)
+                .disabled(disabled)
                 if property.valueCurve == true {
                     ValueCurveButton(property: property, prefix: metadataPrefix)
+                        .disabled(runtimeDisabled)
                 }
             }
             Slider(value: sliderBinding, in: minVal...maxVal, step: 1)
-                .opacity(vcActive ? 0.4 : 1.0)
-                .disabled(vcActive)
+                .opacity(disabled ? 0.4 : 1.0)
+                .disabled(disabled)
         }
         .padding(.vertical, 2)
     }
@@ -239,8 +298,11 @@ struct EffectPropertyView: View {
         return Toggle(isOn: binding) {
             Text(label.isEmpty ? property.label : label)
                 .font(.caption)
+                .foregroundStyle(runtimeDisabled ? .tertiary : .primary)
         }
         .toggleStyle(.switch)
+        .disabled(runtimeDisabled)
+        .opacity(runtimeDisabled ? 0.5 : 1.0)
         .padding(.vertical, 2)
     }
 

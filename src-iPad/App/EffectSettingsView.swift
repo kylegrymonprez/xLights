@@ -103,20 +103,51 @@ struct EffectSettingsView: View {
         .padding(.bottom, 4)
     }
 
+    /// Live start / end + play-position readout. Reads the effect's
+    /// current times from `rows[…].effects[…]` so a user dragging to
+    /// move or resize the selected effect sees the header update in
+    /// real time instead of staying at the values captured when the
+    /// effect was first selected. During the selection-scoped preview
+    /// scrub loop, a third column tracks `playPositionMS` inside the
+    /// `[start, end]` range so the user can see where the preview head
+    /// is without having to look at the timeline.
     private var timingRow: some View {
-        HStack {
+        let (start, end) = currentTimes()
+        return HStack(spacing: 10) {
             Text("Start:")
-            Text(formatMS(viewModel.selectedEffect?.startTimeMS ?? 0))
+            Text(formatMS(start))
                 .monospacedDigit()
-            Spacer()
+            Spacer(minLength: 4)
+            if viewModel.isScrubbing {
+                Text("▶")
+                    .foregroundStyle(Color.accentColor)
+                Text(formatMS(viewModel.playPositionMS))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.accentColor)
+                Spacer(minLength: 4)
+            }
             Text("End:")
-            Text(formatMS(viewModel.selectedEffect?.endTimeMS ?? 0))
+            Text(formatMS(end))
                 .monospacedDigit()
         }
         .font(.caption)
         .foregroundStyle(.secondary)
         .padding(.horizontal)
         .padding(.bottom, 6)
+    }
+
+    /// Resolve the selected effect's current times from the live rows
+    /// instead of trusting the captured `selectedEffect` snapshot —
+    /// the snapshot doesn't update during drag / resize / undo.
+    private func currentTimes() -> (Int, Int) {
+        guard let sel = viewModel.selectedEffect else { return (0, 0) }
+        if let row = viewModel.rows.first(where: { $0.id == sel.rowIndex }),
+           sel.effectIndex >= 0,
+           sel.effectIndex < row.effects.count {
+            let e = row.effects[sel.effectIndex]
+            return (e.startTimeMS, e.endTimeMS)
+        }
+        return (sel.startTimeMS, sel.endTimeMS)
     }
 
     // MARK: - Tab bar

@@ -33,6 +33,12 @@ final class EditableValueCurve {
     @ObservationIgnored let core: XLValueCurve
     @ObservationIgnored let storageKey: String
     @ObservationIgnored weak var viewModel: SequencerViewModel?
+    /// Called with the current serialised VC string after every
+    /// mutation. Non-nil when the curve lives inside a larger
+    /// composite (e.g. SubBuffer's `B_CUSTOM_SubBuffer` slot) where
+    /// the standard settings-map write isn't the right persist path.
+    /// Nil → fall back to `viewModel.setSettingValue`.
+    @ObservationIgnored let customPersist: ((String) -> Void)?
 
     /// Canonical "nothing persisted" value. When a curve drops back to
     /// inactive we pass this as `suppressIfDefault` so the settings map
@@ -45,7 +51,8 @@ final class EditableValueCurve {
          max: Double,
          divisor: Double,
          storageKey: String,
-         viewModel: SequencerViewModel) {
+         viewModel: SequencerViewModel,
+         customPersist: ((String) -> Void)? = nil) {
         self.core = XLValueCurve(serialised: serialised,
                                   forId: id,
                                   min: min,
@@ -53,6 +60,7 @@ final class EditableValueCurve {
                                   divisor: divisor)
         self.storageKey = storageKey
         self.viewModel = viewModel
+        self.customPersist = customPersist
     }
 
     // Bump to force SwiftUI re-evaluation after mutations that don't
@@ -173,9 +181,13 @@ final class EditableValueCurve {
 
     private func persist() {
         let s = core.serialise()
-        viewModel?.setSettingValue(s,
-                                    forKey: storageKey,
-                                    suppressIfDefault: Self.inactiveSerialised)
+        if let persist = customPersist {
+            persist(s)
+        } else {
+            viewModel?.setSettingValue(s,
+                                        forKey: storageKey,
+                                        suppressIfDefault: Self.inactiveSerialised)
+        }
     }
 }
 
@@ -239,6 +251,12 @@ struct ValueCurveEditorSheet: View {
     let property: PropertyMetadata
     let prefix: String
     let storedString: String
+    /// Non-nil for composite-setting hosts (SubBuffer slots, etc.)
+    /// where the VC doesn't live at its own `<prefix>VALUECURVE_<id>`
+    /// key and the parent has to re-serialise its wrapper whenever
+    /// the curve changes. Nil → `EditableValueCurve` writes to the
+    /// normal settings-map key.
+    var customPersist: ((String) -> Void)? = nil
 
     @State private var vc: EditableValueCurve?
 
@@ -271,7 +289,8 @@ struct ValueCurveEditorSheet: View {
                                          max: maxV,
                                          divisor: divisor,
                                          storageKey: storageKey,
-                                         viewModel: viewModel)
+                                         viewModel: viewModel,
+                                         customPersist: customPersist)
             }
         }
     }

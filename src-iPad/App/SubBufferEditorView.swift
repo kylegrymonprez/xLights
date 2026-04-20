@@ -250,6 +250,14 @@ struct SubBufferEditorView: View {
             axisField("Bottom", slot: .y1)
             axisField("Top",    slot: .y2)
         }
+        // Desktop hides center offsets behind a right-click-menu
+        // "advanced" branch. iPad shows them inline since the sidebar
+        // has the vertical room — the fields are readily ignorable at
+        // their zero default.
+        HStack(spacing: 6) {
+            axisField("X Centre", slot: .xc)
+            axisField("Y Centre", slot: .yc)
+        }
     }
 
     @ViewBuilder
@@ -258,24 +266,38 @@ struct SubBufferEditorView: View {
             Text(title)
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-                .frame(width: 44, alignment: .leading)
-            switch value(for: slot) {
-            case .value(let v):
-                // Scaled x100 to reuse EditableNumberField's integer
-                // storage model (divisor 100 displays as 0.00..100.00).
-                EditableNumberField(
-                    storedInt: Int((v * 100).rounded()),
-                    min: 0, max: 10000, divisor: 100,
-                    commit: { scaled in
-                        set(slot: slot, to: Double(scaled) / 100.0)
-                        commit()
-                    })
-            case .curve:
-                Text("(curve)")
-                    .font(.caption2)
-                    .foregroundStyle(.tertiary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-            }
+                .frame(width: 52, alignment: .leading)
+            axisValue(slot: slot)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            subBufferSlotVCButton(for: slot)
+        }
+    }
+
+    @ViewBuilder
+    private func axisValue(slot: Slot) -> some View {
+        let range = vcRange(for: slot)
+        // Scaled x100 to reuse EditableNumberField's integer storage
+        // model (divisor 100 displays 0.00..100.00 / -100.00..100.00).
+        let minScaled = Int((range.min * 100).rounded())
+        let maxScaled = Int((range.max * 100).rounded())
+        switch value(for: slot) {
+        case .value(let v):
+            EditableNumberField(
+                storedInt: Int((v * 100).rounded()),
+                min: minScaled, max: maxScaled, divisor: 100,
+                commit: { scaled in
+                    set(slot: slot, to: Double(scaled) / 100.0)
+                    commit()
+                })
+        case .curve:
+            // Active curve — the renderer samples it over time, so
+            // there's no single "value" to edit numerically. Tap the
+            // VC button to the right to edit the curve; dimming the
+            // label matches how other VC-active rows render.
+            Text("(curve)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 
@@ -346,7 +368,13 @@ struct SubBufferEditorView: View {
 
     // MARK: - Slot helpers
 
-    private enum Slot { case x1, y1, x2, y2 }
+    /// Every editable sub-buffer slot. `xc` / `yc` are the center
+    /// offsets desktop exposes in the advanced context menu; iPad
+    /// surfaces them inline. Adding them to the enum keeps the
+    /// axisField helper generic.
+    enum Slot: CaseIterable {
+        case x1, y1, x2, y2, xc, yc
+    }
 
     private func value(for slot: Slot) -> SubBufferState.SlotValue {
         switch slot {
@@ -354,24 +382,194 @@ struct SubBufferEditorView: View {
         case .y1: return state.y1
         case .x2: return state.x2
         case .y2: return state.y2
+        case .xc: return state.xc
+        case .yc: return state.yc
         }
     }
 
     /// Write to `state` (which is `@State`, so assignments are allowed
-    /// even from a non-mutating method). Clamps to the sibling slot so
-    /// `x1 <= x2` / `y1 <= y2` always holds.
+    /// even from a non-mutating method). Corner slots clamp to the
+    /// sibling so `x1 <= x2` / `y1 <= y2` always holds. Center
+    /// offsets aren't range-constrained on desktop either — they
+    /// shift the rect as a whole at render time via
+    /// `PixelBuffer.cpp:1964-1981`.
     private func set(slot: Slot, to v: Double) {
         switch slot {
         case .x1: state.x1 = .value(min(v, state.x2.asValue(fallback: 100)))
         case .y1: state.y1 = .value(min(v, state.y2.asValue(fallback: 100)))
         case .x2: state.x2 = .value(max(v, state.x1.asValue(fallback: 0)))
         case .y2: state.y2 = .value(max(v, state.y1.asValue(fallback: 0)))
+        case .xc: state.xc = .value(v)
+        case .yc: state.yc = .value(v)
+        }
+    }
+
+    /// Per-slot natural range / id — drives the VC editor's min/max
+    /// and the stable VC `Id=` string desktop expects (so round-trips
+    /// preserve the authoring application's canonical id).
+    func vcRange(for slot: Slot) -> (id: String, min: Double, max: Double) {
+        switch slot {
+        case .x1: return ("SB_Left",   0,   100)
+        case .x2: return ("SB_Right",  0,   100)
+        case .y1: return ("SB_Bottom", 0,   100)
+        case .y2: return ("SB_Top",    0,   100)
+        case .xc: return ("SB_XC",  -100,  100)
+        case .yc: return ("SB_YC",  -100,  100)
+        }
+    }
+
+    /// Replace the slot's underlying SlotValue — used by the per-slot
+    /// VC editor when the user flips active on/off or edits the curve.
+    private func setSlot(_ slot: Slot, to new: SubBufferState.SlotValue) {
+        switch slot {
+        case .x1: state.x1 = new
+        case .y1: state.y1 = new
+        case .x2: state.x2 = new
+        case .y2: state.y2 = new
+        case .xc: state.xc = new
+        case .yc: state.yc = new
         }
     }
 
     private enum Handle: Hashable {
         case bottomLeft, bottomRight, topLeft, topRight, whole
         static let corners: [Handle] = [.bottomLeft, .bottomRight, .topLeft, .topRight]
+    }
+
+    // MARK: - Per-slot VC button
+
+    /// Small inline button next to each slot's value field. Shows
+    /// active state (`chart.xyaxis.line` in accent colour) when the
+    /// slot is a VC, muted otherwise. Opens the full VC editor sheet
+    /// pre-loaded with the slot's current curve (or a freshly-
+    /// defaulted curve if the slot currently holds a plain value).
+    ///
+    /// Writes route through `customPersist` on `EditableValueCurve`
+    /// so the curve's serialised string replaces the slot inside
+    /// the composite `B_CUSTOM_SubBuffer` string — instead of
+    /// trying to write to a dedicated `<prefix>VALUECURVE_<id>` key
+    /// that doesn't exist for sub-buffer slots.
+    @ViewBuilder
+    private func subBufferSlotVCButton(for slot: Slot) -> some View {
+        SubBufferSlotVCButton(
+            slot: slot,
+            slotValue: value(for: slot),
+            range: vcRange(for: slot),
+            onCommit: { newValue in
+                setSlot(slot, to: newValue)
+                commit()
+            }
+        )
+    }
+}
+
+/// Extracted so each slot has its own `@State` for the sheet presenter
+/// and VC state. Reusing a single sheet flag across all six buttons
+/// would make only one slot editable at a time.
+private struct SubBufferSlotVCButton: View {
+    let slot: SubBufferEditorView.Slot
+    let slotValue: SubBufferState.SlotValue
+    let range: (id: String, min: Double, max: Double)
+    let onCommit: (SubBufferState.SlotValue) -> Void
+
+    @State private var showEditor = false
+
+    private var isActive: Bool {
+        if case .curve(let s) = slotValue, s.hasPrefix("Active=TRUE") {
+            return true
+        }
+        return false
+    }
+
+    /// Current serialised string to seed the editor with. When the
+    /// slot holds a plain value, start with an inactive curve so the
+    /// user has a clean canvas (the plain value remains the fallback
+    /// when the curve's active toggle is off).
+    private var seededString: String {
+        if case .curve(let s) = slotValue { return s }
+        return ""   // empty → XLValueCurve init defaults to inactive
+    }
+
+    /// Synthesised PropertyMetadata for the editor sheet. `valueCurve:
+    /// true` so the sheet shows the active toggle and curve-type picker.
+    /// Per-axis range matches `PixelBuffer.cpp:1987/2009` limits.
+    private var property: PropertyMetadata? {
+        PropertyMetadata.makeSynthetic(
+            id: range.id,
+            label: "Sub-Buffer \(slot.labelSuffix)",
+            type: "float",
+            controlType: "slider",
+            defaultValue: 0,
+            min: range.min,
+            max: range.max,
+            divisor: 1,
+            valueCurve: true)
+    }
+
+    var body: some View {
+        Button(action: { showEditor = true }) {
+            Image(systemName: "chart.xyaxis.line")
+                .font(.caption)
+                .frame(width: 22, height: 18)
+                .foregroundStyle(isActive ? .white : .secondary)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(isActive ? Color.accentColor
+                                       : Color.secondary.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.secondary.opacity(0.35), lineWidth: 0.5)
+                )
+        }
+        .buttonStyle(.plain)
+        .sheet(isPresented: $showEditor) {
+            if let prop = property {
+                ValueCurveEditorSheet(
+                    property: prop,
+                    prefix: "B_",
+                    storedString: seededString,
+                    customPersist: { serialised in
+                        // Serialised comes from the editor on every
+                        // mutation. `Active=FALSE|` means the user
+                        // toggled the curve off — collapse back to a
+                        // plain value so the slot round-trips as a
+                        // number, not a dead-curve string.
+                        if serialised.hasPrefix("Active=FALSE")
+                            || serialised.isEmpty {
+                            // Revert to whatever plain value was last
+                            // visible, or the slot's natural default
+                            // if there was no prior value.
+                            let fallback = slotValue.asValue(
+                                fallback: slot.defaultValue)
+                            onCommit(.value(fallback))
+                        } else {
+                            onCommit(.curve(serialised))
+                        }
+                    })
+            }
+        }
+    }
+}
+
+// Pretty labels + per-slot defaults used by the VC button sheet.
+extension SubBufferEditorView.Slot {
+    var labelSuffix: String {
+        switch self {
+        case .x1: return "Left"
+        case .y1: return "Bottom"
+        case .x2: return "Right"
+        case .y2: return "Top"
+        case .xc: return "X Centre"
+        case .yc: return "Y Centre"
+        }
+    }
+
+    var defaultValue: Double {
+        switch self {
+        case .x1, .y1, .xc, .yc: return 0
+        case .x2, .y2:           return 100
+        }
     }
 }
 

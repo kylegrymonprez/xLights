@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 
 // Final batch of `controlType: "custom"` handlers (C-6 tail). Every row
 // in here preserves whatever the user's desktop-authored sequence had
@@ -375,40 +376,128 @@ struct SketchBackgroundRowView: View {
 
 // MARK: - Video_DurationRow
 
-/// `Video_DurationRow` — desktop shows the picked video's duration
-/// plus a "Match effect length" button. iPad doesn't yet probe the
-/// file via AVAsset; display the filename so the user knows which
-/// video is linked, and a disabled button placeholder so the settings
-/// map (which doesn't actually have a dedicated key for the row) is
-/// neither altered nor lost.
+/// `Video_DurationRow` — shows the picked video's duration (probed
+/// via `AVAsset`) and a "Match effect length" button that resizes
+/// the effect's end time so `end - start == video.duration`. Matches
+/// desktop's `VideoPanel::OnMatchToVideoDuration` behaviour.
+///
+/// The AVAsset probe is async + off the main thread; re-runs whenever
+/// the `E_FILEPICKERCTRL_Video_Filename` setting changes. "Duration
+/// unknown" stays visible while the probe is in flight or if the
+/// file can't be resolved.
 struct VideoDurationRowView: View {
     @Environment(SequencerViewModel.self) var viewModel
 
+    private let videoKey = "E_FILEPICKERCTRL_Video_Filename"
+
+    @State private var durationMS: Int? = nil
+    @State private var probedPath: String = ""
+    @State private var probeError: String? = nil
+
+    private var storedPath: String {
+        viewModel.settingValue(forKey: videoKey, defaultValue: "")
+    }
+
+    /// Resolve a stored path to an absolute URL that AVAsset can load.
+    /// Paths relative to the show folder (`Videos/foo.mp4`) get
+    /// show-folder-prepended; absolute paths pass through unchanged.
+    private func absoluteURL(for path: String) -> URL? {
+        if path.isEmpty { return nil }
+        if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
+        guard let showDir = viewModel.document.showFolderPath(),
+              !showDir.isEmpty else { return nil }
+        return URL(fileURLWithPath: showDir).appendingPathComponent(path)
+    }
+
     private var filename: String {
-        let p = viewModel.settingValue(
-            forKey: "E_FILEPICKERCTRL_Video_Filename", defaultValue: "")
-        if p.isEmpty { return "(no video selected)" }
-        return (p as NSString).lastPathComponent
+        if storedPath.isEmpty { return "(no video selected)" }
+        return (storedPath as NSString).lastPathComponent
+    }
+
+    private var durationLabel: String {
+        guard let ms = durationMS else {
+            if storedPath.isEmpty { return "—" }
+            if probeError != nil   { return "Unknown" }
+            return "Probing…"
+        }
+        return formatMS(ms)
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text("Video Duration")
-                .font(.caption)
+            HStack {
+                Text("Video Duration").font(.caption)
+                Spacer()
+                Text(durationLabel)
+                    .monospacedDigit()
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             Text(filename)
                 .font(.caption2)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tertiary)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Button("Match effect to video duration") {}
+            Button("Match Effect to Video Duration",
+                    action: matchEffectToDuration)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .disabled(true)
-            Text("Duration probe + resize coming later.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .disabled(durationMS == nil)
+            if let err = probeError, !storedPath.isEmpty {
+                Text(err)
+                    .font(.caption2)
+                    .foregroundStyle(.orange)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+            }
         }
         .padding(.vertical, 2)
+        .task(id: storedPath) { await probeDuration() }
+    }
+
+    private func probeDuration() async {
+        let path = storedPath
+        guard path != probedPath || durationMS == nil else { return }
+        probedPath = path
+        durationMS = nil
+        probeError = nil
+        guard !path.isEmpty, let url = absoluteURL(for: path) else {
+            probeError = path.isEmpty ? nil : "Could not resolve path."
+            return
+        }
+        do {
+            let asset = AVURLAsset(url: url)
+            let d = try await asset.load(.duration)
+            let seconds = CMTimeGetSeconds(d)
+            if seconds.isFinite && seconds > 0 {
+                durationMS = Int((seconds * 1000).rounded())
+            } else {
+                probeError = "Video reported zero / infinite duration."
+            }
+        } catch {
+            probeError = "AVAsset couldn't open the file."
+        }
+    }
+
+    private func matchEffectToDuration() {
+        guard let ms = durationMS,
+              let sel = viewModel.selectedEffect else { return }
+        // Desktop sets end = start + duration (clamped to sequence
+        // length upstream). We let `resizeEffectEdge` apply any
+        // neighbour-overlap clamping.
+        let newEndMS = sel.startTimeMS + ms
+        viewModel.resizeEffectEdge(rowIndex: sel.rowIndex,
+                                    effectIndex: sel.effectIndex,
+                                    edge: 1,
+                                    newMS: newEndMS)
+    }
+
+    private func formatMS(_ ms: Int) -> String {
+        let totalSeconds = ms / 1000
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        let hundredths = (ms % 1000) / 10
+        return String(format: "%d:%02d.%02d", minutes, seconds, hundredths)
     }
 }
 
@@ -473,6 +562,7 @@ private struct DMXChannelRow: View {
 
     private var sliderKey: String { "E_SLIDER_DMX\(channel)" }
     private var invertKey: String { "E_CHECKBOX_INVDMX\(channel)" }
+    private var vcKey:     String { "E_VALUECURVE_DMX\(channel)" }
 
     private var value: Int {
         Int(viewModel.settingValue(forKey: sliderKey, defaultValue: "0")) ?? 0
@@ -480,6 +570,26 @@ private struct DMXChannelRow: View {
     private var inverted: Bool {
         let v = viewModel.settingValue(forKey: invertKey, defaultValue: "0")
         return v == "1" || v.lowercased() == "true"
+    }
+    private var vcActive: Bool {
+        viewModel.settingValue(forKey: vcKey, defaultValue: "")
+            .hasPrefix("Active=TRUE")
+    }
+
+    /// Synthesised PropertyMetadata driving the VC button. `id` is
+    /// `DMX<N>` so the editor stores under `E_VALUECURVE_DMX<N>`,
+    /// matching desktop's DMXEffect keys (`DMXEffect.cpp:45-76`).
+    private var vcProp: PropertyMetadata? {
+        PropertyMetadata.makeSynthetic(
+            id: "DMX\(channel)",
+            label: "Channel \(channel)",
+            type: "int",
+            controlType: "slider",
+            defaultValue: 0,
+            min: 0,
+            max: 255,
+            divisor: 1,
+            valueCurve: true)
     }
 
     var body: some View {
@@ -497,7 +607,7 @@ private struct DMXChannelRow: View {
         )
 
         VStack(alignment: .leading, spacing: 2) {
-            HStack {
+            HStack(spacing: 6) {
                 Text("Ch \(channel)")
                     .font(.caption2)
                     .frame(width: 44, alignment: .leading)
@@ -508,12 +618,18 @@ private struct DMXChannelRow: View {
                                                     forKey: sliderKey,
                                                     suppressIfDefault: "0")
                     })
+                .disabled(vcActive)
+                if let prop = vcProp {
+                    ValueCurveButton(property: prop, prefix: "E_")
+                }
                 Toggle(isOn: invertBinding) { Text("Inv").font(.caption2) }
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .labelsHidden()
             }
             Slider(value: sliderBinding, in: 0...255, step: 1)
+                .opacity(vcActive ? 0.4 : 1.0)
+                .disabled(vcActive)
         }
         .padding(.vertical, 2)
     }

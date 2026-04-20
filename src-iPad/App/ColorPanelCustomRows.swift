@@ -16,7 +16,10 @@ import SwiftUI
 /// desktop's enable-state behaviour. Backing keys (read by
 /// PixelBuffer::PrepareAllLayers at `PixelBuffer.cpp:2111-2115`):
 ///   `C_CHECKBOX_Chroma`
-///   `C_SLIDER_ChromaSensitivity`  (0..100)
+///   `C_SLIDER_ChromaSensitivity`  (1..255, default 1 — matches
+///     `ColorPanel.cpp:374` and the raw distance threshold the
+///     `PixelBuffer.cpp:1138` check compares against: larger values
+///     trigger on a wider neighbourhood around the chroma colour)
 ///   `C_COLOURPICKERCTRL_ChromaColour`  (#RRGGBB)
 struct ChromaKeyRowView: View {
     @Environment(SequencerViewModel.self) var viewModel
@@ -30,6 +33,8 @@ struct ChromaKeyRowView: View {
         return v == "1" || v.lowercased() == "true"
     }
 
+    /// 1..255. The raw slider units are the distance threshold fed
+    /// into `ColourDistance` at render time — no further scaling.
     private var sensitivity: Int {
         Int(viewModel.settingValue(forKey: sensKey, defaultValue: "1")) ?? 1
     }
@@ -85,7 +90,7 @@ struct ChromaKeyRowView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            Slider(value: sensBinding, in: 0...100, step: 1)
+            Slider(value: sensBinding, in: 1...255, step: 1)
                 .disabled(!enabled)
                 .opacity(enabled ? 1.0 : 0.4)
         }
@@ -103,16 +108,35 @@ struct ChromaKeyRowView: View {
 ///   `C_CHECKBOX_MusicSparkles`
 ///   `C_COLOURPICKERCTRL_SparklesColour`  (#RRGGBB, default #FFFFFF)
 ///
-/// Sparkles also supports a value curve (`C_VALUECURVE_SparkleFrequency`)
-/// that the desktop edits via the inline VC button. iPad defers the VC
-/// button here until a keyed VC editor exists — the stored VC string is
-/// preserved on round-trip regardless.
+/// Sparkles also supports a value curve (`C_VALUECURVE_SparkleFrequency`).
+/// The desktop puts the VC button inline next to the frequency slider;
+/// iPad matches that by synthesising a PropertyMetadata for the
+/// frequency slider and reusing the shared `ValueCurveButton`. When the
+/// curve is active the base slider dims + disables — same "curve takes
+/// over" behaviour every other VC-capable slider in the inspector uses.
 struct SparklesRowView: View {
     @Environment(SequencerViewModel.self) var viewModel
 
     private let freqKey = "C_SLIDER_SparkleFrequency"
     private let musicKey = "C_CHECKBOX_MusicSparkles"
     private let colorKey = "C_COLOURPICKERCTRL_SparklesColour"
+    private let vcKey = "C_VALUECURVE_SparkleFrequency"
+
+    /// Synthesised metadata driving the VC button's editor sheet.
+    /// `prefix: "C_"` + `id: "SparkleFrequency"` → storage key
+    /// `C_VALUECURVE_SparkleFrequency`, matching `PixelBuffer.cpp:1880`.
+    private var frequencyVCProp: PropertyMetadata? {
+        PropertyMetadata.makeSynthetic(
+            id: "SparkleFrequency",
+            label: "Sparkle Frequency",
+            type: "int",
+            controlType: "slider",
+            defaultValue: 0,
+            min: 0,
+            max: 200,
+            divisor: 1,
+            valueCurve: true)
+    }
 
     private var frequency: Int {
         Int(viewModel.settingValue(forKey: freqKey, defaultValue: "0")) ?? 0
@@ -123,6 +147,10 @@ struct SparklesRowView: View {
     }
     private var colorHex: String {
         viewModel.settingValue(forKey: colorKey, defaultValue: "#FFFFFF")
+    }
+    private var vcActive: Bool {
+        viewModel.settingValue(forKey: vcKey, defaultValue: "")
+            .hasPrefix("Active=TRUE")
     }
 
     var body: some View {
@@ -156,11 +184,16 @@ struct SparklesRowView: View {
                     .monospacedDigit()
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                if let vcProp = frequencyVCProp {
+                    ValueCurveButton(property: vcProp, prefix: "C_")
+                }
                 ColorPicker("", selection: colorBinding,
                              supportsOpacity: false)
                     .labelsHidden()
             }
             Slider(value: freqBinding, in: 0...200, step: 1)
+                .opacity(vcActive ? 0.4 : 1.0)
+                .disabled(vcActive)
             Toggle(isOn: musicBinding) {
                 Text("Reflect music").font(.caption2)
             }
