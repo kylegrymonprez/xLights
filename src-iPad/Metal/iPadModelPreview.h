@@ -87,6 +87,12 @@ public:
     // Set virtual canvas size (model coordinate space)
     void SetVirtualCanvasSize(int w, int h) { _virtualW = w; _virtualH = h; }
 
+    // Mirror desktop's `Display2DCenter0` flag: when true, world X=0 is
+    // placed at the horizontal centre of the preview in 2D mode. Shows
+    // laid out around a centred origin (e.g. models at X = -600..+600)
+    // need this to be on, or they render off-screen.
+    void SetCenter2D0(bool v) { _center2D0 = v; }
+
 private:
     std::string _name = "iPadPreview";
     xlStandaloneMetalCanvas* _canvas;
@@ -106,6 +112,7 @@ private:
     int _virtualH = 0;
     bool _isDrawing = false;
     bool _is3d = true;
+    bool _center2D0 = false;
     PreviewCamera _camera2d{false};
     PreviewCamera _camera3d{true};
     std::string _currentModel;  // empty = "render everything" (House Preview mode)

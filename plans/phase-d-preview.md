@@ -40,16 +40,23 @@ straightforward once the bridge exists.
 - Save path: `ViewpointMgr::Save` is already plumbed desktop-side; iPad
   needs to trigger a rewrite of `xlights_rgbeffects.xml` on changes.
 
-## D-4. 2D vs 3D toggle
+## D-4. 2D vs 3D toggle — ✓ done (2026-04-20)
 
-Per-preview toolbar / segmented control that switches the
-`PreviewCamera` between `is_3d = true/false`. Distinct from
-"current mode comes from the selected saved view" — the toggle is a
-preview-local override. Persist at the scene level during Phase F.
+Segmented 2D/3D control on House Preview only (desktop Model Preview
+is 2D-only). Toggles `settings.is3D`; `PreviewPaneView.updateUIView`
+syncs it to `XLMetalBridge.setIs3D:` and re-renders. Scene-level
+persistence still TODO (Phase F).
 
-Bridge methods (`setIs3D:` / `is3D`) are already in place; this is
-purely a SwiftUI control next to the existing overlay buttons in
-`HousePreviewView.swift`.
+House Preview 2D mode also required `iPadRenderContext` to read
+`<settings><previewWidth/Height>` and `<Display2DCenter0>` from
+`xlights_rgbeffects.xml` and hand them to `iPadModelPreview`
+(`SetVirtualCanvasSize` / `SetCenter2D0`) via
+`XLMetalBridge.drawModelsForDocument:`. Without the virtual canvas,
+the 2D ortho view matrix never scaled world coords onto pixel coords;
+without `_center2D0`, centre-origin shows (models laid out around
+X=0) rendered shifted left and most models off-screen. Model loading
+also now uses the saved preview size rather than a hardcoded
+1920×1080.
 
 ## D-5. Model placement on House Preview (2D/3D)
 
@@ -78,28 +85,28 @@ Per-pane controls overlay already exposes +, -, 1x, and Reset View
 Both map to existing `PreviewCamera` operations; this is a UI addition
 with no new math.
 
-## D-7. Background image + brightness / alpha
+## D-7. Background image — ✓ done (2026-04-20)
 
-Desktop `ModelPreview` draws an optional background image with
-brightness (0–100) and alpha (0–100) controls, plus a "scale to fit"
-toggle. Settings are stored per-`LayoutGroup` in
-`xlights_rgbeffects.xml` (`GetBackgroundImage`, `GetBackgroundBrightness`,
-`GetBackgroundAlpha`). The default House Preview reads
-`xLightsFrame::GetDefaultPreviewBackground*` (global defaults).
+Read-only display of the show's background image in the House Preview
+2D mode. Editing (brightness / alpha / scale / pick-a-file) remains
+desktop-only per the top-level scope — iPad just honours what the
+show has already stored.
 
-Today iPad ignores the node entirely — background is always solid
-black and there is no control to change it.
-
-- Plumb `mBackgroundImage` / `mBackgroundBrightness` / `mBackgroundAlpha`
-  / `mScaleBackgroundImage` through `iPadModelPreview` (the desktop
-  draw code at `ModelPreview.cpp:1411+` is reusable — it already uses
-  `xlGraphicsContext::createTexture` and a brightness shader).
-- Read the global defaults on load (`SetBackgroundBrightness` /
-  `SetbackgroundImage` in the same file).
-- Surface a "Background…" entry in the preview long-press menu (D-3):
-  pick image, brightness slider, alpha slider, "scale to fit" toggle.
-- Writes round-trip back to `xlights_rgbeffects.xml` via the same
-  `<LayoutGroup>` attributes desktop writes to.
+- `iPadRenderContext` now parses `backgroundImage`,
+  `backgroundBrightness`, `backgroundAlpha`, and `scaleImage` from the
+  rgbeffects `<settings>` node, FixFile-resolves the path against the
+  show directory, and exposes `GetBackgroundImage` /
+  `GetBackgroundBrightness` / `GetBackgroundAlpha` /
+  `GetScaleBackgroundImage`.
+- `XLMetalBridge` lazy-loads the image via `CGImageSource` into an
+  `xlImage`, creates an `xlTexture` cached on the bridge (re-loaded
+  only when the path changes), and enqueues the draw into
+  `solidProgram` before model rendering. Draw math mirrors
+  `ModelPreview.cpp:1431` — aspect-preserving fit inside the virtual
+  preview rectangle when `scaleImage` is off, with the same
+  `-virtualW/2` shift when `Display2DCenter0` is on.
+- 3D House Preview intentionally does not draw the background, same as
+  desktop.
 
 ## D-8. 2D overlays — grid and bounding box
 
@@ -134,63 +141,48 @@ Today iPad has no text overlay and no first-pixel marker.
 - Labels should scale sensibly for touch; desktop picks a font size
   based on camera zoom — same logic should port.
 
-## D-10. Preview image export
+## D-10. Preview image export — ✓ done (2026-04-20)
 
-Desktop exposes `PreviewSaveImage()` (PNG dump of the current preview
-framebuffer) and `PreviewPrintImage()` via the Layout panel and the
-preview context menu. Useful for sharing house layouts offline and
-for bug reports.
+Share-sheet button in `PreviewControlsOverlay` posts
+`.previewSaveImage`; the Coordinator snapshots its `MTKView` with
+`drawHierarchy(in:afterScreenUpdates:)` and presents a
+`UIActivityViewController` from the topmost presented view controller.
+Share-sheet covers Files / Photos / Mail / AirDrop / Copy / Print out
+of the box, so no separate copy or print entry was needed.
 
-- iPad: add "Save Image…" to the preview long-press menu. Capture the
-  current `CAMetalLayer` drawable to a `UIImage`, then present a
-  `UIActivityViewController` (Files / Photos / Mail / AirDrop). No
-  print equivalent — iPadOS handles Print via the share sheet once the
-  image is in hand.
-- Include a "Copy Image" variant that goes straight to the pasteboard.
+## D-11. House Preview transport — ✓ done (2026-04-20)
 
-## D-11. House Preview transport — parity with desktop
+Toolbar now has Rewind-to-start / Rewind 10s / Stop / Play-Pause /
+FF 10s, mirroring desktop's `HousePreviewPanel`. Scrubber coverage is
+provided by the existing sequencer-ruler playhead drag in
+`SequencerGridV2View`, which already drives `viewModel.seekTo(ms:)`.
+Placement chose "main toolbar" rather than "strip beneath each
+preview" — keeps the two preview panes uncluttered and avoids
+duplicating the transport strip per pane.
 
-Desktop's `HousePreviewPanel` embeds a transport strip directly under
-the preview: Play, Pause, Stop, Rewind-to-start, Rewind 10s, FF 10s,
-plus a scrubber slider and frame/time readout. The iPad today has
-Play/Pause/Stop in the sequencer toolbar — no rewind-10 / FF-10 / no
-scrubber attached to the preview, and the time readout is in the main
-toolbar instead of under the preview.
+## D-12. Pixel / point-size control — dropped
 
-- Decide placement: either add a transport strip beneath each preview
-  pane (closer to desktop parity) or extend the existing toolbar
-  strip with Rewind10 / FForward10 and verify the `playPositionMS`
-  slider (if we add one) scrubs the render correctly.
-- Rewind10 / FF10 on desktop post `EVT_SEQUENCE_REWIND10` /
-  `EVT_SEQUENCE_FFORWARD10`; the iPad equivalent is a direct
-  `seekTo(ms:)` on `SequencerViewModel` offset by ±10000 ms.
-- Scrubber must not fight the playback loop — drag-to-scrub should
-  pause, scrub, then resume on release (matches desktop behaviour).
+Removed on 2026-04-20. Desktop has no equivalent user-facing slider,
+and the iPad stepper did not produce any user-visible change because
+the MSL point-size path is effectively clamped at the shader level.
+Keeping the hardcoded 2.0 in `PreviewPaneView.draw(in:)` matches
+desktop behaviour and avoids a support-ticket vector ("my iPad shows
+different pixel sizes than desktop"). Not reinstating without a
+confirmed desktop counterpart.
 
-## D-12. Pixel / point-size control
+## D-13. View-object visibility (quick toggle) — ✓ done (2026-04-20)
 
-Desktop reads point size from preferences
-(`xLightsFrame::GetModelHandleSize` / per-preview "pixel size" menu)
-so the user can make pixels more visible on large displays or print
-screenshots. iPad is hard-coded to 2.0 in `XLMetalBridge.mm:22`.
+"View Objs" toggle button in `PreviewControlsOverlay` drives
+`settings.showViewObjects`; bridged through
+`XLMetalBridge.setShowViewObjects:` / `showViewObjects`. Now gates
+**every** non-pixel scene element rather than only the view-object
+loop, so users get one switch for the whole "visual backdrop":
+- house-mesh / terrain / gridlines / ground images (ViewObjects)
+- background image (D-7)
+- D-8 overlays (grid, bounding box) — must hook into the same flag
+  when they land.
 
-- Expose a slider (or +/- buttons) in the preview long-press menu.
-- Persist per-preview in `SceneStorage` (alongside the 2D/3D override
-  from Phase F-5).
-
-## D-13. View-object visibility (quick toggle)
-
-Desktop's `ViewsModelsPanel` has full per-view-object show/hide (house
-mesh, terrain, ruler, gridlines, image/mesh objects). Full Display
-Elements parity is Phase F-6, but a coarse "show view objects /
-hide view objects" toggle is useful before then — it's the difference
-between showing the house/mesh backdrop and showing pixels only.
-
-- Single toggle in the preview long-press menu: "Show View Objects".
-- Maps to a bool on `iPadModelPreview`; the House Preview draw loop
-  already iterates `ctx->GetAllObjects()` (`XLMetalBridge.mm:213`) and
-  can short-circuit when the flag is off.
-- Per-object show/hide remains Phase F territory.
+Per-object show/hide stays Phase F-6.
 
 ## D-14. Alternate LayoutGroup previews (stretch — overlaps with Phase F)
 
@@ -209,15 +201,11 @@ Creating/editing layout groups is desktop-scope (layout editor). But
 - The actual window/routing — which preview pane shows which layout
   group — is Phase F.
 
-## D-15. FPS / render-time overlay (optional)
+## D-15. FPS / render-time overlay — dropped
 
-Desktop has an optional FPS counter drawn in the corner of the preview
-(useful while diagnosing effect performance). Low priority but cheap
-to add and extremely useful for field-debugging iPad performance on
-real shows.
-
-- Toggle in the preview long-press menu. Draws over the title label in
-  `HousePreviewView.swift`.
+Removed on 2026-04-20. Desktop FPS counter is a diagnostic tool; on
+iPad it caused support-ticket confusion (users comparing iPad vs
+desktop numbers that don't mean the same thing). Not shipping.
 
 ---
 

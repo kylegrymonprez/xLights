@@ -42,4 +42,10 @@
 - (void)setIs3D:(BOOL)is3d;
 - (BOOL)is3D;
 
+// Coarse view-object (house mesh / terrain / gridlines / ground images)
+// visibility toggle for the House Preview. No effect on Model Preview —
+// that pane never draws view objects. Default: YES.
+- (void)setShowViewObjects:(BOOL)show;
+- (BOOL)showViewObjects;
+
 @end

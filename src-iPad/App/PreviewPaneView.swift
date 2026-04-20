@@ -15,6 +15,7 @@ struct PreviewPaneView: UIViewRepresentable {
     let previewName: String
     let previewModelName: String?
     @Binding var controlsVisible: Bool
+    let settings: PreviewSettings
 
     func makeCoordinator() -> Coordinator {
         Coordinator()
@@ -87,7 +88,22 @@ struct PreviewPaneView: UIViewRepresentable {
 
     func updateUIView(_ uiView: MTKView, context: Context) {
         context.coordinator.viewModel = viewModel
+        context.coordinator.settings = settings
         context.coordinator.bridge?.setPreviewModel(previewModelName ?? "")
+
+        // Push appearance toggles that the bridge needs to know about. Mode
+        // and view-object visibility both affect draw output, so flip
+        // setNeedsDisplay when they change even outside of playback.
+        if let bridge = context.coordinator.bridge {
+            if bridge.is3D() != settings.is3D {
+                bridge.setIs3D(settings.is3D)
+                uiView.setNeedsDisplay()
+            }
+            if bridge.showViewObjects() != settings.showViewObjects {
+                bridge.setShowViewObjects(settings.showViewObjects)
+                uiView.setNeedsDisplay()
+            }
+        }
 
         // The display link drives per-frame redraws. Keep it running not
         // just during full playback but also while the selection-scoped
@@ -107,6 +123,7 @@ struct PreviewPaneView: UIViewRepresentable {
     class Coordinator: NSObject, MTKViewDelegate, UIGestureRecognizerDelegate {
         var bridge: XLMetalBridge?
         var viewModel: SequencerViewModel?
+        var settings: PreviewSettings?
         weak var mtkView: MTKView?
         // nonisolated(unsafe): touched from the nonisolated deinit. Real use is
         // main-thread-only (set/invalidated from display-link lifecycle calls).
@@ -164,6 +181,64 @@ struct PreviewPaneView: UIViewRepresentable {
             notificationObservers.append(center.addObserver(
                 forName: .previewResetCamera, object: nil, queue: .main
             ) { note in apply(note) { b in b.resetCamera() }})
+
+            // Image export — capture the current MTKView contents and push
+            // the resulting UIImage through a share sheet. Scoped by preview
+            // name like the zoom / reset observers above.
+            notificationObservers.append(center.addObserver(
+                forName: .previewSaveImage, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let self,
+                      (note.object as? String) == previewName else { return }
+                self.captureAndShare()
+            })
+        }
+
+        /// Capture the current drawable into a UIImage and present a share
+        /// sheet. `drawHierarchy(in:afterScreenUpdates:)` handles CAMetalLayer
+        /// — `afterScreenUpdates: true` forces a redraw before the capture
+        /// so the snapshot never misses the latest frame when playback is
+        /// paused (the MTKView defaults to isPaused+enableSetNeedsDisplay).
+        private func captureAndShare() {
+            guard let mtkView else { return }
+            // Ensure the layer is up-to-date for panes that aren't actively
+            // animating. setNeedsDisplay alone isn't enough because the
+            // snapshot happens synchronously.
+            mtkView.setNeedsDisplay()
+            let renderer = UIGraphicsImageRenderer(bounds: mtkView.bounds)
+            let image = renderer.image { _ in
+                mtkView.drawHierarchy(in: mtkView.bounds, afterScreenUpdates: true)
+            }
+            let activityVC = UIActivityViewController(activityItems: [image],
+                                                     applicationActivities: nil)
+            // iPad requires a source for the popover — anchor at the
+            // preview's centre. On iPhone it's a sheet and the source is
+            // ignored.
+            if let popover = activityVC.popoverPresentationController {
+                popover.sourceView = mtkView
+                popover.sourceRect = CGRect(x: mtkView.bounds.midX,
+                                            y: mtkView.bounds.midY,
+                                            width: 0, height: 0)
+                popover.permittedArrowDirections = []
+            }
+            Self.presentTopmost(activityVC)
+        }
+
+        /// Walk the foreground scene's root view controller chain and
+        /// present from whatever is topmost — keeps the share sheet working
+        /// whether or not another sheet/popover is already up.
+        private static func presentTopmost(_ vc: UIViewController) {
+            guard let scene = UIApplication.shared.connectedScenes
+                .compactMap({ $0 as? UIWindowScene })
+                .first(where: { $0.activationState == .foregroundActive })
+                ?? UIApplication.shared.connectedScenes
+                    .compactMap({ $0 as? UIWindowScene }).first,
+                  let window = scene.keyWindow ?? scene.windows.first,
+                  var presenter = window.rootViewController else { return }
+            while let next = presenter.presentedViewController {
+                presenter = next
+            }
+            presenter.present(vc, animated: true)
         }
 
         // MARK: - Gestures

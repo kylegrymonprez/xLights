@@ -93,17 +93,63 @@ bool iPadRenderContext::LoadShowFolder(const std::string& showDir,
         if (!xlightsNode) {
             spdlog::error("iPadRenderContext: No <xrgb> or <xlights> root element in {}", rgbPath);
         } else {
+            // Preview canvas size lives in the <settings> node as
+            // <previewWidth value="..."/> / <previewHeight value="..."/>.
+            // Desktop falls back to 1280x720 when absent; match that.
+            auto settingsNode = xlightsNode.child("settings");
+            if (settingsNode) {
+                for (auto s = settingsNode.first_child(); s; s = s.next_sibling()) {
+                    std::string name = s.name();
+                    const char* v = s.attribute("value").as_string();
+                    if (name == "previewWidth") {
+                        int w = (int)std::strtol(v, nullptr, 10);
+                        if (w > 0) _previewWidth = w;
+                    } else if (name == "previewHeight") {
+                        int h = (int)std::strtol(v, nullptr, 10);
+                        if (h > 0) _previewHeight = h;
+                    } else if (name == "Display2DCenter0") {
+                        _display2DCenter0 = (std::string(v) == "1");
+                    } else if (name == "backgroundImage") {
+                        _backgroundImage = v;
+                    } else if (name == "backgroundBrightness") {
+                        int b = (int)std::strtol(v, nullptr, 10);
+                        if (b >= 0) _backgroundBrightness = b;
+                    } else if (name == "backgroundAlpha") {
+                        int a = (int)std::strtol(v, nullptr, 10);
+                        if (a >= 0) _backgroundAlpha = a;
+                    } else if (name == "scaleImage") {
+                        _scaleBackgroundImage = (std::strtol(v, nullptr, 10) > 0);
+                    }
+                }
+            }
+            // Resolve the background image against the show folder / media
+            // directories. FixFile handles both absolute paths (from a
+            // different machine's filesystem) and plain filenames.
+            if (!_backgroundImage.empty()) {
+                _backgroundImage = FileUtils::FixFile(_showDir, _backgroundImage);
+                ObtainAccessToURL(_backgroundImage, false);
+                if (!FileExists(_backgroundImage)) {
+                    spdlog::warn("iPadRenderContext: background image not found: {}",
+                                 _backgroundImage);
+                    _backgroundImage.clear();
+                }
+            }
+            spdlog::info("iPadRenderContext: Preview canvas {}x{}, center2D0={}, bg='{}' bri={} alpha={} scale={}",
+                         _previewWidth, _previewHeight, _display2DCenter0,
+                         _backgroundImage, _backgroundBrightness,
+                         _backgroundAlpha, _scaleBackgroundImage);
+
             auto modelsNode = xlightsNode.child("models");
             if (!modelsNode) {
                 spdlog::error("iPadRenderContext: No <models> element in {}", rgbPath);
             } else {
-                _modelManager->LoadModels(modelsNode, 1920, 1080);
+                _modelManager->LoadModels(modelsNode, _previewWidth, _previewHeight);
                 spdlog::info("iPadRenderContext: Loaded {} models", _modelManager->GetModels().size());
 
                 // Load model groups
                 auto groupsNode = xlightsNode.child("modelGroups");
                 if (groupsNode) {
-                    _modelManager->LoadGroups(groupsNode, 1920, 1080);
+                    _modelManager->LoadGroups(groupsNode, _previewWidth, _previewHeight);
                     spdlog::info("iPadRenderContext: Loaded groups, total models now {}",
                                  _modelManager->GetModels().size());
                 }

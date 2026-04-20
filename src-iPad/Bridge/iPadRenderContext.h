@@ -104,6 +104,30 @@ public:
     ModelManager& GetModelManager() { return *_modelManager; }
     ViewObjectManager& GetAllObjects() { return *_viewObjectManager; }
     SequenceFile* GetSequenceFile() { return _sequenceFile.get(); }
+    // Virtual preview canvas size from <settings><previewWidth/Height>
+    // in xlights_rgbeffects.xml, defaulted to desktop's 1280×720 when
+    // absent. Consumed by iPadModelPreview in House Preview mode so the
+    // 2D ortho projection maps world coords onto pixel coords the same
+    // way desktop does.
+    int GetPreviewWidth() const { return _previewWidth; }
+    int GetPreviewHeight() const { return _previewHeight; }
+
+    // <settings><Display2DCenter0 value="1"/>. When set, desktop places
+    // world X=0 at the horizontal centre of the preview (shows with
+    // models laid out around a centered origin, e.g. -600..+600 rather
+    // than 0..1200). Ignoring this flag was the cause of the House
+    // Preview rendering blank for center-origin shows.
+    bool GetDisplay2DCenter0() const { return _display2DCenter0; }
+
+    // House Preview background image + brightness/alpha/scale — values
+    // come from `<settings>` in xlights_rgbeffects.xml and are read-only
+    // on iPad (editing lives in the desktop Layout panel, out of iPad
+    // scope). Path is FixFile-resolved against the show directory; empty
+    // string means "no background".
+    const std::string& GetBackgroundImage() const { return _backgroundImage; }
+    int GetBackgroundBrightness() const { return _backgroundBrightness; }
+    int GetBackgroundAlpha() const { return _backgroundAlpha; }
+    bool GetScaleBackgroundImage() const { return _scaleBackgroundImage; }
 
     // Model pixel data for a given frame — returns (x, y, r, g, b) tuples
     struct PixelData {
@@ -133,4 +157,14 @@ private:
     RenderCache _renderCache;
     std::unique_ptr<RenderEngine> _renderEngine;
     unsigned int _modelsChangeCount = 0;
+
+    // Virtual preview canvas size — desktop defaults.
+    int _previewWidth = 1280;
+    int _previewHeight = 720;
+    bool _display2DCenter0 = false;
+
+    std::string _backgroundImage;
+    int _backgroundBrightness = 100;
+    int _backgroundAlpha = 100;
+    bool _scaleBackgroundImage = false;
 };

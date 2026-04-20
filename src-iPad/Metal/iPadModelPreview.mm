@@ -109,6 +109,16 @@ bool iPadModelPreview::StartDrawing(double pointSize, bool fromPaint) {
                       cam.GetPanY()*cam.GetZoom() - cam.GetZoomCorrY() + scale_corry,
                       0.0f));
         _viewMatrix = ViewTranslate * ViewScale;
+        // Mirror desktop ModelPreview.cpp:1392 — when the show uses a
+        // horizontally-centred origin (Display2DCenter0 in rgbeffects),
+        // prepend a half-width translate so world X=0 lands at the
+        // preview's horizontal centre. Without this, centre-origin layouts
+        // render with everything shifted left and most models off-screen.
+        if (_center2D0 && _virtualW != 0) {
+            glm::mat4 cTranslate = glm::translate(glm::mat4(1.0f),
+                glm::vec3(((float)_virtualW) / 2.0f, 0.0f, 0.0f));
+            _viewMatrix = ViewTranslate * ViewScale * cTranslate;
+        }
         _projMatrix = glm::ortho(0.0f, (float)w, 0.0f, (float)h);
     }
     _projViewMatrix = _projMatrix * _viewMatrix;

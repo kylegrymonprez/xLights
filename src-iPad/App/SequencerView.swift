@@ -80,7 +80,15 @@ struct SequencerView: View {
 
             Divider().frame(height: 24)
 
-            // Playback controls — always shown, works with or without audio
+            // Playback controls — always shown, works with or without audio.
+            // Rewind-to-start / back-10s / play-pause / forward-10s layout
+            // mirrors desktop `HousePreviewPanel`'s transport strip.
+            Button(action: { viewModel.seekTo(ms: 0) }) {
+                Image(systemName: "backward.end.fill")
+            }
+            Button(action: { viewModel.seekTo(ms: max(0, viewModel.playPositionMS - 10_000)) }) {
+                Image(systemName: "gobackward.10")
+            }
             Button(action: { viewModel.stop() }) {
                 Image(systemName: "stop.fill")
             }
@@ -88,6 +96,12 @@ struct SequencerView: View {
                 Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
             }
             .keyboardShortcut(.space, modifiers: [])
+            Button(action: {
+                viewModel.seekTo(ms: min(viewModel.sequenceDurationMS,
+                                         viewModel.playPositionMS + 10_000))
+            }) {
+                Image(systemName: "goforward.10")
+            }
 
             Text(formatTime(viewModel.playPositionMS))
                 .monospacedDigit()
