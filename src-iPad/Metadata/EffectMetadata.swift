@@ -101,7 +101,6 @@ struct PropertyMetadata: Codable {
         case "filepicker":                  return "FILEPICKER"
         case "fontpicker":                  return "FONTPICKER"
         case "colourpicker":                return "COLOURPICKER"
-        case "radiobutton":                 return "RADIOBUTTON"
         default:                            return "TEXTCTRL"
         }
     }

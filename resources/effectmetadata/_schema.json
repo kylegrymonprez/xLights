@@ -53,7 +53,7 @@
                 },
                 "controlType": {
                     "type": "string",
-                    "enum": ["slider", "checkbox", "choice", "combobox", "spin", "text", "filepicker", "fontpicker", "colourpicker", "radiobutton", "togglebutton", "point2d", "custom"],
+                    "enum": ["slider", "checkbox", "choice", "combobox", "spin", "text", "filepicker", "fontpicker", "colourpicker", "togglebutton", "point2d", "custom"],
                     "description": "UI control type hint. 'point2d' expands into two slider rows suffixed X/Y; use minX/maxX/defaultX and minY/maxY/defaultY for per-axis bounds (falls back to min/max/default if absent)."
                 },
                 "default": {

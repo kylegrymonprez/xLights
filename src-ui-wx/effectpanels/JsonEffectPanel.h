@@ -113,7 +113,6 @@ protected:
         wxFilePickerCtrl* filePicker = nullptr;
         wxFontPickerCtrl* fontPicker = nullptr;
         wxColourPickerCtrl* colourPicker = nullptr;
-        wxRadioButton* radioButton = nullptr;
         ValueCurveButton* valueCurveBtn = nullptr;
         wxWindow* buddySlider = nullptr;   // IDD_SLIDER for float props
         wxTextCtrl* buddyText = nullptr;   // IDD_TEXTCTRL for int slider props

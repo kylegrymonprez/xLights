@@ -21,7 +21,6 @@
 #include <wx/filepicker.h>
 #include <wx/fontpicker.h>
 #include <wx/clrpicker.h>
-#include <wx/radiobut.h>
 #include <wx/tglbtn.h>
 #include <wx/statline.h>
 #include <wx/tokenzr.h>
@@ -376,9 +375,6 @@ void JsonEffectPanel::BuildFromJson(const nlohmann::json& metadata) {
             }
             if (it->second.spinCtrl) {
                 it->second.spinCtrl->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent& e) { ValidateWindow(); e.Skip(); });
-            }
-            if (it->second.radioButton) {
-                it->second.radioButton->Bind(wxEVT_RADIOBUTTON, [this](wxCommandEvent& e) { ValidateWindow(); e.Skip(); });
             }
             if (it->second.textCtrl) {
                 it->second.textCtrl->Bind(wxEVT_TEXT, [this](wxCommandEvent& e) { ValidateWindow(); e.Skip(); });
@@ -1406,24 +1402,6 @@ void JsonEffectPanel::BuildPropertyRow(wxWindow* parentWin, wxSizer* sizer, cons
         if (cols >= 3) sizer->Add(-1, -1, 1, wxALL, 1);
         if (cols >= 4) sizer->Add(-1, -1, 1, wxALL, 1);
 
-    } else if (controlType == "radiobutton") {
-        bool defaultVal = prop.value("default", false);
-
-        // Column 1: spacer (radio buttons have their own label)
-        sizer->Add(-1, -1, 1, wxALL, 2);
-
-        // Column 2: Radio button
-        std::string ctrlName = "ID_RADIOBUTTON_" + id;
-        wxWindowID ctrlId = wxNewId();
-        auto* rb = new wxRadioButton(parentWin, ctrlId, wxString(label), wxDefaultPosition, wxDefaultSize,
-                                      0, wxDefaultValidator, wxString(ctrlName));
-        rb->SetValue(defaultVal);
-        info.radioButton = rb;
-        sizer->Add(rb, 1, wxALL | wxEXPAND, 2);
-
-        // Columns 3+4: spacers
-        if (cols >= 3) sizer->Add(-1, -1, 1, wxALL, 1);
-        if (cols >= 4) sizer->Add(-1, -1, 1, wxALL, 1);
     } else if (controlType == "point2d") {
         // Two rows, one per axis, each laid out like a float-slider row with
         // the slider as the serialized primary. Control names get an "X"/"Y"
@@ -1702,7 +1680,6 @@ wxWindow* JsonEffectPanel::FindControlForProperty(const std::string& propId) {
     if (info.filePicker) return info.filePicker;
     if (info.fontPicker) return info.fontPicker;
     if (info.colourPicker) return info.colourPicker;
-    if (info.radioButton) return info.radioButton;
     if (info.buddySlider) return info.buddySlider;
     return nullptr;
 }
