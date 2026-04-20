@@ -170,7 +170,7 @@ void ColourReplaceDialog::OnButton_ReplaceClick(wxCommandEvent& event)
     if (_ccb->GetValue()->IsActive()) {
         to = _ccb->GetValue()->Serialise();
     } else {
-        to = _ccb->GetBackgroundColour().GetAsString(wxC2S_HTML_SYNTAX);
+        to = (std::string)wxColourToXlColor(_ccb->GetBackgroundColour());
     }
 
     int replaced = _frame->GetSequenceElements().ReplaceColours(_frame, BitmapButton_ExistingColour->GetString(BitmapButton_ExistingColour->GetSelection()), to, CheckBox_SelectedEffectsOnly->GetValue());

@@ -459,24 +459,24 @@ void xlColorPickerFields::OnTextCtrl_Text(wxCommandEvent& event)
     else if (name.Contains("ID_TEXTCTRL_BrightnessCPF")) {
         int val = RangeLimit( TextCtrl_Brightness, 0, 100 );
         hsv.value = double(val) / 100.0;
-        Panel_Slider->SetHSV(val);
+        Panel_Slider->SetHSV(hsv);
         Panel_Palette->SetHSV(hsv);
     }
     else if (name.Contains("ID_TEXTCTRL_Red")) {
         int red = RangeLimit( TextCtrl_Red, 0, 255 );
-        rgb.red = double(red) / 255.0;
+        rgb.red = red;
         Panel_Slider->SetRGB(rgb);
         Panel_Palette->SetRGB(rgb);
     }
     else if (name.Contains("ID_TEXTCTRL_Green")) {
         int green = RangeLimit( TextCtrl_Green, 0, 255 );
-        rgb.green = double(green) / 255.0;
+        rgb.green = green;
         Panel_Slider->SetRGB(rgb);
         Panel_Palette->SetRGB(rgb);
     }
     else if (name.Contains("ID_TEXTCTRL_Blue")) {
         int blue = RangeLimit( TextCtrl_Blue, 0, 255 );
-        rgb.blue = double(blue) / 255.0;
+        rgb.blue = blue;
         Panel_Slider->SetRGB(rgb);
         Panel_Palette->SetRGB(rgb);
     }

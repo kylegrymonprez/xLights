@@ -1097,7 +1097,11 @@ int ModelPropertyAdapter::OnPropertyGridChange(wxPropertyGridInterface* grid, wx
     } else if (event.GetPropertyName() == "ModelTagColour") {
         wxColour wxc;
         wxc << event.GetProperty()->GetValue();
-        _model.SetModelTagColour(wxColourToXlColor(wxc));
+        xlColor xc = wxColourToXlColor(wxc);
+        _model.SetModelTagColour(xc);
+        // Rewrite with a fresh non-lossy wxColour so the grid's text display
+        // shows normalized RGB instead of NSCalibratedRGBColorSpace drift.
+        event.GetProperty()->SetValue(WXVARIANT(xlColorToWxColour(xc)));
         _model.IncrementChangeCount();
         _model.AddASAPWork(OutputModelManager::WORK_RGBEFFECTS_CHANGE, "Model::OnPropertyGridChange::ModelTagColour");
         return 0;
@@ -1508,8 +1512,10 @@ int ModelPropertyAdapter::OnPropertyGridChange(wxPropertyGridInterface* grid, wx
         int index = wxAtoi(event.GetPropertyName().substr(17));
         wxColor wc;
         wc << event.GetValue();
+        xlColor xc = wxColourToXlColor(wc);
         _model.IncrementChangeCount();
-        _model.SetSuperStringColour(index, wxColourToXlColor(wc));
+        _model.SetSuperStringColour(index, xc);
+        event.GetProperty()->SetValue(WXVARIANT(xlColorToWxColour(xc)));
         return 0;
     } else if (event.GetPropertyName() == "ModelStringColor" || event.GetPropertyName() == "ModelStringType" || event.GetPropertyName() == "ModelRGBWHandling") {
         wxPGProperty* p2 = grid->GetPropertyByName("ModelStringType");
@@ -1525,6 +1531,7 @@ int ModelPropertyAdapter::OnPropertyGridChange(wxPropertyGridInterface* grid, wx
                 wxColor cc;
                 cc << p->GetValue();
                 c = wxColourToXlColor(cc);
+                p->SetValue(WXVARIANT(xlColorToWxColour(c)));
             }
             if (p != nullptr)
                 p->Enable();

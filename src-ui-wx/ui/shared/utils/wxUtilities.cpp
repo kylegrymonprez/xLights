@@ -53,7 +53,12 @@ wxColour xlColorToWxColour(const xlColor& c) {
 }
 
 xlColor wxColourToXlColor(const wxColour& c) {
-    return xlColor(c.Red(), c.Green(), c.Blue());
+    if (!c.IsOk()) {
+        return xlBLACK;
+    }
+    xlColor out;
+    AdjustColorToDeviceColorspace(c, out.red, out.green, out.blue, out.alpha);
+    return out;
 }
 
 xlImage wxImageToXlImage(const wxImage& img) {

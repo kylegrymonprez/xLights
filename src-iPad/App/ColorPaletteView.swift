@@ -112,12 +112,14 @@ struct ColorPaletteView: View {
 
     private func hexFromColor(_ color: Color) -> String? {
         #if canImport(UIKit)
-        let ui = UIColor(color)
-        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-        guard ui.getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
-        let ri = Int((r * 255).rounded())
-        let gi = Int((g * 255).rounded())
-        let bi = Int((b * 255).rounded())
+        // On wide-gamut iPads SwiftUI Color may be in Display P3; convert to
+        // sRGB so out-of-gamut components don't escape [0,1] and produce bad hex.
+        guard let srgb = CGColorSpace(name: CGColorSpace.sRGB),
+              let srgbCG = UIColor(color).cgColor.converted(to: srgb, intent: .defaultIntent, options: nil),
+              let c = srgbCG.components, c.count >= 3 else { return nil }
+        let ri = Int((max(0, min(1, c[0])) * 255).rounded())
+        let gi = Int((max(0, min(1, c[1])) * 255).rounded())
+        let bi = Int((max(0, min(1, c[2])) * 255).rounded())
         return String(format: "#%02X%02X%02X", ri, gi, bi)
         #else
         return nil

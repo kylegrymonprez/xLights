@@ -190,14 +190,20 @@ func colorFromHex(_ hex: String) -> Color? {
 /// Serialise a SwiftUI Color as a `#RRGGBB` string matching desktop's
 /// wxColour format. Drops alpha — the desktop panel widgets don't
 /// store alpha for chroma / sparkles / palette colours either.
+///
+/// On wide-gamut iPads the SwiftUI ColorPicker may hand back a Color in
+/// Display P3. UIColor.getRed then returns extended-sRGB components that
+/// can fall outside [0,1] for out-of-gamut colors, producing garbage hex.
+/// Route through CGColor/sRGB so the serialized value matches what the
+/// user sees and round-trips cleanly back through colorFromHex.
 func hexFromColor(_ color: Color) -> String? {
     #if canImport(UIKit)
-    let ui = UIColor(color)
-    var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
-    guard ui.getRed(&r, green: &g, blue: &b, alpha: &a) else { return nil }
-    let ri = Int((r * 255).rounded())
-    let gi = Int((g * 255).rounded())
-    let bi = Int((b * 255).rounded())
+    guard let srgb = CGColorSpace(name: CGColorSpace.sRGB),
+          let srgbCG = UIColor(color).cgColor.converted(to: srgb, intent: .defaultIntent, options: nil),
+          let c = srgbCG.components, c.count >= 3 else { return nil }
+    let ri = Int((max(0, min(1, c[0])) * 255).rounded())
+    let gi = Int((max(0, min(1, c[1])) * 255).rounded())
+    let bi = Int((max(0, min(1, c[2])) * 255).rounded())
     return String(format: "#%02X%02X%02X", ri, gi, bi)
     #else
     return nil

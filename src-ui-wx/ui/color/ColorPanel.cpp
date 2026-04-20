@@ -652,8 +652,7 @@ std::string ColorPanel::GetCurrentPalette() const {
             res += btn->GetValue()->Serialise() + ",";
         } else {
             wxColor color = GetPaletteColor(i);
-            color.Set(color.Red(), color.Green(), color.Blue(), wxALPHA_OPAQUE);
-            res += color.GetAsString(wxC2S_HTML_SYNTAX).ToStdString() + ",";
+            res += (std::string)wxColourToXlColor(color) + ",";
         }
     }
     return res;
@@ -695,7 +694,7 @@ wxString ColorPanel::GetRandomColorString() {
     for (int i = 0; i < PALETTE_SIZE; i++) {
         color = GetPaletteColor(i);
         AttrName.Printf("C_BUTTON_Palette%d=", i + 1);
-        ret += AttrName + color.GetAsString(wxC2S_HTML_SYNTAX) + ",";
+        ret += AttrName + (std::string)wxColourToXlColor(color) + ",";
 
         wxString v = (!EffectPanelUtils::IsLocked(GetPaletteButton(i)->GetName().ToStdString())
                       ? rand() % 2 : GetPaletteCheckbox(i)->GetValue()) ? "1" : "0";
@@ -739,10 +738,10 @@ wxString ColorPanel::GetRandomColorString() {
         ret += "C_CHECKBOX_Chroma=1,";
     }
     if (_chromaColour && _chromaColour->GetColour() != *wxBLACK) {
-        ret += "C_COLOURPICKERCTRL_ChromaColour=" + _chromaColour->GetStringValue() + ",";
+        ret += "C_COLOURPICKERCTRL_ChromaColour=" + (std::string)wxColourToXlColor(_chromaColour->GetColour()) + ",";
     }
     if (_sparklesColour && _sparklesColour->GetColour() != *wxWHITE) {
-        ret += "C_COLOURPICKERCTRL_SparklesColour=" + _sparklesColour->GetStringValue() + ",";
+        ret += "C_COLOURPICKERCTRL_SparklesColour=" + (std::string)wxColourToXlColor(_sparklesColour->GetColour()) + ",";
     }
     return ret;
 }
@@ -757,7 +756,7 @@ wxString ColorPanel::GetColorString(bool colourOnly) {
         } else {
             wxColour color = GetPaletteColor(i);
             AttrName.Printf("C_BUTTON_Palette%d=", i + 1);
-            s += AttrName + color.GetAsString(wxC2S_HTML_SYNTAX) + ",";
+            s += AttrName + (std::string)wxColourToXlColor(color) + ",";
         }
         if (checkBoxes[i]->IsChecked()) {
             AttrName.Printf("C_CHECKBOX_Palette%d=1,", i + 1);
@@ -800,13 +799,13 @@ wxString ColorPanel::GetColorString(bool colourOnly) {
             s += wxString::Format("C_SLIDER_ChromaSensitivity=%d,", _chromaSensitivity->GetValue());
         }
         if (_chromaColour && _chromaColour->GetColour() != *wxBLACK) {
-            s += "C_COLOURPICKERCTRL_ChromaColour=" + _chromaColour->GetStringValue() + ",";
+            s += "C_COLOURPICKERCTRL_ChromaColour=" + (std::string)wxColourToXlColor(_chromaColour->GetColour()) + ",";
         }
         s += "C_CHECKBOX_Chroma=1,";
     }
 
     if (_sparklesColour && _sparklesColour->GetColour() != *wxWHITE) {
-        s += "C_COLOURPICKERCTRL_SparklesColour=" + _sparklesColour->GetStringValue() + ",";
+        s += "C_COLOURPICKERCTRL_SparklesColour=" + (std::string)wxColourToXlColor(_sparklesColour->GetColour()) + ",";
     }
 
     return s;

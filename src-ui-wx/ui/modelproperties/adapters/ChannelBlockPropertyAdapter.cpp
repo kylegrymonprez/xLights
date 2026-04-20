@@ -52,6 +52,7 @@ int ChannelBlockPropertyAdapter::OnPropertyGridChange(wxPropertyGridInterface* g
         wxColor c;
         c << event.GetProperty()->GetValue();
         xlColor xc = wxColourToXlColor(c);
+        event.GetProperty()->SetValue(WXVARIANT(xlColorToWxColour(xc)));
         std::string text = event.GetPropertyName();
         int val = ExtractTrailingInt(text);
         if (val < 1) val = 1;

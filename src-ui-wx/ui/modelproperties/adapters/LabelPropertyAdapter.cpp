@@ -47,7 +47,9 @@ int LabelPropertyAdapter::OnPropertyGridChange(wxPropertyGridInterface* grid, wx
         wxColour col;
         col << event.GetValue();
         if (col.IsOk()) {
-            _label.SetLabelTextColor(xlColor(col.Red(), col.Green(), col.Blue()));
+            xlColor xc = wxColourToXlColor(col);
+            _label.SetLabelTextColor(xc);
+            event.GetProperty()->SetValue(WXVARIANT(xlColorToWxColour(xc)));
         }
         _label.IncrementChangeCount();
         _label.AddASAPWork(OutputModelManager::WORK_RELOAD_MODEL_CHANGE, "LabelPropertyAdapter::OnPropertyGridChange::LabelTextColor");

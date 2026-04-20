@@ -684,14 +684,15 @@ void BulkEditColourPickerCtrl::OnColourPickerPopup(wxCommandEvent& event)
             std::string id = GetName().ToStdString();
             id = FixIdForPanel(GetPanelName(GetParent()), id);
 
+            std::string colorHex = (std::string)wxColourToXlColor(GetColour());
             if (GetPanelName(GetParent()) == "Effect")
             {
                 std::string effect = ((EffectsPanel*)GetPanel(GetParent()))->EffectChoicebook->GetChoiceCtrl()->GetStringSelection().ToStdString();
-                xLightsApp::GetFrame()->GetMainSequencer()->ApplyEffectSettingToSelected(effect, id, GetValue().GetAsString(wxC2S_HTML_SYNTAX), nullptr, "");
+                xLightsApp::GetFrame()->GetMainSequencer()->ApplyEffectSettingToSelected(effect, id, colorHex, nullptr, "");
             }
             else
             {
-                xLightsApp::GetFrame()->GetMainSequencer()->ApplyEffectSettingToSelected("", id, GetValue().GetAsString(wxC2S_HTML_SYNTAX), nullptr, "");
+                xLightsApp::GetFrame()->GetMainSequencer()->ApplyEffectSettingToSelected("", id, colorHex, nullptr, "");
             }
         }
     }
@@ -699,7 +700,7 @@ void BulkEditColourPickerCtrl::OnColourPickerPopup(wxCommandEvent& event)
 
 std::string BulkEditColourPickerCtrl::GetStringValue() const
 {
-    return GetValue().GetAsString(wxC2S_HTML_SYNTAX);
+    return (std::string)wxColourToXlColor(GetColour());
 }
 
 void BulkEditValueCurveButton::OnValueCurvePopup(wxCommandEvent &event)

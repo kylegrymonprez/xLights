@@ -80,7 +80,9 @@ int GridlinesObjectPropertyAdapter::OnPropertyGridChange(wxPropertyGridInterface
         wxPGProperty *p = grid->GetPropertyByName("GridColor");
         wxColour c;
         c << p->GetValue();
-        _gridlines.SetGridColor(wxColourToXlColor(c));
+        xlColor xc = wxColourToXlColor(c);
+        _gridlines.SetGridColor(xc);
+        p->SetValue(WXVARIANT(xlColorToWxColour(xc)));
         _gridlines.IncrementChangeCount();
         _gridlines.AddASAPWork(OutputModelManager::WORK_RGBEFFECTS_CHANGE, "GridlinesObject::OnPropertyGridChange::GridColor");
         _gridlines.AddASAPWork(OutputModelManager::WORK_REDRAW_LAYOUTPREVIEW, "GridlinesObject::OnPropertyGridChange::GridColor");

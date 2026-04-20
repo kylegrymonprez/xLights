@@ -139,7 +139,7 @@ public:
         auto const& [res, newcolor] = xlColourData::INSTANCE.ShowColorDialog(GetOwner()->GetOwner()->GetParent(), _color);
         if (res == wxID_OK) {
             _color = newcolor;
-            model->SetValue(wxVariant(_color.GetAsString()), item, col);
+            model->SetValue(wxVariant(wxString((std::string)wxColourToXlColor(_color))), item, col);
         }
 
         return false;

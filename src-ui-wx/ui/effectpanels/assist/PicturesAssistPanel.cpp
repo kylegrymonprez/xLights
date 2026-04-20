@@ -703,7 +703,7 @@ std::string PicturesAssistPanel::GetCurrentPalette() const
     std::string res;
     for (size_t i = 0; i < PALETTE_SIZE; i++) {
         wxColour c = GetPaletteColor(i);
-        res += c.GetAsString(wxC2S_HTML_SYNTAX).ToStdString() + ",";
+        res += (std::string)wxColourToXlColor(c) + ",";
     }
     return res;
 }

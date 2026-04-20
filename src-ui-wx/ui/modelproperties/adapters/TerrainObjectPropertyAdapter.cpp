@@ -134,7 +134,9 @@ int TerrainObjectPropertyAdapter::OnPropertyGridChange(wxPropertyGridInterface* 
         wxPGProperty *p = grid->GetPropertyByName("gridColor");
         wxColour c;
         c << p->GetValue();
-        _terrain.SetGridColor(wxColourToXlColor(c));
+        xlColor xc = wxColourToXlColor(c);
+        _terrain.SetGridColor(xc);
+        p->SetValue(WXVARIANT(xlColorToWxColour(xc)));
         _terrain.IncrementChangeCount();
         _terrain.AddASAPWork(OutputModelManager::WORK_RGBEFFECTS_CHANGE, "TerrainObject::OnPropertyGridChange::gridColor");
         _terrain.AddASAPWork(OutputModelManager::WORK_REDRAW_LAYOUTPREVIEW, "TerrainObject::OnPropertyGridChange::gridColor");

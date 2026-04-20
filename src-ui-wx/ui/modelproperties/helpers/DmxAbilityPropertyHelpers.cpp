@@ -481,7 +481,9 @@ int OnColorWheelPropertyGridChange(wxPropertyGridInterface* grid, wxPropertyGrid
         namekey.Replace("DmxColorWheelSize.DmxColorWheelColor", "");
         int index = wxAtoi(namekey);
         if (index >= 0 && index < (int)color.GetColorWheelColorSize()) {
-            color.SetWheelColor(index, wxColourToXlColor(wheelColour));
+            xlColor xc = wxColourToXlColor(wheelColour);
+            color.SetWheelColor(index, xc);
+            event.GetProperty()->SetValue(WXVARIANT(xlColorToWxColour(xc)));
             base->AddASAPWork(OutputModelManager::WORK_RELOAD_MODEL_CHANGE, "DmxColorAbility::OnColorPropertyGridChange::DmxColorWheelColor");
         }
     }

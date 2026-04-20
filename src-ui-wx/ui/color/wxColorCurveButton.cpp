@@ -112,13 +112,14 @@ void ColorCurveButton::UpdateBitmap()
         SetBackgroundColour(color);
         SetForegroundColour(color);
         wxImage image(sz.GetWidth(), sz.GetHeight());
+        xlColor xc = wxColourToXlColor(color);
         if (color.IsOk()) {
             image.SetRGB(wxRect(0, 0, sz.GetWidth(), sz.GetHeight()),
-                         color.Red(), color.Green(), color.Blue());
+                         xc.red, xc.green, xc.blue);
         }
         wxBitmap bmp(image);
         SetBitmap(bmp);
-        SetToolTip(wxString::Format("%s\n%d,%d,%d\n%s", _color, color.Red(), color.Green(), color.Blue(), GetColourName(wxColourToXlColor(color))));
+        SetToolTip(wxString::Format("%s\n%d,%d,%d\n%s", _color, xc.red, xc.green, xc.blue, GetColourName(xc)));
     }
     Refresh();
 }

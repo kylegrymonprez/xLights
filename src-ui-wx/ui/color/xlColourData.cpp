@@ -33,7 +33,7 @@ void xlColourData::Save(XLightsConfigAdapter* config)
     if (config != nullptr) {
         for (int i = 0; i < m_colorData.NUM_CUSTOM; ++i) {
             config->Write("CustomColour" + std::to_string(i),
-                          m_colorData.GetCustomColour(i).GetAsString());
+                          wxString((std::string)wxColourToXlColor(m_colorData.GetCustomColour(i))));
         }
     }
 }
@@ -45,5 +45,6 @@ std::tuple<int, wxColour> xlColourData::ShowColorDialog(wxWindow* parent, const 
     // OptimiseDialogPosition(&dlg);
     auto result = dlg.ShowModal();
     m_colorData = dlg.GetColourData();
-    return { result, m_colorData.GetColour() };
+    xlColor c = wxColourToXlColor(m_colorData.GetColour());
+    return { result, xlColorToWxColour(c)};
 }

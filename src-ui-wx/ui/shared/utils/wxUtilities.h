@@ -37,7 +37,11 @@ class wxIPV4address;
 class wxArrayString;
 typedef wxColour wxColor;
 
-// wx<->xlColor conversions (implementations in wxUtilities.cpp)
+// wx<->xlColor conversions (implementations in wxUtilities.cpp).
+// On macOS, wxColourToXlColor routes the read through the deviceRGB color
+// space so RGB values round-trip cleanly. wxColour's default Red()/Green()/
+// Blue() accessors convert through NSCalibratedRGBColorSpace, which drifts
+// by 1-2 units per channel and breaks color-picker round-trips.
 wxColour xlColorToWxColour(const xlColor& c);
 xlColor wxColourToXlColor(const wxColour& c);
 
