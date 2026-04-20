@@ -728,8 +728,14 @@ LayoutPanel::LayoutPanel(wxWindow* parent, xLightsFrame *xl, wxPanel* sequencer)
     int msp = config->Read("LayoutModelSplitterSash", -1);
     int sp = config->Read("LayoutMainSplitterSash", -1);
     is_3d = config->ReadBool("LayoutMode3D", false);
+    bool showNames = config->ReadBool("LayoutShowNames", false);
+    bool showInfo = config->ReadBool("LayoutShowStartChannel", false);
 
     CheckBox_3D->SetValue(is_3d);
+    CheckBoxShowNames->SetValue(showNames);
+    CheckBoxShowInfo->SetValue(showInfo);
+    modelPreview->SetShowModelNames(showNames);
+    modelPreview->SetShowModelInfo(showInfo);
     static_cast<ModelPreview*>(xlights->GetHousePreview())->Set3D(is_3d);
 
     ChoiceLayoutGroups->Enable();
@@ -3282,12 +3288,18 @@ void LayoutPanel::OnCheckBoxOverlapClick(wxCommandEvent& event)
 
 void LayoutPanel::OnCheckBoxShowNamesClick(wxCommandEvent& event)
 {
-    modelPreview->SetShowModelNames(CheckBoxShowNames->GetValue());
+    bool val = CheckBoxShowNames->GetValue();
+    modelPreview->SetShowModelNames(val);
+    auto* config = GetXLightsConfig();
+    config->Write("LayoutShowNames", val);
 }
 
 void LayoutPanel::OnCheckBoxShowInfoClick(wxCommandEvent& event)
 {
-    modelPreview->SetShowModelInfo(CheckBoxShowInfo->GetValue());
+    bool val = CheckBoxShowInfo->GetValue();
+    modelPreview->SetShowModelInfo(val);
+    auto* config = GetXLightsConfig();
+    config->Write("LayoutShowStartChannel", val);
 }
 
 bool LayoutPanel::SaveEffects()
