@@ -120,6 +120,13 @@ public:
     // Preview rendering blank for center-origin shows.
     bool GetDisplay2DCenter0() const { return _display2DCenter0; }
 
+    // <settings><LayoutMode3D value="1"/>. Desktop's last-used 3D vs 2D
+    // preference for the House Preview, read at show-folder load.
+    // iPad uses this as the initial value for House Preview's is3D
+    // toggle (the user can still flip it per-session via the overlay
+    // picker; we don't write back since layout editing is desktop-only).
+    bool GetLayoutMode3D() const { return _layoutMode3D; }
+
     // House Preview background image + brightness/alpha/scale — values
     // come from `<settings>` in xlights_rgbeffects.xml and are read-only
     // on iPad (editing lives in the desktop Layout panel, out of iPad
@@ -224,6 +231,7 @@ private:
     int _previewWidth = 1280;
     int _previewHeight = 720;
     bool _display2DCenter0 = false;
+    bool _layoutMode3D = true;
 
     std::string _backgroundImage;
     int _backgroundBrightness = 100;

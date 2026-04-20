@@ -181,6 +181,12 @@
 - (NSString*)activeLayoutGroup;
 - (void)setActiveLayoutGroup:(NSString*)name;
 
+// Desktop's last-used House Preview 3D-vs-2D mode, read from
+// `<settings><LayoutMode3D>` at show-folder load. Used as the initial
+// value for the House Preview's is3D toggle; not written back since
+// iPad layout editing stays desktop-only.
+- (BOOL)layoutMode3D;
+
 // Effect editing
 - (BOOL)addEffectToRow:(int)rowIndex
                   name:(NSString*)effectName

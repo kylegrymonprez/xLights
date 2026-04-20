@@ -522,6 +522,11 @@
         postNotificationName:@"XLLayoutGroupChanged" object:self];
 }
 
+- (BOOL)layoutMode3D {
+    if (!_context) return YES;
+    return _context->GetLayoutMode3D() ? YES : NO;
+}
+
 // MARK: - Effect Editing
 
 - (BOOL)addEffectToRow:(int)rowIndex

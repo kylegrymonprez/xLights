@@ -183,6 +183,32 @@ struct PreviewPaneView: UIViewRepresentable {
                 forName: .previewResetCamera, object: nil, queue: .main
             ) { note in apply(note) { b in b.resetCamera() }})
 
+            // Fit-all / fit-model — both resolve model bounds through
+            // the document's render context, so we have to pull the
+            // doc off the view model each time (it can change across
+            // sequence loads).
+            notificationObservers.append(center.addObserver(
+                forName: .previewFitAll, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let self,
+                      let bridge = self.bridge,
+                      let viewModel = self.viewModel,
+                      (note.object as? String) == previewName else { return }
+                _ = bridge.fitAllModels(for: viewModel.document)
+                self.mtkView?.setNeedsDisplay()
+            })
+            notificationObservers.append(center.addObserver(
+                forName: .previewFitModel, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let self,
+                      let bridge = self.bridge,
+                      let viewModel = self.viewModel,
+                      (note.object as? String) == previewName else { return }
+                let name = note.userInfo?["name"] as? String ?? ""
+                _ = bridge.fitModelNamed(name, for: viewModel.document)
+                self.mtkView?.setNeedsDisplay()
+            })
+
             // Image export — capture the current MTKView contents and push
             // the resulting UIImage through a share sheet. Scoped by preview
             // name like the zoom / reset observers above.

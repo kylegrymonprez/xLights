@@ -32,9 +32,13 @@ struct HousePreviewView: View {
     @State private var activeLayoutGroup: String = "Default"
 
     var body: some View {
+        // Pass nil for previewModelName — House Preview must draw
+        // every model, not single-model mode. `selectedModelName` is
+        // the independent signal that drives "Fit Selected".
         PreviewContainer(title: "House",
                          previewName: "HousePreview",
                          previewModelName: nil,
+                         selectedModelName: viewModel.previewModelName,
                          controlsVisible: $controlsVisible,
                          settings: settings,
                          layoutGroups: layoutGroups,
@@ -52,6 +56,12 @@ struct HousePreviewView: View {
     private func refreshLayoutGroups() {
         layoutGroups = (viewModel.document.layoutGroups() as? [String]) ?? ["Default"]
         activeLayoutGroup = viewModel.document.activeLayoutGroup() ?? "Default"
+        // Adopt desktop's last-used 3D/2D preference from
+        // `<settings><LayoutMode3D>` on each show-folder load. Users
+        // can still flip the toggle mid-session; we don't write back.
+        if viewModel.isShowFolderLoaded {
+            settings.is3D = viewModel.document.layoutMode3D()
+        }
     }
 }
 
@@ -67,6 +77,7 @@ struct ModelPreviewView: View {
         PreviewContainer(title: "Model",
                          previewName: "ModelPreview",
                          previewModelName: viewModel.previewModelName,
+                         selectedModelName: viewModel.previewModelName,
                          controlsVisible: $controlsVisible,
                          settings: settings,
                          layoutGroups: [],
@@ -80,6 +91,10 @@ private struct PreviewContainer: View {
     let title: String
     let previewName: String
     let previewModelName: String?
+    /// Name of the model the user currently has selected (drives Fit
+    /// Selected). Independent of `previewModelName` which controls the
+    /// bridge's single-model draw mode.
+    let selectedModelName: String?
     @Binding var controlsVisible: Bool
     let settings: PreviewSettings
     let layoutGroups: [String]
@@ -114,6 +129,7 @@ private struct PreviewContainer: View {
                                            settings: settings,
                                            supportsViewObjects: supportsViewObjects,
                                            supportsIs3D: supportsIs3D,
+                                           selectedModelName: selectedModelName,
                                            layoutGroups: layoutGroups,
                                            activeLayoutGroup: $activeLayoutGroup)
                 }
@@ -151,6 +167,7 @@ private struct PreviewControlsOverlay: View {
     @Bindable var settings: PreviewSettings
     let supportsViewObjects: Bool
     let supportsIs3D: Bool
+    let selectedModelName: String?
     let layoutGroups: [String]
     @Binding var activeLayoutGroup: String
 
@@ -177,6 +194,29 @@ private struct PreviewControlsOverlay: View {
                 Button { post(.zoomReset) } label: { Text("1×").font(.caption.monospacedDigit()) }
                 Button { post(.zoomIn) } label: { Image(systemName: "plus.magnifyingglass") }
                 Button { post(.reset) } label: { Image(systemName: "arrow.counterclockwise") }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+
+            // Fit All / Fit Selected — frame visible models in the
+            // viewport. Fit Selected is only meaningful when a model
+            // is picked (via Model Preview); greyed out otherwise.
+            HStack(spacing: 4) {
+                Button {
+                    NotificationCenter.default.post(name: .previewFitAll,
+                                                    object: previewName)
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right.rectangle")
+                }
+                Button {
+                    guard let sel = selectedModelName, !sel.isEmpty else { return }
+                    NotificationCenter.default.post(name: .previewFitModel,
+                                                    object: previewName,
+                                                    userInfo: ["name": sel])
+                } label: {
+                    Image(systemName: "viewfinder")
+                }
+                .disabled(selectedModelName?.isEmpty ?? true)
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
@@ -242,27 +282,28 @@ private struct PreviewControlsOverlay: View {
             // doesn't expose viewpoints either).
             if supportsIs3D {
                 Menu {
-                    if viewpoints.isEmpty {
-                        Text("No saved viewpoints")
-                            .font(.caption2)
-                    } else {
-                        ForEach(viewpoints, id: \.self) { name in
-                            Button {
-                                postViewpointCommand(action: "apply", name: name)
-                                appliedViewpoint = name
-                            } label: {
-                                HStack {
-                                    Text(name)
-                                    if name == appliedViewpoint {
-                                        Spacer()
-                                        Image(systemName: "checkmark")
-                                    }
+                    ForEach(viewpoints, id: \.self) { name in
+                        Button {
+                            postViewpointCommand(action: "apply", name: name)
+                            appliedViewpoint = name
+                        } label: {
+                            HStack {
+                                Text(name)
+                                if name == appliedViewpoint {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
                                 }
                             }
                         }
+                    }
+                    // "Default" is a virtual entry at the top of the
+                    // list and must not appear in Delete. Also skip the
+                    // submenu when there are no user-saved viewpoints.
+                    let deletable = viewpoints.filter { $0 != "Default" }
+                    if !deletable.isEmpty {
                         Divider()
                         Menu("Delete…") {
-                            ForEach(viewpoints, id: \.self) { name in
+                            ForEach(deletable, id: \.self) { name in
                                 Button(role: .destructive) {
                                     postViewpointCommand(action: "delete", name: name)
                                     if appliedViewpoint == name { appliedViewpoint = nil }
@@ -271,15 +312,11 @@ private struct PreviewControlsOverlay: View {
                                 }
                             }
                         }
-                        Divider()
                     }
+                    Divider()
                     Button("Save Current View As…") {
                         savePromptName = ""
                         savePromptVisible = true
-                    }
-                    Button("Restore Default Viewpoint") {
-                        postViewpointCommand(action: "restore", name: nil)
-                        appliedViewpoint = nil
                     }
                 } label: {
                     HStack(spacing: 3) {
@@ -364,6 +401,10 @@ extension Notification.Name {
     static let previewZoomOut = Notification.Name("PreviewZoomOut")
     static let previewZoomReset = Notification.Name("PreviewZoomReset")
     static let previewResetCamera = Notification.Name("PreviewResetCamera")
+    static let previewFitAll = Notification.Name("PreviewFitAll")
+    /// Fit to a specific named model. `userInfo["name"]` carries the
+    /// model name. object is the preview name.
+    static let previewFitModel = Notification.Name("PreviewFitModel")
     static let previewSaveImage = Notification.Name("PreviewSaveImage")
     /// Posted by `PreviewControlsOverlay` (object = previewName) when
     /// the user asks the coordinator to refresh its viewpoint list,

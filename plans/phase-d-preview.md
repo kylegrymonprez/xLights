@@ -1,83 +1,89 @@
 # Phase D — Model Preview + preview polish
 
-Open items for preview appearance, overlays, and camera polish. Scope
-is *preview-viewing*: camera, overlays, background, transport, export.
-Layout-editor overlays and model manipulation live in
-[`future-layout-editing.md`](future-layout-editing.md); multi-
-`LayoutGroup` visibility management lives in Phase F.
+**Status: ✓ complete (2026-04-20).**
 
-**Already landed** (see git history for detail): core render fixes for
-2D mode (virtual canvas, `Display2DCenter0`, correct `is_3d` flag to
-`DisplayModelOnWindow`); D-3 saved viewpoints; D-4 2D/3D toggle; D-7
-read-only background image; D-10 preview image export; D-11
-rewind/FF transport; D-13 "View Objects" toggle (one switch for
-background + view objects + any future layout-editor overlays);
-D-14 alternate LayoutGroup previews; D-12 pixel-size and D-15 FPS
-counter were *dropped* for parity (no desktop counterpart).
+All in-scope Phase D work is done. Layout-editor-only overlays and
+model manipulation are parked in
+[`future-layout-editing.md`](future-layout-editing.md). Multi-
+`LayoutGroup` editing and per-view visibility management stay in
+Phase F (Window System + Display Elements).
 
-Cross-phase reminders: layout editing stays desktop-only; multi-
-`LayoutGroup` editing and per-view visibility management are Phase F
-(Window System + Display Elements); save/open/new file plumbing that
-several items here reference is Phase E (Sequence Management).
+## Summary of what landed
 
-## D-5. Model placement on House Preview (2D/3D)
+Core render fixes for 2D mode (virtual canvas size from
+`<settings><previewWidth/Height>`, `Display2DCenter0` in the view
+matrix, correct `is_3d` flag to `DisplayModelOnWindow`).
 
-Desktop stores model placement for the house preview as part of each
-`Model`'s `ModelScreenLocation` in `xlights_rgbeffects.xml` — verified
-in place. Confirm during implementation:
+Per-item:
 
-- 3D placement attributes round-trip through `ModelManager::LoadModels`
-  (they already do on iPad load; verify Save still writes them once we
-  start editing).
-- If any 2D/3D placement state is stored only in a desktop-side
-  preference (e.g. layout-panel toolbar state) rather than `rgbeffects`,
-  move it into `rgbeffects` so iPad sees the same state. Default
-  assumption is that everything needed is already in `rgbeffects` and
-  no schema change is required.
+- **D-3 Saved viewpoints** — `iPadRenderContext` owns a `ViewpointMgr`;
+  `SaveViewpoints()` rewrites just the `<Viewpoints>` subtree of
+  `xlights_rgbeffects.xml`. `XLMetalBridge` exposes per-pane
+  list / apply / save-as / delete / restore-default. SwiftUI menu in
+  `PreviewControlsOverlay` with the applied name shown next to the
+  `camera.viewfinder` icon.
+- **D-4 2D/3D toggle** — House-Preview-only segmented picker. Initial
+  value reads `<settings><LayoutMode3D>`; session overrides don't
+  write back (layout editing stays desktop-only).
+- **D-5 Model placement sourcing** — verified. All House Preview
+  placement data (`previewWidth`, `previewHeight`, `Display2DCenter0`,
+  `LayoutMode3D`, `backgroundImage*`, `layoutGroups`, `Viewpoints`) is
+  read from `rgbeffects.xml`. iPad never writes back; no schema
+  migration needed.
+- **D-6 Fit All / Fit Selected** — bridge methods walk model bounds
+  via `ModelScreenLocation::GetHcenterPos` / `GetMWidth` etc. For 2D
+  we pick `zoom = min(virtualW/bboxW, virtualH/bboxH) * 0.95` and pan
+  to centre (honouring `Display2DCenter0`). For 3D we keep the
+  rotation angles, pan so bbox centre sits at world origin, and pick
+  `distance = max(bboxH/2, bboxW/2/aspect) / tan(22.5°) / 0.95`.
+  Fit Selected uses `viewModel.previewModelName` (the currently-
+  selected Model Preview target), and no-ops when the selected model
+  isn't visible in the active layout group.
+- **D-7 Background image** — read-only display in 2D House Preview.
+  Honours per-`LayoutGroup` overrides. Lazy-loaded via
+  `CGImageSource`, texture cached on the bridge. Gated behind the
+  D-13 "View Objects" toggle.
+- **D-10 Preview image export** — share-sheet button. MTKView snapshot
+  via `drawHierarchy(in:afterScreenUpdates:)` → `UIActivityViewController`
+  (Files / Photos / Mail / AirDrop / Copy / Print out of the box).
+- **D-11 House Preview transport parity** — Rewind-to-start / Rewind
+  10s / Stop / Play-Pause / FF 10s in the main toolbar. Scrubbing
+  handled by the existing sequencer-ruler playhead drag.
+- **D-13 "View Objects" toggle** — one switch for the whole visual
+  backdrop: background image + view objects (house-mesh / terrain /
+  gridlines / ground images). Future layout-editor overlays will hook
+  the same flag.
+- **D-14 Alternate LayoutGroup previews** — `iPadRenderContext` loads
+  `<layoutGroups>`. House Preview filter mirrors desktop
+  `UpdateModelsList`: `layout_group == active || "All Previews"` plus
+  ModelGroup expansion. Switcher Menu in the overlay.
 
-This is a verification task — triggered when Phase E sequence-editing
-lands and we start writing rgbeffects back out.
+Dropped for desktop parity:
 
-## D-6. Zoom / fit / center shortcuts
+- **D-12 Pixel / point-size control** — no desktop counterpart; kept
+  the hardcoded 2.0. Would mislead users diffing iPad vs desktop.
+- **D-15 FPS / render-time overlay** — diagnostic noise; causes
+  support confusion.
 
-Per-pane controls overlay already exposes +, -, 1x, and Reset View
-(mapped to `setCameraZoom` / `resetCamera`). Still to add:
+## Deferred to future-layout-editing.md
 
-- **Fit All Models** — fit the full house bounding box to the preview.
-- **Fit Selected Model** — fit the currently-selected model (or its
-  bounding box) to the preview.
-
-Both map to existing `PreviewCamera` operations; the camera math
-differs between 2D (ortho half-width scaling) and 3D (distance +
-angles) so each mode needs its own fit routine. No new shader work.
+- Model-name / info / first-pixel overlays (L-1).
+- 2D grid / bounding-box overlays (L-2). `Display2DCenter0` is already
+  in the view matrix; only the grid/bbox overlays themselves are
+  parked.
+- Model selection, drag-to-move, resize handles, polyline vertex
+  editing, property grid, align/distribute, flip, resize-to-match,
+  CAD/DXF export, wiring view, bulk edit.
 
 ---
 
-## Explicitly out of scope for Phase D
+## Explicitly out of scope for Phase D (kept for audit reference)
 
-Captured here so future audits don't re-flag them:
-
-- **Model-name / info / first-pixel overlays** — diagnostic overlays
-  used while arranging a layout, not during playback preview. Parked
-  in [`future-layout-editing.md`](future-layout-editing.md) (L-1).
-- **2D grid / bounding-box overlays** (`Display2DGrid`,
-  `Display2DGridSpacing`, `Display2DBoundingBox`) — measurement aids
-  for laying out models, not playback. Parked in
-  [`future-layout-editing.md`](future-layout-editing.md) (L-2).
-  `Display2DCenter0` itself is already consumed by the 2D view matrix
-  — it is part of the world-coord system, not a layout-editor overlay.
-- **Model selection, drag-to-move, resize handles, polyline vertex
-  editing, property grid, align/distribute, flip, resize-to-match,
-  CAD/DXF export, wiring view, bulk edit** — all part of the desktop
-  Layout editor, parked in
-  [`future-layout-editing.md`](future-layout-editing.md).
-- **Per-model show/hide + Views management** — that's the Display
-  Elements dialog in Phase F-6. D-13 only adds a single coarse view-
-  objects toggle as a stop-gap.
+- **Per-model show/hide + Views management** — Display Elements
+  dialog, Phase F-6. D-13 only provides the coarse view-objects
+  toggle as a stop-gap.
 - **Detach previews to external display / separate window** — Phase
   F-1 (scene-level window system).
 - **3D Connexion / space-mouse input** — desktop-only peripheral.
 - **Keyboard shortcut camera nudging** — iPad input is touch-first;
   gesture equivalents already cover these.
-- **Pixel-size slider** and **FPS counter** — no desktop counterpart,
-  dropped for parity (see git history for full reasoning).

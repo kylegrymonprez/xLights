@@ -80,20 +80,20 @@ variants in `libdbg-ios/`.
 | B | Effects grid parity with desktop | Partial — gap audit vs desktop done 2026-04-20; Metal-backed grid renders and basic edit works, but ~100 desktop behaviours remain (multi-select, align/split, timing-track editing, loop region, follow-playhead, row-heading ops, waveform variants) | [`plans/phase-b-grid-parity.md`](plans/phase-b-grid-parity.md) |
 | B-Metal | Grid render pipeline migration (CG → Metal) | ✓ complete | — |
 | C | Effect settings inspector | In progress | [`plans/phase-c-inspector.md`](plans/phase-c-inspector.md) |
-| D | Model Preview + preview polish | Partial — most UI items landed (viewpoints, 2D/3D toggle, background, transport, image export, view-object toggle, layout groups); only fit-to-window zoom remains in scope (layout-editor overlays parked in [`plans/future-layout-editing.md`](plans/future-layout-editing.md)) | [`plans/phase-d-preview.md`](plans/phase-d-preview.md) |
+| D | Model Preview + preview polish | ✓ complete — layout-editor overlays parked in [`plans/future-layout-editing.md`](plans/future-layout-editing.md) | [`plans/phase-d-preview.md`](plans/phase-d-preview.md) |
 | E | Sequence management (open / save / new / settings) | Not started — currently read-only; blocks any real user testing | [`plans/phase-e-sequence-management.md`](plans/phase-e-sequence-management.md) |
 | F | Window system + Display Elements | Not started | [`plans/phase-f-window-system.md`](plans/phase-f-window-system.md) |
 | G | Document / iCloud polish | Not started | [`plans/phase-g-document.md`](plans/phase-g-document.md) |
 | H | App Store readiness | Not started | [`plans/phase-h-app-store.md`](plans/phase-h-app-store.md) |
 
-**Parallelism.** Phases B / C / D / E are independent and can run in
+**Parallelism.** Phases B / C / E are independent and can run in
 parallel. B works against the Metal grid + `SequencerViewModel` + row
 headers; C works against `EffectMetadata.swift` + the inspector view;
-D works against `iPadModelPreview` + `ViewpointMgr`; E works against
-`XLSequenceDocument` + `SequencerViewModel` save/new paths. Phase F
-depends on all of them — it composes the finished pieces (previews,
-inspector, grid) plus the File-menu commands (E) into the final window
-/ menu-bar layout. G and H are sequential at the end.
+E works against `XLSequenceDocument` + `SequencerViewModel` save/new
+paths. Phase D is complete. Phase F depends on the others — it
+composes the finished pieces (previews, inspector, grid) plus the
+File-menu commands (E) into the final window / menu-bar layout. G
+and H are sequential at the end.
 
 **Preview scope.** Phase D is preview *viewing and appearance*: camera,
 overlays, background, labels, transport, export. Desktop `ModelPreview`

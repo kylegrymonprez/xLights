@@ -113,6 +113,8 @@ bool iPadRenderContext::LoadShowFolder(const std::string& showDir,
                         if (h > 0) _previewHeight = h;
                     } else if (name == "Display2DCenter0") {
                         _display2DCenter0 = (std::string(v) == "1");
+                    } else if (name == "LayoutMode3D") {
+                        _layoutMode3D = (std::string(v) == "1");
                     } else if (name == "backgroundImage") {
                         _backgroundImage = v;
                     } else if (name == "backgroundBrightness") {
@@ -138,10 +140,11 @@ bool iPadRenderContext::LoadShowFolder(const std::string& showDir,
                     _backgroundImage.clear();
                 }
             }
-            spdlog::info("iPadRenderContext: Preview canvas {}x{}, center2D0={}, bg='{}' bri={} alpha={} scale={}",
-                         _previewWidth, _previewHeight, _display2DCenter0,
-                         _backgroundImage, _backgroundBrightness,
-                         _backgroundAlpha, _scaleBackgroundImage);
+            spdlog::info("iPadRenderContext: Preview canvas {}x{}, mode3D={}, center2D0={}, bg='{}' bri={} alpha={} scale={}",
+                         _previewWidth, _previewHeight, _layoutMode3D,
+                         _display2DCenter0, _backgroundImage,
+                         _backgroundBrightness, _backgroundAlpha,
+                         _scaleBackgroundImage);
 
             // Named layout groups — each gets its own background stack.
             // Desktop writes these under `<layoutGroups><layoutGroup …/>`

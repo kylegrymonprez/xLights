@@ -67,4 +67,13 @@
                  forDocument:(XLSequenceDocument*)doc;
 - (void)restoreDefaultViewpointForDocument:(XLSequenceDocument*)doc;
 
+// Fit-to-window camera shortcuts. Fit All frames every model in the
+// active layout group (matching the House Preview filter); Fit Model
+// frames the single named model (or returns NO if it's missing or
+// hidden by the current layout group). Adjusts zoom + pan (2D) or
+// distance + pan (3D) without changing rotation angles.
+- (BOOL)fitAllModelsForDocument:(XLSequenceDocument*)doc;
+- (BOOL)fitModelNamed:(NSString*)name
+          forDocument:(XLSequenceDocument*)doc;
+
 @end

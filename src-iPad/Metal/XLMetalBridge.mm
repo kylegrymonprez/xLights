@@ -25,7 +25,9 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <ImageIO/ImageIO.h>
 
+#include <cmath>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -253,6 +255,13 @@ static iPadRenderContext* ContextFromDoc(XLSequenceDocument* doc) {
     NSMutableArray<NSString*>* out = [NSMutableArray array];
     iPadRenderContext* rctx = ContextFromDoc(doc);
     if (!rctx || !_preview) return out;
+    // "Default" always leads the list — every preview has a default
+    // viewpoint (either the user's saved DefaultCamera2D/3D, or the
+    // built-in PreviewCamera::Reset state as a fallback). Treating it
+    // as a normal list entry lets the overlay show "Default" next to
+    // the camera icon once the user picks it, matching the named-
+    // viewpoint flow.
+    [out addObject:@"Default"];
     ViewpointMgr& vm = rctx->GetViewpointMgr();
     const bool wantIs3D = _preview->Is3D();
     const int n = wantIs3D ? vm.GetNum3DCameras() : vm.GetNum2DCameras();
@@ -272,6 +281,22 @@ static iPadRenderContext* ContextFromDoc(XLSequenceDocument* doc) {
     ViewpointMgr& vm = rctx->GetViewpointMgr();
     std::string wanted = std::string([name UTF8String]);
     const bool is3d = _preview->Is3D();
+
+    // "Default" is a virtual entry — the saved user-default camera if
+    // one exists, else the built-in PreviewCamera::Reset state.
+    // Matches desktop "Restore Default Viewpoint" semantics and lets
+    // users see "Default" reflected in the overlay label.
+    if (wanted == "Default") {
+        PreviewCamera* def = is3d ? vm.GetDefaultCamera3D()
+                                  : vm.GetDefaultCamera2D();
+        if (def) {
+            _preview->ActiveCamera() = *def;
+        } else {
+            _preview->ResetCamera();
+        }
+        return YES;
+    }
+
     const int n = is3d ? vm.GetNum3DCameras() : vm.GetNum2DCameras();
     for (int i = 0; i < n; i++) {
         PreviewCamera* c = is3d ? vm.GetCamera3D(i) : vm.GetCamera2D(i);
@@ -291,6 +316,10 @@ static iPadRenderContext* ContextFromDoc(XLSequenceDocument* doc) {
               forDocument:(XLSequenceDocument*)doc {
     iPadRenderContext* rctx = ContextFromDoc(doc);
     if (!rctx || !_preview || !name || name.length == 0) return NO;
+    // "Default" is a reserved virtual entry — don't let a user save
+    // over it. Desktop exposes a separate "Save as default viewpoint"
+    // action for that; we can add it later if needed.
+    if ([name isEqualToString:@"Default"]) return NO;
     ViewpointMgr& vm = rctx->GetViewpointMgr();
     const bool is3d = _preview->Is3D();
     std::string n = std::string([name UTF8String]);
@@ -303,6 +332,7 @@ static iPadRenderContext* ContextFromDoc(XLSequenceDocument* doc) {
                  forDocument:(XLSequenceDocument*)doc {
     iPadRenderContext* rctx = ContextFromDoc(doc);
     if (!rctx || !_preview || !name) return NO;
+    if ([name isEqualToString:@"Default"]) return NO;  // can't delete virtual
     ViewpointMgr& vm = rctx->GetViewpointMgr();
     const bool is3d = _preview->Is3D();
     std::string wanted = std::string([name UTF8String]);
@@ -335,6 +365,157 @@ static iPadRenderContext* ContextFromDoc(XLSequenceDocument* doc) {
         }
     }
     _preview->ResetCamera();
+}
+
+/// Accumulate `m`'s world-coord bounding box into the running min/max.
+/// Uses ModelScreenLocation's center + render size, since UpdateBoundingBox
+/// needs the Node list populated via PrepareToDraw — we want a cheap
+/// approximation that works for any loaded model. Returns true if `m`
+/// contributed (i.e. had valid dimensions).
+static bool AccumulateModelBounds(Model* m, float& minX, float& minY,
+                                   float& maxX, float& maxY) {
+    if (!m) return false;
+    auto& loc = m->GetModelScreenLocation();
+    float cx = loc.GetHcenterPos();
+    float cy = loc.GetVcenterPos();
+    // GetRestorableMWidth / GetRestorableMHeight return post-scale world
+    // extents for most model types. Fall back to a small radius if the
+    // model doesn't report a meaningful size.
+    float halfW = std::max(1.0f, loc.GetMWidth() * 0.5f);
+    float halfH = std::max(1.0f, loc.GetMHeight() * 0.5f);
+    minX = std::min(minX, cx - halfW);
+    maxX = std::max(maxX, cx + halfW);
+    minY = std::min(minY, cy - halfH);
+    maxY = std::max(maxY, cy + halfH);
+    return true;
+}
+
+/// Apply a bounding-box-to-viewport fit to the active PreviewCamera.
+/// 2D sets zoom + pan so the bbox fills the virtual canvas area with
+/// a small margin; 3D keeps the current rotation but adjusts pan so
+/// the bbox centre is at world origin and distance so the larger of
+/// the bbox dimensions fits the 45° vertical FOV. Called after the
+/// caller has accumulated bounds from one or more models.
+- (void)fitToBoundingBoxMinX:(float)minX minY:(float)minY
+                        maxX:(float)maxX maxY:(float)maxY
+                         ctx:(iPadRenderContext*)rctx {
+    if (!_preview) return;
+    if (maxX <= minX || maxY <= minY) return;
+
+    const float bboxW = maxX - minX;
+    const float bboxH = maxY - minY;
+    const float cx = (minX + maxX) * 0.5f;
+    const float cy = (minY + maxY) * 0.5f;
+    // Leave ~5% margin around the fitted content so models at the
+    // bounding box edge don't render flush with the pane border.
+    constexpr float margin = 0.95f;
+
+    PreviewCamera& cam = _preview->ActiveCamera();
+    if (_preview->Is3D()) {
+        // 3D: pan moves the scene so its centre sits at world origin
+        // (the rotation / distance pivot), then distance is chosen to
+        // fit the larger of the bbox dimensions in the 45° FOV at the
+        // current aspect ratio. We don't touch angleX/Y/Z — this is a
+        // "frame the bbox from the current viewpoint" operation.
+        cam.SetPanX(-cx);
+        cam.SetPanY(-cy);
+        cam.SetPanZ(0.0f);
+
+        const int paneW = _canvas ? _canvas->getWidth() : 0;
+        const int paneH = _canvas ? _canvas->getHeight() : 0;
+        const float aspect = (paneH > 0) ? (float)paneW / (float)paneH : 1.0f;
+        // Vertical half-FOV at 45° total. For the horizontal axis we
+        // divide by aspect to pick up pane-width-constrained scenes.
+        const float tanHalfFov = std::tan(glm::radians(22.5f));
+        const float neededYDist = (bboxH * 0.5f) / tanHalfFov;
+        const float neededXDist = (bboxW * 0.5f) / (tanHalfFov * aspect);
+        float dist = std::max(neededYDist, neededXDist) / margin;
+        if (dist < 100.0f) dist = 100.0f;                 // sanity floor
+        cam.SetDistance(-dist);
+        cam.SetZoom(1.0f);
+    } else {
+        // 2D: the pane's ortho mapping applies scale2d = min(h/vH, w/vW)
+        // automatically, so we just choose a PreviewCamera zoom that
+        // makes the bbox fill the virtual canvas (after scale2d the
+        // bbox lands in the pane). Pan is in scaled pixel space
+        // pre-translation, and the 2D view matrix adds a
+        // `virtualW/2` shift when Display2DCenter0 is on — handle that
+        // here so fit is correct for both layouts.
+        int virtualW = 0;
+        int virtualH = 0;
+        _preview->GetVirtualCanvasSize(virtualW, virtualH);
+        if (virtualW <= 0 || virtualH <= 0) {
+            // Fallback when the pane hasn't been sized yet — nothing
+            // meaningful we can compute; reset instead.
+            cam.Reset();
+            return;
+        }
+        float zoom = std::min((float)virtualW / bboxW,
+                              (float)virtualH / bboxH) * margin;
+        if (zoom < 0.01f) zoom = 0.01f;
+        cam.SetZoom(zoom);
+        cam.SetZoomCorrX(0.0f);
+        cam.SetZoomCorrY(0.0f);
+        // Place bbox centre at virtual canvas centre. With center2D0
+        // on, the view matrix already shifts world-X by +virtualW/2,
+        // so the pan target is -cx; otherwise we need to also recentre
+        // the virtual canvas on (virtualW/2) → pan target is
+        // (virtualW/2 - cx).
+        const bool c0 = rctx ? rctx->GetDisplay2DCenter0() : false;
+        const float vhx = (float)virtualW * 0.5f;
+        const float vhy = (float)virtualH * 0.5f;
+        float panX = c0 ? (-cx) : (vhx - cx);
+        float panY = vhy - cy;
+        cam.SetPanX(panX);
+        cam.SetPanY(panY);
+        cam.SetPanZ(0.0f);
+    }
+}
+
+- (BOOL)fitAllModelsForDocument:(XLSequenceDocument*)doc {
+    iPadRenderContext* rctx = ContextFromDoc(doc);
+    if (!rctx || !_preview) return NO;
+
+    float minX = std::numeric_limits<float>::infinity();
+    float minY = std::numeric_limits<float>::infinity();
+    float maxX = -std::numeric_limits<float>::infinity();
+    float maxY = -std::numeric_limits<float>::infinity();
+    bool any = false;
+    // Respect the active layout-group filter so Fit All matches what
+    // the user actually sees — not every model in the show.
+    for (Model* m : rctx->GetModelsForActivePreview()) {
+        if (AccumulateModelBounds(m, minX, minY, maxX, maxY)) any = true;
+    }
+    if (!any) return NO;
+    [self fitToBoundingBoxMinX:minX minY:minY maxX:maxX maxY:maxY ctx:rctx];
+    return YES;
+}
+
+- (BOOL)fitModelNamed:(NSString*)name
+          forDocument:(XLSequenceDocument*)doc {
+    iPadRenderContext* rctx = ContextFromDoc(doc);
+    if (!rctx || !_preview || !name || name.length == 0) return NO;
+
+    std::string wanted = std::string([name UTF8String]);
+    Model* target = rctx->GetModelManager()[wanted];
+    if (!target) return NO;
+
+    // Only fit if the model is actually visible in the current layout
+    // group — otherwise fitting to an offscreen model would leave the
+    // user staring at empty space.
+    bool visible = false;
+    for (Model* m : rctx->GetModelsForActivePreview()) {
+        if (m == target) { visible = true; break; }
+    }
+    if (!visible) return NO;
+
+    float minX = std::numeric_limits<float>::infinity();
+    float minY = std::numeric_limits<float>::infinity();
+    float maxX = -std::numeric_limits<float>::infinity();
+    float maxY = -std::numeric_limits<float>::infinity();
+    if (!AccumulateModelBounds(target, minX, minY, maxX, maxY)) return NO;
+    [self fitToBoundingBoxMinX:minX minY:minY maxX:maxX maxY:maxY ctx:rctx];
+    return YES;
 }
 
 - (void)drawModelsForDocument:(XLSequenceDocument*)doc atMS:(int)frameMS pointSize:(float)pointSize {
