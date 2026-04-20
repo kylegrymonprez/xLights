@@ -172,6 +172,15 @@
 // Opaque pointer to iPadRenderContext for Metal bridge
 - (void*)renderContext;
 
+// House Preview layout groups. "Default" (always first) + named groups
+// from `<layoutGroups>` in xlights_rgbeffects.xml. Setting an unknown
+// name falls back to "Default". Setter posts
+// `XLLayoutGroupChanged` on NotificationCenter so preview panes can
+// invalidate their background-texture caches.
+- (NSArray<NSString*>*)layoutGroups;
+- (NSString*)activeLayoutGroup;
+- (void)setActiveLayoutGroup:(NSString*)name;
+
 // Effect editing
 - (BOOL)addEffectToRow:(int)rowIndex
                   name:(NSString*)effectName

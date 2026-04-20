@@ -13,9 +13,11 @@
 #include "render/Element.h"
 #include "render/RenderProgressInfo.h"
 #include "models/Model.h"
+#include "models/ModelGroup.h"
 #include "models/Node.h"
 #include "render/ValueCurve.h"
 #include "utils/ExternalHooks.h"
+#include "XmlSerializer/XmlSerializingVisitor.h"
 
 #include <pugixml.hpp>
 #include "utils/FileUtils.h"
@@ -25,6 +27,8 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <vector>
@@ -139,6 +143,36 @@ bool iPadRenderContext::LoadShowFolder(const std::string& showDir,
                          _backgroundImage, _backgroundBrightness,
                          _backgroundAlpha, _scaleBackgroundImage);
 
+            // Named layout groups — each gets its own background stack.
+            // Desktop writes these under `<layoutGroups><layoutGroup …/>`
+            // with attribute-style values (not `<settings>` children).
+            _namedLayoutGroups.clear();
+            auto layoutGroupsNode = xlightsNode.child("layoutGroups");
+            if (layoutGroupsNode) {
+                for (auto lg = layoutGroupsNode.first_child(); lg; lg = lg.next_sibling()) {
+                    if (std::string_view(lg.name()) != "layoutGroup") continue;
+                    NamedLayoutGroup g;
+                    g.name = lg.attribute("name").as_string("");
+                    if (g.name.empty()) continue;
+                    g.backgroundImage = lg.attribute("backgroundImage").as_string("");
+                    g.backgroundBrightness = lg.attribute("backgroundBrightness").as_int(100);
+                    g.backgroundAlpha = lg.attribute("backgroundAlpha").as_int(100);
+                    g.scaleBackgroundImage = lg.attribute("scaleImage").as_int(0) > 0;
+                    if (!g.backgroundImage.empty()) {
+                        g.backgroundImage = FileUtils::FixFile(_showDir, g.backgroundImage);
+                        ObtainAccessToURL(g.backgroundImage, false);
+                        if (!FileExists(g.backgroundImage)) {
+                            spdlog::warn("iPadRenderContext: layoutGroup '{}' bg not found: {}",
+                                         g.name, g.backgroundImage);
+                            g.backgroundImage.clear();
+                        }
+                    }
+                    _namedLayoutGroups.push_back(std::move(g));
+                }
+                spdlog::info("iPadRenderContext: Loaded {} named layout groups",
+                             _namedLayoutGroups.size());
+            }
+
             auto modelsNode = xlightsNode.child("models");
             if (!modelsNode) {
                 spdlog::error("iPadRenderContext: No <models> element in {}", rgbPath);
@@ -171,6 +205,19 @@ bool iPadRenderContext::LoadShowFolder(const std::string& showDir,
                     spdlog::info("iPadRenderContext: Loaded {} views",
                                  _viewsManager.GetViewCount());
                 }
+
+                // Viewpoints — saved camera positions (2D/3D separated).
+                // Desktop exposes these via the preview right-click menu
+                // (ModelPreview context menu). On iPad we surface them
+                // through the preview controls overlay.
+                auto viewpointsNode = xlightsNode.child("Viewpoints");
+                _viewpointMgr.Clear();
+                if (viewpointsNode) {
+                    _viewpointMgr.Load(viewpointsNode);
+                    spdlog::info("iPadRenderContext: Loaded viewpoints (2D={}, 3D={})",
+                                 _viewpointMgr.GetNum2DCameras(),
+                                 _viewpointMgr.GetNum3DCameras());
+                }
             }
         }
     } else {
@@ -178,6 +225,143 @@ bool iPadRenderContext::LoadShowFolder(const std::string& showDir,
     }
 
     return true;
+}
+
+bool iPadRenderContext::SaveViewpoints() {
+    if (_showDir.empty()) return false;
+    std::string rgbPath = _showDir + "/xlights_rgbeffects.xml";
+    ObtainAccessToURL(rgbPath, true);
+
+    pugi::xml_document doc;
+    auto result = doc.load_file(rgbPath.c_str());
+    if (!result) {
+        spdlog::error("iPadRenderContext::SaveViewpoints: load failed: {}",
+                      result.description());
+        return false;
+    }
+    auto root = doc.child("xrgb");
+    if (!root) root = doc.child("xlights");
+    if (!root) {
+        spdlog::error("iPadRenderContext::SaveViewpoints: no root element");
+        return false;
+    }
+
+    // Remove the old Viewpoints subtree and rewrite from the in-memory
+    // ViewpointMgr. ViewpointMgr::Save walks the visitor which creates
+    // a fresh <Viewpoints> child under the target node.
+    while (auto existing = root.child("Viewpoints")) {
+        root.remove_child(existing);
+    }
+    XmlSerializingVisitor visitor(root);
+    _viewpointMgr.Save(visitor);
+
+    if (!doc.save_file(rgbPath.c_str(), "  ")) {
+        spdlog::error("iPadRenderContext::SaveViewpoints: write failed for {}",
+                      rgbPath);
+        return false;
+    }
+    return true;
+}
+
+void iPadRenderContext::SetActiveLayoutGroup(const std::string& name) {
+    if (name == "Default") {
+        _activeLayoutGroup = "Default";
+        return;
+    }
+    for (const auto& g : _namedLayoutGroups) {
+        if (g.name == name) {
+            _activeLayoutGroup = name;
+            return;
+        }
+    }
+    // Unknown group — fall back to Default rather than render nothing.
+    _activeLayoutGroup = "Default";
+}
+
+const std::string& iPadRenderContext::GetActiveBackgroundImage() const {
+    if (_activeLayoutGroup == "Default") return _backgroundImage;
+    for (const auto& g : _namedLayoutGroups) {
+        if (g.name == _activeLayoutGroup) return g.backgroundImage;
+    }
+    return _backgroundImage;
+}
+
+int iPadRenderContext::GetActiveBackgroundBrightness() const {
+    if (_activeLayoutGroup == "Default") return _backgroundBrightness;
+    for (const auto& g : _namedLayoutGroups) {
+        if (g.name == _activeLayoutGroup) return g.backgroundBrightness;
+    }
+    return _backgroundBrightness;
+}
+
+int iPadRenderContext::GetActiveBackgroundAlpha() const {
+    if (_activeLayoutGroup == "Default") return _backgroundAlpha;
+    for (const auto& g : _namedLayoutGroups) {
+        if (g.name == _activeLayoutGroup) return g.backgroundAlpha;
+    }
+    return _backgroundAlpha;
+}
+
+bool iPadRenderContext::GetActiveScaleBackgroundImage() const {
+    if (_activeLayoutGroup == "Default") return _scaleBackgroundImage;
+    for (const auto& g : _namedLayoutGroups) {
+        if (g.name == _activeLayoutGroup) return g.scaleBackgroundImage;
+    }
+    return _scaleBackgroundImage;
+}
+
+// Mirrors desktop xLightsFrame::UpdateModelsList (TabSequence.cpp:1209).
+// For the Default preview, include models tagged "Default" or
+// "All Previews". For a named group, include models tagged with that
+// name or "All Previews". Model groups whose own `layout_group` matches
+// are expanded to their constituent models, skipping duplicates.
+std::vector<Model*> iPadRenderContext::GetModelsForActivePreview() const {
+    std::vector<Model*> out;
+    if (!_modelManager) return out;
+
+    const std::string& active = _activeLayoutGroup;
+
+    auto matchesActive = [&](const std::string& g) {
+        return g == active || g == "All Previews";
+    };
+
+    auto addModelIfAbsent = [&](Model* m) {
+        if (!m) return;
+        if (std::find(out.begin(), out.end(), m) == out.end()) {
+            out.push_back(m);
+        }
+    };
+
+    // Pass 1: individual (non-group) models whose layout_group matches.
+    for (const auto& [name, model] : _modelManager->GetModels()) {
+        if (!model) continue;
+        if (model->GetDisplayAs() == DisplayAsType::ModelGroup) continue;
+        if (matchesActive(model->GetLayoutGroup())) {
+            addModelIfAbsent(model);
+        }
+    }
+    // Pass 2: ModelGroups tagged for this preview — flatten their
+    // children (recursively for nested groups). A model already added
+    // in pass 1 is not duplicated.
+    std::function<void(ModelGroup*)> expand = [&](ModelGroup* grp) {
+        if (!grp) return;
+        for (Model* m : grp->Models()) {
+            if (!m) continue;
+            if (m->GetDisplayAs() == DisplayAsType::ModelGroup) {
+                expand(static_cast<ModelGroup*>(m));
+            } else {
+                addModelIfAbsent(m);
+            }
+        }
+    };
+    for (const auto& [name, model] : _modelManager->GetModels()) {
+        if (!model) continue;
+        if (model->GetDisplayAs() != DisplayAsType::ModelGroup) continue;
+        if (matchesActive(model->GetLayoutGroup())) {
+            expand(static_cast<ModelGroup*>(model));
+        }
+    }
+    return out;
 }
 
 bool iPadRenderContext::OpenSequence(const std::string& path) {

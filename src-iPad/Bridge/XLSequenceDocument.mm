@@ -495,6 +495,33 @@
     return _context.get();
 }
 
+- (NSArray<NSString*>*)layoutGroups {
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    [out addObject:@"Default"];
+    if (!_context) return out;
+    for (const auto& g : _context->GetNamedLayoutGroups()) {
+        [out addObject:[NSString stringWithUTF8String:g.name.c_str()]];
+    }
+    return out;
+}
+
+- (NSString*)activeLayoutGroup {
+    if (!_context) return @"Default";
+    return [NSString stringWithUTF8String:_context->GetActiveLayoutGroup().c_str()];
+}
+
+- (void)setActiveLayoutGroup:(NSString*)name {
+    if (!_context) return;
+    std::string s = name ? std::string([name UTF8String]) : std::string("Default");
+    if (_context->GetActiveLayoutGroup() == s) return;
+    _context->SetActiveLayoutGroup(s);
+    // Each preview pane caches its background texture against the
+    // previously-active path; broadcast so they invalidate before the
+    // next draw.
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:@"XLLayoutGroupChanged" object:self];
+}
+
 // MARK: - Effect Editing
 
 - (BOOL)addEffectToRow:(int)rowIndex

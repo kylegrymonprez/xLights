@@ -232,6 +232,111 @@ static std::unique_ptr<xlImage> LoadImageFile(const std::string& path, int& outW
     return _showViewObjects;
 }
 
+- (void)invalidateBackgroundCache {
+    if (_bgTexture) {
+        delete _bgTexture;
+        _bgTexture = nullptr;
+        _bgLoadedPath.clear();
+        _bgImageWidth = 0;
+        _bgImageHeight = 0;
+    }
+}
+
+// Helper: look up the iPadRenderContext from the document. Returns
+// nullptr if the document has no render context yet.
+static iPadRenderContext* ContextFromDoc(XLSequenceDocument* doc) {
+    if (!doc) return nullptr;
+    return static_cast<iPadRenderContext*>([doc renderContext]);
+}
+
+- (NSArray<NSString*>*)viewpointNamesForDocument:(XLSequenceDocument*)doc {
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    iPadRenderContext* rctx = ContextFromDoc(doc);
+    if (!rctx || !_preview) return out;
+    ViewpointMgr& vm = rctx->GetViewpointMgr();
+    const bool wantIs3D = _preview->Is3D();
+    const int n = wantIs3D ? vm.GetNum3DCameras() : vm.GetNum2DCameras();
+    for (int i = 0; i < n; i++) {
+        PreviewCamera* c = wantIs3D ? vm.GetCamera3D(i) : vm.GetCamera2D(i);
+        if (c) {
+            [out addObject:[NSString stringWithUTF8String:c->GetName().c_str()]];
+        }
+    }
+    return out;
+}
+
+- (BOOL)applyViewpointNamed:(NSString*)name
+                forDocument:(XLSequenceDocument*)doc {
+    iPadRenderContext* rctx = ContextFromDoc(doc);
+    if (!rctx || !_preview || !name) return NO;
+    ViewpointMgr& vm = rctx->GetViewpointMgr();
+    std::string wanted = std::string([name UTF8String]);
+    const bool is3d = _preview->Is3D();
+    const int n = is3d ? vm.GetNum3DCameras() : vm.GetNum2DCameras();
+    for (int i = 0; i < n; i++) {
+        PreviewCamera* c = is3d ? vm.GetCamera3D(i) : vm.GetCamera2D(i);
+        if (c && c->GetName() == wanted) {
+            // Copy the saved camera state into the preview's active
+            // camera. PreviewCamera::operator= mirrors every field and
+            // invalidates the cached view matrix so the next draw
+            // rebuilds with the new position/angles.
+            _preview->ActiveCamera() = *c;
+            return YES;
+        }
+    }
+    return NO;
+}
+
+- (BOOL)saveCurrentViewAs:(NSString*)name
+              forDocument:(XLSequenceDocument*)doc {
+    iPadRenderContext* rctx = ContextFromDoc(doc);
+    if (!rctx || !_preview || !name || name.length == 0) return NO;
+    ViewpointMgr& vm = rctx->GetViewpointMgr();
+    const bool is3d = _preview->Is3D();
+    std::string n = std::string([name UTF8String]);
+    if (!vm.IsNameUnique(n, is3d)) return NO;
+    vm.AddCamera(n, &_preview->ActiveCamera(), is3d);
+    return rctx->SaveViewpoints();
+}
+
+- (BOOL)deleteViewpointNamed:(NSString*)name
+                 forDocument:(XLSequenceDocument*)doc {
+    iPadRenderContext* rctx = ContextFromDoc(doc);
+    if (!rctx || !_preview || !name) return NO;
+    ViewpointMgr& vm = rctx->GetViewpointMgr();
+    const bool is3d = _preview->Is3D();
+    std::string wanted = std::string([name UTF8String]);
+    const int n = is3d ? vm.GetNum3DCameras() : vm.GetNum2DCameras();
+    for (int i = 0; i < n; i++) {
+        PreviewCamera* c = is3d ? vm.GetCamera3D(i) : vm.GetCamera2D(i);
+        if (c && c->GetName() == wanted) {
+            if (is3d) vm.DeleteCamera3D(i);
+            else vm.DeleteCamera2D(i);
+            return rctx->SaveViewpoints();
+        }
+    }
+    return NO;
+}
+
+- (void)restoreDefaultViewpointForDocument:(XLSequenceDocument*)doc {
+    iPadRenderContext* rctx = ContextFromDoc(doc);
+    if (!_preview) return;
+    // Prefer the user's saved Default if one exists; otherwise fall
+    // back to PreviewCamera::Reset() defaults. Matches desktop
+    // "Restore Default Viewpoint" semantics.
+    if (rctx) {
+        ViewpointMgr& vm = rctx->GetViewpointMgr();
+        PreviewCamera* def = _preview->Is3D()
+            ? vm.GetDefaultCamera3D()
+            : vm.GetDefaultCamera2D();
+        if (def) {
+            _preview->ActiveCamera() = *def;
+            return;
+        }
+    }
+    _preview->ResetCamera();
+}
+
 - (void)drawModelsForDocument:(XLSequenceDocument*)doc atMS:(int)frameMS pointSize:(float)pointSize {
     if (_canvas->getMetalLayer() == nil) return;
     if (_canvas->getWidth() == 0 || _canvas->getHeight() == 0) return;
@@ -289,30 +394,32 @@ static std::unique_ptr<xlImage> LoadImageFile(const std::string& path, int& outW
             }
         }
     } else {
-        // House Preview: every model at its world position, view objects on top.
-        // Sort models back-to-front by camera-space Z of their world centre so
-        // alpha-blended pixels from one model composite over models behind them.
-        // Matches ModelPreview::RenderModels on desktop.
+        // House Preview: models of the active layout group at their
+        // world positions, view objects on top (Default group only).
+        // Sort models back-to-front by camera-space Z of their world
+        // centre so alpha-blended pixels from one model composite over
+        // models behind them. Matches ModelPreview::RenderModels on
+        // desktop.
 
         // Background image — only rendered in 2D mode, matching desktop
-        // (ModelPreview.cpp:1411). brightness/alpha/scale settings are
-        // read from xlights_rgbeffects.xml; iPad never edits them. The
-        // texture is cached between frames and only rebuilt when the
-        // show-folder path changes. Gated behind the same "View Objects"
-        // toggle as the house-mesh/ground/terrain loop below, so users
-        // have one switch that hides every non-pixel scene element
-        // (background, view objects, and once Phase D-8 lands, the 2D
-        // grid and bounding-box overlays too).
+        // (ModelPreview.cpp:1411). Brightness/alpha/scale come from the
+        // active layout group (Default or named); iPad never edits
+        // them. The texture is cached between frames and re-fetched
+        // only when the path changes. Gated behind the same "View
+        // Objects" toggle as the house-mesh/ground/terrain loop below,
+        // so users have one switch that hides every non-pixel scene
+        // element (background, view objects, and once Phase D-8 lands,
+        // the 2D grid and bounding-box overlays too).
         if (!_preview->Is3D() && _showViewObjects) {
             [self drawBackgroundWithContext:ctx graphicsCtx:graphicsCtx solidProg:solidProg];
         }
 
-        auto models = ctx->GetModelManager().GetModels();
+        std::vector<Model*> models = ctx->GetModelsForActivePreview();
         const glm::mat4& viewMatrix = _preview->GetViewMatrix();
         std::vector<std::pair<Model*, float>> keyed;
         keyed.reserve(models.size());
-        for (auto& [name, model] : models) {
-            if (model->GetDisplayAs() == DisplayAsType::ModelGroup) continue;
+        for (Model* model : models) {
+            if (!model) continue;
             glm::vec3 c = model->GetModelScreenLocation().GetCenterPosition();
             float z = (viewMatrix * glm::vec4(c, 1.0f)).z;
             keyed.emplace_back(model, z);
@@ -335,9 +442,10 @@ static std::unique_ptr<xlImage> LoadImageFile(const std::string& path, int& outW
         }
 
         // View objects (house meshes, ground images, gridlines, terrain).
-        // Skipped entirely when the user toggles them off via the preview
-        // controls — useful to declutter during pixel-level inspection.
-        if (_showViewObjects) {
+        // Only the Default layout group owns view objects (desktop hard-
+        // codes their layout_group to "Default"); named groups skip the
+        // loop entirely. Also gated on the "View Objects" toggle.
+        if (_showViewObjects && ctx->ActivePreviewShowsViewObjects()) {
             auto& allObjects = ctx->GetAllObjects();
             for (auto it = allObjects.begin(); it != allObjects.end(); ++it) {
                 ViewObject* vo = it->second;
@@ -361,7 +469,7 @@ static std::unique_ptr<xlImage> LoadImageFile(const std::string& path, int& outW
 - (void)drawBackgroundWithContext:(iPadRenderContext*)rctx
                       graphicsCtx:(xlGraphicsContext*)gctx
                         solidProg:(xlGraphicsProgram*)solidProg {
-    const std::string& path = rctx->GetBackgroundImage();
+    const std::string& path = rctx->GetActiveBackgroundImage();
     if (path.empty() || !gctx || !solidProg) return;
 
     if (_bgTexture == nullptr || path != _bgLoadedPath) {
@@ -380,10 +488,10 @@ static std::unique_ptr<xlImage> LoadImageFile(const std::string& path, int& outW
 
     const int virtualW = rctx->GetPreviewWidth();
     const int virtualH = rctx->GetPreviewHeight();
-    const bool scaleImage = rctx->GetScaleBackgroundImage();
+    const bool scaleImage = rctx->GetActiveScaleBackgroundImage();
     const bool center0 = rctx->GetDisplay2DCenter0();
-    const int brightness = rctx->GetBackgroundBrightness();
-    const int alpha = (int)((rctx->GetBackgroundAlpha() * 255) / 100);
+    const int brightness = rctx->GetActiveBackgroundBrightness();
+    const int alpha = (int)((rctx->GetActiveBackgroundAlpha() * 255) / 100);
 
     float scaleh = 1.0f;
     float scalew = 1.0f;

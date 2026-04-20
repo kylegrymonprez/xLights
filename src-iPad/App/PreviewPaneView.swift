@@ -40,6 +40,7 @@ struct PreviewPaneView: UIViewRepresentable {
         }
         context.coordinator.bridge?.setPreviewModel(previewModelName ?? "")
         context.coordinator.mtkView = view
+        context.coordinator.previewNameForNotifications = previewName
         context.coordinator.registerNotifications(previewName: previewName)
 
         // Gestures — pinch to zoom, single-finger drag to orbit (3D) or pan
@@ -192,7 +193,74 @@ struct PreviewPaneView: UIViewRepresentable {
                       (note.object as? String) == previewName else { return }
                 self.captureAndShare()
             })
+
+            // Layout-group change — every pane drops its cached
+            // background texture so the next draw reloads the correct
+            // file for the new group. Not scoped by preview name: the
+            // render context is shared across panes, so the change
+            // applies globally.
+            notificationObservers.append(center.addObserver(
+                forName: Notification.Name("XLLayoutGroupChanged"),
+                object: nil, queue: .main
+            ) { [weak self] _ in
+                guard let self else { return }
+                self.bridge?.invalidateBackgroundCache()
+                self.mtkView?.setNeedsDisplay()
+            })
+
+            // Viewpoint commands — scoped to this pane by previewName
+            // (each pane has its own camera, so apply/save target the
+            // correct one). The reply broadcasts via
+            // `previewViewpointListChanged` so the overlay's menu can
+            // refresh after a save/delete.
+            notificationObservers.append(center.addObserver(
+                forName: .previewViewpointCommand, object: nil, queue: .main
+            ) { [weak self] note in
+                guard let self,
+                      (note.object as? String) == previewName else { return }
+                // Pull the primitive values out of the non-Sendable
+                // userInfo here on the main queue before handing them
+                // to the handler, so the closure's captured state
+                // stays Sendable under Swift 6 strict concurrency.
+                let action = (note.userInfo?["action"] as? String) ?? ""
+                let name = note.userInfo?["name"] as? String
+                self.handleViewpointCommand(action: action, name: name)
+            })
         }
+
+        private func handleViewpointCommand(action: String, name: String?) {
+            guard let bridge, let viewModel else { return }
+            let doc = viewModel.document
+            switch action {
+            case "refresh":
+                break
+            case "apply":
+                guard let n = name else { return }
+                _ = bridge.applyViewpointNamed(n, for: doc)
+                mtkView?.setNeedsDisplay()
+            case "save":
+                guard let n = name, !n.isEmpty else { return }
+                _ = bridge.saveCurrentView(as: n, for: doc)
+            case "delete":
+                guard let n = name else { return }
+                _ = bridge.deleteViewpointNamed(n, for: doc)
+            case "restore":
+                bridge.restoreDefaultViewpoint(for: doc)
+                mtkView?.setNeedsDisplay()
+            default:
+                return
+            }
+            // Broadcast the current (possibly updated) list back to the
+            // overlay for this pane so its menu reflects the latest.
+            let names = (bridge.viewpointNames(for: doc) as? [String]) ?? []
+            NotificationCenter.default.post(name: .previewViewpointListChanged,
+                                            object: self.previewNameForNotifications,
+                                            userInfo: ["names": names])
+        }
+
+        /// Captured at registration time so the command handler can
+        /// echo back on the same channel the overlay listens on.
+        fileprivate var previewNameForNotifications: String = ""
 
         /// Capture the current drawable into a UIImage and present a share
         /// sheet. `drawHierarchy(in:afterScreenUpdates:)` handles CAMetalLayer

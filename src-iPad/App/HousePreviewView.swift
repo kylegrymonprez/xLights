@@ -18,16 +18,40 @@ final class PreviewSettings {
 
 /// House Preview — shows every model plus view objects.
 struct HousePreviewView: View {
+    @Environment(SequencerViewModel.self) var viewModel
     @State private var controlsVisible: Bool = false
     @State private var settings = PreviewSettings(is3DDefault: true,
                                                   showViewObjectsDefault: true)
+    // Layout-group list and active-group are cached in @State because
+    // the C++ render context is loaded in-place on the same document
+    // instance SwiftUI already holds. The document reference never
+    // changes, so reading `document.layoutGroups()` directly from
+    // `body` wouldn't trigger a re-render after load. We refresh
+    // explicitly via .onAppear + isShowFolderLoaded.
+    @State private var layoutGroups: [String] = ["Default"]
+    @State private var activeLayoutGroup: String = "Default"
 
     var body: some View {
         PreviewContainer(title: "House",
                          previewName: "HousePreview",
                          previewModelName: nil,
                          controlsVisible: $controlsVisible,
-                         settings: settings)
+                         settings: settings,
+                         layoutGroups: layoutGroups,
+                         activeLayoutGroup: $activeLayoutGroup)
+            .onAppear { refreshLayoutGroups() }
+            .onChange(of: viewModel.isShowFolderLoaded) { _, _ in refreshLayoutGroups() }
+            .onChange(of: activeLayoutGroup) { _, newValue in
+                // Route selection through the document so the
+                // render-context state updates and
+                // `XLLayoutGroupChanged` fires for texture invalidate.
+                viewModel.document.setActiveLayoutGroup(newValue)
+            }
+    }
+
+    private func refreshLayoutGroups() {
+        layoutGroups = (viewModel.document.layoutGroups() as? [String]) ?? ["Default"]
+        activeLayoutGroup = viewModel.document.activeLayoutGroup() ?? "Default"
     }
 }
 
@@ -44,7 +68,9 @@ struct ModelPreviewView: View {
                          previewName: "ModelPreview",
                          previewModelName: viewModel.previewModelName,
                          controlsVisible: $controlsVisible,
-                         settings: settings)
+                         settings: settings,
+                         layoutGroups: [],
+                         activeLayoutGroup: .constant("Default"))
     }
 }
 
@@ -56,6 +82,8 @@ private struct PreviewContainer: View {
     let previewModelName: String?
     @Binding var controlsVisible: Bool
     let settings: PreviewSettings
+    let layoutGroups: [String]
+    @Binding var activeLayoutGroup: String
 
     /// Model Preview ignores view objects entirely in XLMetalBridge, so the
     /// "Show View Objects" toggle is a no-op there — suppress it. Desktop
@@ -85,7 +113,9 @@ private struct PreviewContainer: View {
                     PreviewControlsOverlay(previewName: previewName,
                                            settings: settings,
                                            supportsViewObjects: supportsViewObjects,
-                                           supportsIs3D: supportsIs3D)
+                                           supportsIs3D: supportsIs3D,
+                                           layoutGroups: layoutGroups,
+                                           activeLayoutGroup: $activeLayoutGroup)
                 }
             }
             .padding(6)
@@ -121,6 +151,24 @@ private struct PreviewControlsOverlay: View {
     @Bindable var settings: PreviewSettings
     let supportsViewObjects: Bool
     let supportsIs3D: Bool
+    let layoutGroups: [String]
+    @Binding var activeLayoutGroup: String
+
+    /// Current list of saved viewpoints for this pane (filtered to its
+    /// 2D/3D mode, updated via `.previewViewpointListChanged`).
+    @State private var viewpoints: [String] = []
+    /// Name of the viewpoint most recently applied / saved from this
+    /// pane. Displayed next to the viewpoint icon so users can see which
+    /// saved view they're looking at, parity with the layout-group
+    /// picker. Best-effort — user gestures (pinch, drag, rotate) will
+    /// drift the camera away from the saved state, but we keep showing
+    /// the name until they explicitly pick a different viewpoint or
+    /// restore the default.
+    @State private var appliedViewpoint: String? = nil
+    /// Prompt state for "Save current view as…" — SwiftUI's .alert with
+    /// a text field requires a backing binding, so these live here.
+    @State private var savePromptVisible: Bool = false
+    @State private var savePromptName: String = ""
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 4) {
@@ -152,6 +200,100 @@ private struct PreviewControlsOverlay: View {
                 .controlSize(.small)
             }
 
+            // Layout group picker — House Preview only, always shown
+            // (even when the show has only "Default") so the user has
+            // visibility into which preview is active. Filters models
+            // drawn in the House Preview to those assigned to the
+            // chosen group (or "All Previews"), and swaps the
+            // background image if the named group carries its own.
+            // View objects render only in "Default".
+            if supportsIs3D && !layoutGroups.isEmpty {
+                Menu {
+                    ForEach(layoutGroups, id: \.self) { name in
+                        Button {
+                            activeLayoutGroup = name
+                        } label: {
+                            HStack {
+                                Text(name)
+                                if name == activeLayoutGroup {
+                                    Spacer()
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "square.stack.3d.up")
+                        Text(activeLayoutGroup)
+                            .font(.caption2)
+                            .lineLimit(1)
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            // Viewpoints — saved camera positions, per pane and
+            // filtered to the pane's current 2D/3D mode. Empty list
+            // still shows the menu (so the user can Save / Restore).
+            // Disabled in Model Preview (desktop's Model Preview
+            // doesn't expose viewpoints either).
+            if supportsIs3D {
+                Menu {
+                    if viewpoints.isEmpty {
+                        Text("No saved viewpoints")
+                            .font(.caption2)
+                    } else {
+                        ForEach(viewpoints, id: \.self) { name in
+                            Button {
+                                postViewpointCommand(action: "apply", name: name)
+                                appliedViewpoint = name
+                            } label: {
+                                HStack {
+                                    Text(name)
+                                    if name == appliedViewpoint {
+                                        Spacer()
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                        Divider()
+                        Menu("Delete…") {
+                            ForEach(viewpoints, id: \.self) { name in
+                                Button(role: .destructive) {
+                                    postViewpointCommand(action: "delete", name: name)
+                                    if appliedViewpoint == name { appliedViewpoint = nil }
+                                } label: {
+                                    Text(name)
+                                }
+                            }
+                        }
+                        Divider()
+                    }
+                    Button("Save Current View As…") {
+                        savePromptName = ""
+                        savePromptVisible = true
+                    }
+                    Button("Restore Default Viewpoint") {
+                        postViewpointCommand(action: "restore", name: nil)
+                        appliedViewpoint = nil
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "camera.viewfinder")
+                        Text(appliedViewpoint ?? "View")
+                            .font(.caption2)
+                            .lineLimit(1)
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
             // Share / save the current preview contents. Presents the
             // standard iOS share sheet (Photos, Files, Mail, AirDrop,
             // Copy, Print). No separate "Copy" button — the share sheet
@@ -165,6 +307,40 @@ private struct PreviewControlsOverlay: View {
             .buttonStyle(.bordered)
             .controlSize(.small)
         }
+        // Ask the coordinator to push the current list the moment the
+        // overlay becomes visible, and whenever the 2D/3D toggle flips
+        // (the available viewpoints list differs between modes).
+        .onAppear {
+            postViewpointCommand(action: "refresh", name: nil)
+        }
+        .onChange(of: settings.is3D) { _, _ in
+            postViewpointCommand(action: "refresh", name: nil)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .previewViewpointListChanged)) { note in
+            guard (note.object as? String) == previewName,
+                  let names = note.userInfo?["names"] as? [String] else { return }
+            viewpoints = names
+        }
+        .alert("Save Viewpoint", isPresented: $savePromptVisible) {
+            TextField("Name", text: $savePromptName)
+            Button("Save") {
+                let trimmed = savePromptName.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty else { return }
+                postViewpointCommand(action: "save", name: trimmed)
+                appliedViewpoint = trimmed
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("Saves the current camera position under this name.")
+        }
+    }
+
+    private func postViewpointCommand(action: String, name: String?) {
+        var info: [String: Any] = ["action": action]
+        if let name { info["name"] = name }
+        NotificationCenter.default.post(name: .previewViewpointCommand,
+                                        object: previewName,
+                                        userInfo: info)
     }
 
     private enum Action {
@@ -189,4 +365,15 @@ extension Notification.Name {
     static let previewZoomReset = Notification.Name("PreviewZoomReset")
     static let previewResetCamera = Notification.Name("PreviewResetCamera")
     static let previewSaveImage = Notification.Name("PreviewSaveImage")
+    /// Posted by `PreviewControlsOverlay` (object = previewName) when
+    /// the user asks the coordinator to refresh its viewpoint list,
+    /// apply a named viewpoint, save the current view, or restore the
+    /// default. The userInfo carries `action` ("refresh" / "apply" /
+    /// "save" / "delete" / "restore") and an optional `name` string.
+    static let previewViewpointCommand = Notification.Name("PreviewViewpointCommand")
+    /// Posted by the coordinator (object = previewName) whenever the
+    /// viewpoint list for the pane changes (load, apply switch, save,
+    /// delete). Carries `names: [String]` in userInfo. The overlay
+    /// refreshes its menu from this.
+    static let previewViewpointListChanged = Notification.Name("PreviewViewpointListChanged")
 }

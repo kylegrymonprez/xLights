@@ -21,6 +21,7 @@
 #include "render/RenderEngine.h"
 #include "render/RenderCache.h"
 #include "render/IRenderProgressSink.h"
+#include "render/ViewpointMgr.h"
 #include "effects/EffectManager.h"
 #include "outputs/OutputManager.h"
 #include "models/ModelManager.h"
@@ -124,10 +125,71 @@ public:
     // on iPad (editing lives in the desktop Layout panel, out of iPad
     // scope). Path is FixFile-resolved against the show directory; empty
     // string means "no background".
+    //
+    // These are the DEFAULT-group values. Use GetActiveBackground*()
+    // below to pick between these and the named-group overrides when a
+    // non-Default layout group is active.
     const std::string& GetBackgroundImage() const { return _backgroundImage; }
     int GetBackgroundBrightness() const { return _backgroundBrightness; }
     int GetBackgroundAlpha() const { return _backgroundAlpha; }
     bool GetScaleBackgroundImage() const { return _scaleBackgroundImage; }
+
+    // Named layout groups from <layoutGroups> in rgbeffects.xml. Each
+    // carries its own background settings and scopes the House Preview
+    // to a filtered set of models (those whose `layout_group` matches
+    // the group name, plus any marked "All Previews"). The "Default"
+    // group is implicit (driven by the top-level <settings> values
+    // above) — it is NOT listed in GetNamedLayoutGroups().
+    struct NamedLayoutGroup {
+        std::string name;
+        std::string backgroundImage;
+        int backgroundBrightness = 100;
+        int backgroundAlpha = 100;
+        bool scaleBackgroundImage = false;
+    };
+    const std::vector<NamedLayoutGroup>& GetNamedLayoutGroups() const { return _namedLayoutGroups; }
+
+    // Active House-Preview layout group. "Default" means the implicit
+    // default preview (models with layout_group == "Default" or
+    // "All Previews"); other values must match a named group from
+    // GetNamedLayoutGroups(). Unknown names fall back to "Default".
+    const std::string& GetActiveLayoutGroup() const { return _activeLayoutGroup; }
+    void SetActiveLayoutGroup(const std::string& name);
+
+    // Active-group view of the background settings. Picks the correct
+    // source (Default vs. a named group) so callers don't need to
+    // switch on GetActiveLayoutGroup() themselves.
+    const std::string& GetActiveBackgroundImage() const;
+    int GetActiveBackgroundBrightness() const;
+    int GetActiveBackgroundAlpha() const;
+    bool GetActiveScaleBackgroundImage() const;
+
+    // Expanded list of models to render for the active layout group.
+    // Filters by layout_group and expands ModelGroup children exactly
+    // like desktop UpdateModelsList (TabSequence.cpp:1209), minus
+    // duplicate suppression. Call once per frame.
+    std::vector<Model*> GetModelsForActivePreview() const;
+
+    // Whether the active group draws view objects. Only "Default"
+    // draws them (matching desktop — view objects are hard-coded to
+    // layout_group "Default").
+    bool ActivePreviewShowsViewObjects() const { return _activeLayoutGroup == "Default"; }
+
+    // Saved camera views (viewpoints). Loaded from the `<Viewpoints>`
+    // node in xlights_rgbeffects.xml; each camera is flagged 2D or 3D
+    // and named. UI filters by the preview's current mode before
+    // showing them.
+    ViewpointMgr& GetViewpointMgr() { return _viewpointMgr; }
+    const ViewpointMgr& GetViewpointMgr() const { return _viewpointMgr; }
+
+    // Rewrite just the `<Viewpoints>` subtree of the on-disk
+    // xlights_rgbeffects.xml so saved-as / delete survive app restart.
+    // Preserves every other node (models, layoutGroups, settings, …)
+    // by re-reading the file, replacing the Viewpoints child, and
+    // writing back. Returns false if the file couldn't be read /
+    // serialized. Heavy-ish (one disk round-trip per save), but
+    // viewpoint edits are a rare user action.
+    bool SaveViewpoints();
 
     // Model pixel data for a given frame — returns (x, y, r, g, b) tuples
     struct PixelData {
@@ -167,4 +229,9 @@ private:
     int _backgroundBrightness = 100;
     int _backgroundAlpha = 100;
     bool _scaleBackgroundImage = false;
+
+    std::vector<NamedLayoutGroup> _namedLayoutGroups;
+    std::string _activeLayoutGroup = "Default";
+
+    ViewpointMgr _viewpointMgr;
 };

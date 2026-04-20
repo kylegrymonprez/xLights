@@ -48,4 +48,23 @@
 - (void)setShowViewObjects:(BOOL)show;
 - (BOOL)showViewObjects;
 
+// Drop the cached background texture. Called when the active layout
+// group changes (possibly new background image path). Next draw
+// re-loads whatever the render context's active-group path is.
+- (void)invalidateBackgroundCache;
+
+// Viewpoints (saved camera positions). List is filtered to the pane's
+// current 2D/3D mode. Apply copies a saved PreviewCamera into the
+// active camera; saveAs captures the active camera under a new name.
+// Persistence for the add/delete mutations requires the document — the
+// document triggers the rgbeffects.xml rewrite.
+- (NSArray<NSString*>*)viewpointNamesForDocument:(XLSequenceDocument*)doc;
+- (BOOL)applyViewpointNamed:(NSString*)name
+                forDocument:(XLSequenceDocument*)doc;
+- (BOOL)saveCurrentViewAs:(NSString*)name
+              forDocument:(XLSequenceDocument*)doc;
+- (BOOL)deleteViewpointNamed:(NSString*)name
+                 forDocument:(XLSequenceDocument*)doc;
+- (void)restoreDefaultViewpointForDocument:(XLSequenceDocument*)doc;
+
 @end

@@ -80,7 +80,7 @@ variants in `libdbg-ios/`.
 | B | Effects grid parity with desktop | Partial — gap audit vs desktop done 2026-04-20; Metal-backed grid renders and basic edit works, but ~100 desktop behaviours remain (multi-select, align/split, timing-track editing, loop region, follow-playhead, row-heading ops, waveform variants) | [`plans/phase-b-grid-parity.md`](plans/phase-b-grid-parity.md) |
 | B-Metal | Grid render pipeline migration (CG → Metal) | ✓ complete | — |
 | C | Effect settings inspector | In progress | [`plans/phase-c-inspector.md`](plans/phase-c-inspector.md) |
-| D | Model Preview + preview polish | Partial — gap audit vs desktop done 2026-04-20, many overlays still missing | [`plans/phase-d-preview.md`](plans/phase-d-preview.md) |
+| D | Model Preview + preview polish | Partial — most UI items landed (viewpoints, 2D/3D toggle, background, transport, image export, view-object toggle, layout groups); only fit-to-window zoom remains in scope (layout-editor overlays parked in [`plans/future-layout-editing.md`](plans/future-layout-editing.md)) | [`plans/phase-d-preview.md`](plans/phase-d-preview.md) |
 | E | Sequence management (open / save / new / settings) | Not started — currently read-only; blocks any real user testing | [`plans/phase-e-sequence-management.md`](plans/phase-e-sequence-management.md) |
 | F | Window system + Display Elements | Not started | [`plans/phase-f-window-system.md`](plans/phase-f-window-system.md) |
 | G | Document / iCloud polish | Not started | [`plans/phase-g-document.md`](plans/phase-g-document.md) |
