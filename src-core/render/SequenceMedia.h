@@ -387,6 +387,12 @@ public:
     // === Cross-type queries ===
     bool HasMedia(const std::string& filepath) const;
     void RemoveMedia(const std::string& filepath);
+    // Re-key a cache entry across any media type. Only touches the
+    // in-memory cache — callers are responsible for any on-disk
+    // move + walking effect settings to rewrite references. No-op
+    // if `oldPath` isn't found or `newPath` already exists.
+    // Returns true on successful rename.
+    bool RenameMedia(const std::string& oldPath, const std::string& newPath);
     // Reload a non-embedded entry from disk (erases and re-creates the cache entry)
     bool ReloadMedia(const std::string& filepath);
     size_t GetMediaCount() const;

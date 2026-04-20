@@ -10,6 +10,17 @@ class SequencerViewModel {
     var sequenceName: String?
     var isShowFolderLoaded = false
     var isSequenceLoaded = false
+    /// Dirty marker mirrored from `XLSequenceDocument.isSequenceDirty`.
+    /// Updated by the dirty-poll timer (500ms) while a sequence is
+    /// loaded — toolbar Save / close-with-prompt key off it. Poll
+    /// rather than observer so every mutation path (bridge + core)
+    /// updates it without having to hook each entry individually.
+    var isDirty: Bool = false
+    /// Count of referenced media files that couldn't be resolved on
+    /// the current device (file not present, no iCloud copy, etc.).
+    /// Populated on sequence open via the media-inventory bridge.
+    /// Drives the missing-media banner + Media Manager badge.
+    var brokenMediaCount: Int = 0
     var sequenceDurationMS: Int = 0
     var frameIntervalMS: Int = 50
     var rows: [RowInfo] = []
@@ -145,6 +156,7 @@ class SequencerViewModel {
     private var scrubStartMS: Int = 0
     private var scrubEndMS: Int = 0
     private var renderPollTimer: Timer?
+    private var dirtyPollTimer: Timer?
     private var playbackStartTime: CFAbsoluteTime = 0  // wall clock when play started
     private var playbackStartMS: Int = 0                // sequence position when play started
 
@@ -230,6 +242,7 @@ class SequencerViewModel {
     func openSequence(path: String) {
         if document.openSequence(path) {
             isSequenceLoaded = true
+            isDirty = false
             sequenceName = document.sequenceName()
             sequenceDurationMS = Int(document.sequenceDurationMS())
             frameIntervalMS = Int(document.frameIntervalMS())
@@ -242,7 +255,107 @@ class SequencerViewModel {
             loadWaveform(startMS: 0, endMS: sequenceDurationMS)
             // Kick off background render so SequenceData is populated
             startBackgroundRender()
+            startDirtyPolling()
+            // Scan for missing media on open — the full render pass
+            // populates the media cache which the scan walks. We run
+            // the scan on a utility queue after a short delay so the
+            // cache has settled, then hop back to main to update the
+            // banner count. Keeps the open path from blocking on I/O.
+            scheduleBrokenMediaScan()
         }
+    }
+
+    /// Schedule a media-inventory walk to populate `brokenMediaCount`.
+    /// Runs 750 ms after call so the initial render has populated
+    /// every referenced entry's cache slot (GetAllMediaPaths reads
+    /// the cache, not the settings map).
+    private func scheduleBrokenMediaScan() {
+        brokenMediaCount = 0
+        let doc = document
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
+            guard let self, self.isSequenceLoaded else { return }
+            DispatchQueue.global(qos: .utility).async {
+                let inv = (doc.mediaInventoryInSequence() as? [[String: Any]]) ?? []
+                let broken = inv.reduce(0) { acc, dict -> Int in
+                    let b = (dict["isBroken"] as? NSNumber)?.boolValue ?? false
+                    return acc + (b ? 1 : 0)
+                }
+                DispatchQueue.main.async { [weak self] in
+                    self?.brokenMediaCount = broken
+                }
+            }
+        }
+    }
+
+    // MARK: - Save / dirty tracking (E-1)
+
+    /// Attempt to write the sequence to its current on-disk path.
+    /// Returns true on success. Failed writes leave `isDirty`
+    /// alone — the user keeps their unsaved changes and can retry.
+    @discardableResult
+    func saveSequence() -> Bool {
+        guard isSequenceLoaded else { return false }
+        // Playback + scrub mutate state the writer reads; pause
+        // before writing so the XML snapshot is stable.
+        if isPlaying { pause() }
+        if isScrubbing { stopScrub() }
+        let ok = document.saveSequence()
+        if ok {
+            isDirty = false
+        }
+        return ok
+    }
+
+    /// Save to a new path. Caller is responsible for invoking a
+    /// `UIDocumentPicker` / `.fileExporter` to get the destination
+    /// URL. The path must end in `.xsq`; security-scoped access is
+    /// obtained via `XLSequenceDocument.obtainAccessToPath`.
+    @discardableResult
+    func saveSequenceAs(path: String) -> Bool {
+        guard isSequenceLoaded else { return false }
+        if isPlaying { pause() }
+        if isScrubbing { stopScrub() }
+        XLSequenceDocument.obtainAccess(toPath: path, enforceWritable: true)
+        let ok = document.saveSequence(as: path)
+        if ok {
+            isDirty = false
+            // The bridge updates the underlying SequenceFile's
+            // path; refresh the display name so the toolbar picks
+            // up the new sequence name.
+            sequenceName = document.sequenceName()
+        }
+        return ok
+    }
+
+    /// Present-time dirty-state check from SwiftUI views that
+    /// haven't already observed `isDirty`. Reads through the bridge
+    /// for the freshest value — the poll timer updates the
+    /// observable at 500ms cadence, which may lag a very recent
+    /// mutation for a few hundred milliseconds otherwise.
+    func checkDirtyNow() -> Bool {
+        guard isSequenceLoaded else { return false }
+        let dirty = document.isSequenceDirty()
+        if dirty != isDirty {
+            isDirty = dirty
+        }
+        return dirty
+    }
+
+    private func startDirtyPolling() {
+        stopDirtyPolling()
+        dirtyPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5,
+                                               repeats: true) { [weak self] _ in
+            guard let self else { return }
+            let dirty = self.document.isSequenceDirty()
+            if dirty != self.isDirty {
+                self.isDirty = dirty
+            }
+        }
+    }
+
+    private func stopDirtyPolling() {
+        dirtyPollTimer?.invalidate()
+        dirtyPollTimer = nil
     }
 
     /// Called when the app scene moves to `.background` — iOS may kill
@@ -279,6 +392,7 @@ class SequencerViewModel {
     func closeSequence() {
         if isOutputting { toggleOutput() }
         stopPlayback()
+        stopDirtyPolling()
         cancelBackgroundRender()
         // Wait for any background render jobs to exit before tearing
         // down SequenceElements / SequenceData — the render workers
@@ -287,6 +401,7 @@ class SequencerViewModel {
         _ = document.abortRenderAndWait(5.0)
         document.closeSequence()
         isSequenceLoaded = false
+        isDirty = false
         isRenderDone = false
         isRendering = false
         sequenceName = nil

@@ -776,6 +776,41 @@ bool SequenceMedia::RenameImage(const std::string& oldPath, const std::string& n
     return true;
 }
 
+bool SequenceMedia::RenameMedia(const std::string& oldPath, const std::string& newPath)
+{
+    if (oldPath == newPath) return true;
+    std::scoped_lock lock(_cacheMutex);
+
+    // Generic re-key across every cache. Mirrors RenameImage's
+    // shape — keep the entry alive, swap the map key, update the
+    // entry's stored file path. Same collision check as the
+    // image-specific version: refuse if newPath already has an
+    // entry of any type. That avoids merging two distinct entries
+    // into one.
+    auto rekey = [&](auto& cache) -> int {
+        auto it = cache.find(oldPath);
+        if (it == cache.end()) return 0; // not in this cache
+        auto entry = it->second;
+        entry->SetFilePath(newPath);
+        cache.erase(it);
+        cache.emplace(newPath, entry);
+        return 1;
+    };
+
+    if (HasMedia(newPath)) return false;
+
+    // Try each cache; first hit wins. HasMedia above guarantees
+    // newPath collides in none of them, so we don't need to
+    // double-check per cache.
+    if (rekey(_imageCache))  return true;
+    if (rekey(_svgCache))    return true;
+    if (rekey(_shaderCache)) return true;
+    if (rekey(_textCache))   return true;
+    if (rekey(_binaryCache)) return true;
+    if (rekey(_videoCache))  return true;
+    return false;
+}
+
 // --- pugixml implementations ---
 
 bool SequenceMedia::LoadFromXml(const pugi::xml_node& node)

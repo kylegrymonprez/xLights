@@ -55,10 +55,17 @@ struct ContentView: View {
     @Environment(SequencerViewModel.self) var viewModel
     @State private var showFolderConfig = false
 
+    @State private var showMediaManager = false
+
     var body: some View {
         VStack(spacing: 0) {
             if viewModel.memoryWarning {
                 MemoryWarningBanner()
+            }
+            if viewModel.isSequenceLoaded && viewModel.brokenMediaCount > 0 {
+                MissingMediaBanner(
+                    count: viewModel.brokenMediaCount,
+                    onReview: { showMediaManager = true })
             }
             Group {
                 if !viewModel.isShowFolderLoaded {
@@ -69,6 +76,10 @@ struct ContentView: View {
                     SequencerView()
                 }
             }
+        }
+        .sheet(isPresented: $showMediaManager) {
+            MediaManagerSheet()
+                .environment(viewModel)
         }
         .sheet(isPresented: $showFolderConfig) {
             FolderConfigView()
@@ -95,6 +106,35 @@ struct MemoryWarningBanner: View {
         .padding(.vertical, 6)
         .foregroundStyle(.white)
         .background(Color.orange)
+    }
+}
+
+/// Banner shown at the top of the app when the just-opened
+/// sequence references media files that don't resolve on this
+/// device (missing files, evicted-from-iCloud, revoked bookmarks).
+/// Tapping "Review" opens the sequence-wide `MediaManagerSheet` so
+/// the user can see which files are missing. Actual relocation UI
+/// lands with G30 (rename-with-reference-update) in a later pass.
+struct MissingMediaBanner: View {
+    let count: Int
+    let onReview: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+            Text(count == 1
+                 ? "1 media file is missing"
+                 : "\(count) media files are missing")
+                .font(.caption)
+            Spacer()
+            Button("Review", action: onReview)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .foregroundStyle(.white)
+        .background(Color.red.opacity(0.85))
     }
 }
 

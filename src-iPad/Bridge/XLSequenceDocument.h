@@ -50,6 +50,31 @@
 - (void)closeSequence;
 - (BOOL)isSequenceLoaded;
 
+// Save the currently-open sequence back to its on-disk path. Returns
+// NO if there's no sequence loaded, the path is empty, or the XML
+// write fails. Marks the sequence clean on success.
+- (BOOL)saveSequence;
+
+// Save to a new path (Save As / Export). `path` must end in `.xsq`;
+// the caller is responsible for obtaining security-scoped access
+// to the destination via `-obtainAccessToPath:…` before calling.
+// On success updates the sequence's internal path so subsequent
+// `-saveSequence` writes to the new location.
+- (BOOL)saveSequenceAs:(NSString*)path;
+
+// Absolute on-disk path the sequence was opened from (or last
+// saved to). Empty when no sequence is loaded.
+- (NSString*)currentSequencePath;
+
+// Dirty tracking (E-1). `SequenceElements` increments a change
+// counter on every mutation; the bridge records the counter
+// snapshot taken at load / save, and `isSequenceDirty` compares the
+// live counter against that snapshot. Call `markSequenceClean`
+// after a save-via-non-bridge-path (e.g. a save-as through Swift
+// that writes out-of-band).
+- (BOOL)isSequenceDirty;
+- (void)markSequenceClean;
+
 // Sequence metadata
 - (int)sequenceDurationMS;
 - (int)frameIntervalMS;
@@ -457,6 +482,84 @@
 // walks the media cache — iPad renders once on sequence open, so every
 // referenced file has landed there by the time the user opens a picker.
 - (NSArray<NSDictionary<NSString*, NSString*>*>*)mediaPathsInSequence;
+
+// Richer sequence-wide media inventory (G28 — C5). Every entry in
+// the sequence's media cache with status flags + metadata the media
+// manager view surfaces:
+//
+//   path         — the stored path (key used by settings maps)
+//   type         — image|svg|shader|text|binary|video
+//   resolvedPath — FixFile-resolved absolute path (empty if
+//                  unresolvable)
+//   isEmbedded   — NSNumber BOOL: data lives in the .xsq
+//   isBroken     — NSNumber BOOL: not embedded AND resolved file
+//                  doesn't exist on disk
+//   widthPx      — NSNumber int, images only (0 otherwise)
+//   heightPx     — NSNumber int, images only
+//   frameCount   — NSNumber int, animated images / video (0 for
+//                  single-frame / unknown)
+//
+// Missing entries (isBroken=YES) drive the E-4 open-time
+// relocation sheet; the full list drives the media manager.
+- (NSArray<NSDictionary<NSString*, id>*>*)mediaInventoryInSequence;
+
+// Embed / extract for sequence-wide media management (G29 — C5).
+// Embedding copies the file's binary content into the in-memory
+// `MediaCacheEntry` so the next `saveSequence` writes base64 into
+// the `.xsq`. Extracting writes the embedded data to disk at the
+// entry's resolved path and flips the entry back to external.
+// Videos and (on desktop) large binary files aren't embeddable —
+// `IsEmbeddable()` on the base class gates both calls.
+//
+// Bumps the sequence dirty count so the toolbar Save affordance
+// lights up. Returns YES if the operation actually changed the
+// entry's embedded state.
+- (BOOL)embedMediaAtPath:(NSString*)path;
+- (BOOL)extractMediaAtPath:(NSString*)path;
+
+// Embed / extract every embeddable cache entry. `typeFilter` nil
+// or empty operates on all types; specifying "image" / "svg" /
+// "shader" / "text" / "binary" scopes to that type (match the
+// strings returned by `mediaInventoryInSequence`). Videos are
+// never touched — they're un-embeddable. Returns the count that
+// actually changed state.
+- (int)embedAllMediaOfType:(NSString*)typeFilter;
+- (int)extractAllMediaOfType:(NSString*)typeFilter;
+
+// Rename a cache entry (G30 — C5). Works for both embedded
+// entries (cache-key swap only) and external files (also moves
+// the file on disk so the stored path resolves at the new
+// location). For embedded entries the disk move is skipped.
+// Walks every effect's settings + palette maps and rewrites
+// values equal to `oldPath` to point at `newPath` so no effect
+// ends up stranded.
+//
+// Fails if `newPath` already exists on disk (external) or in
+// the media cache (either), if the on-disk rename fails, or if
+// the old path isn't cached. Returns YES on success.
+- (BOOL)renameMediaFromPath:(NSString*)oldPath
+                      toPath:(NSString*)newPath;
+
+// Remove cached media entries that aren't referenced by any
+// effect in the sequence (G31 — C5). The set of "referenced"
+// paths is computed by walking every effect's settings +
+// palette map, so we don't have to wait for a full re-render
+// the way `MarkAllUnused` + `RemoveUnusedMedia` would. Returns
+// the count removed. Dirties the sequence when anything was
+// removed.
+- (int)removeUnusedMedia;
+
+// Video compatibility check (G32 — C5). Wraps
+// `MediaCompatibility::CheckVideoFile`: returns nil when the
+// file is AVFoundation-decodable on iPad, or a human-readable
+// reason string (e.g. "Unsupported video codec") when it isn't.
+//
+// iPad can't transcode — if AVFoundation can't decode the
+// source, neither can the transcoder. The UI uses the reason
+// in a warning alert pointing the user at Handbrake / ffmpeg
+// on desktop. Desktop keeps its in-app convert flow via
+// `VideoTranscoder`; that path is not exposed to iPad.
+- (NSString*)videoCompatibilityIssueForPath:(NSString*)path;
 
 // Ensure a preview-frame bundle exists for `path` at the requested
 // thumbnail bounds. Loads the entry if not yet loaded and calls

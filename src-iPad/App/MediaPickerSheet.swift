@@ -30,6 +30,7 @@ struct MediaPickerSheet: View {
     @State private var entries: [Entry] = []
     @State private var groups: [FolderGroup] = []
     @State private var didLoad = false
+    @State private var showManager = false
 
     // `|`-joined list of folder-group IDs the user has manually
     // collapsed. Empty default means "everything expanded". Persisted
@@ -108,6 +109,12 @@ struct MediaPickerSheet: View {
                     } label: {
                         Label("Browse Files…", systemImage: "folder")
                     }
+                    Button {
+                        showManager = true
+                    } label: {
+                        Label("Manage All Media…",
+                              systemImage: "rectangle.stack")
+                    }
                     Button(role: .destructive) {
                         onClear()
                         dismiss()
@@ -125,6 +132,10 @@ struct MediaPickerSheet: View {
             }
         }
         .onAppear { loadEntries() }
+        .sheet(isPresented: $showManager) {
+            MediaManagerSheet()
+                .environment(viewModel)
+        }
     }
 
     private var typeLabel: String {

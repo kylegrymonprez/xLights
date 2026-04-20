@@ -55,6 +55,21 @@ struct SequencerView: View {
                 EffectPaletteView()
             }
         }
+        .confirmationDialog("Unsaved Changes",
+                            isPresented: $showingUnsavedPrompt,
+                            titleVisibility: .visible) {
+            Button("Save and Close") {
+                if viewModel.saveSequence() {
+                    viewModel.closeSequence()
+                }
+            }
+            Button("Discard Changes", role: .destructive) {
+                viewModel.closeSequence()
+            }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("This sequence has unsaved changes.")
+        }
     }
 
     /// Draggable divider below the preview pane. Vertical drag
@@ -72,11 +87,37 @@ struct SequencerView: View {
 
     // MARK: - Toolbar
 
+    @State private var showingUnsavedPrompt = false
+
     private var toolbar: some View {
         HStack(spacing: 12) {
-            Button(action: { viewModel.closeSequence() }) {
+            Button(action: {
+                // Prompt if the user has unsaved edits; otherwise
+                // close immediately.
+                if viewModel.checkDirtyNow() {
+                    showingUnsavedPrompt = true
+                } else {
+                    viewModel.closeSequence()
+                }
+            }) {
                 Image(systemName: "xmark")
             }
+
+            // Save button — enabled when the sequence is dirty.
+            // Users who want Save-As can long-press (below).
+            Button(action: { _ = viewModel.saveSequence() }) {
+                ZStack(alignment: .topTrailing) {
+                    Image(systemName: "square.and.arrow.down")
+                    if viewModel.isDirty {
+                        Circle()
+                            .fill(Color.orange)
+                            .frame(width: 6, height: 6)
+                            .offset(x: 3, y: -2)
+                    }
+                }
+            }
+            .keyboardShortcut("s", modifiers: [.command])
+            .disabled(!viewModel.isDirty)
 
             Divider().frame(height: 24)
 

@@ -77,23 +77,24 @@ variants in `libdbg-ios/`.
 | Phase | Title | Status | Sub-plan |
 |---|---|---|---|
 | A | Core-path hardening | ✓ complete | — (one small follow-up in [`plans/followups.md`](plans/followups.md)) |
-| B | Effects grid parity with desktop | Partial — gap audit vs desktop done 2026-04-20; Metal-backed grid renders and basic edit works, but ~100 desktop behaviours remain (multi-select, align/split, timing-track editing, loop region, follow-playhead, row-heading ops, waveform variants) | [`plans/phase-b-grid-parity.md`](plans/phase-b-grid-parity.md) |
+| B | Effects grid parity with desktop | In progress — Metal-backed grid, basic selection / drag / resize / long-press shipped; ~100 desktop behaviours pending (multi-select, align/split, timing-track editing, loop region, follow-playhead, row-heading ops, waveform variants) | [`plans/phase-b-grid-parity.md`](plans/phase-b-grid-parity.md) |
 | B-Metal | Grid render pipeline migration (CG → Metal) | ✓ complete | — |
-| C | Effect settings inspector | In progress | [`plans/phase-c-inspector.md`](plans/phase-c-inspector.md) |
+| C | Effect settings inspector | In progress — C4 multi-effect blocked on grid multi-select; C7 specialised editors still open | [`plans/phase-c-inspector.md`](plans/phase-c-inspector.md) |
 | D | Model Preview + preview polish | ✓ complete — layout-editor overlays parked in [`plans/future-layout-editing.md`](plans/future-layout-editing.md) | [`plans/phase-d-preview.md`](plans/phase-d-preview.md) |
-| E | Sequence management (open / save / new / settings) | Not started — currently read-only; blocks any real user testing | [`plans/phase-e-sequence-management.md`](plans/phase-e-sequence-management.md) |
+| E | Sequence management (open / save / new / settings) | Partial — save / dirty / close-with-prompt and missing-media detection landed; New wizard, Sequence Settings dialog, recent docs, autosave still open | [`plans/phase-e-sequence-management.md`](plans/phase-e-sequence-management.md) |
 | F | Window system + Display Elements | Not started | [`plans/phase-f-window-system.md`](plans/phase-f-window-system.md) |
 | G | Document / iCloud polish | Not started | [`plans/phase-g-document.md`](plans/phase-g-document.md) |
 | H | App Store readiness | Not started | [`plans/phase-h-app-store.md`](plans/phase-h-app-store.md) |
 
-**Parallelism.** Phases B / C / E are independent and can run in
-parallel. B works against the Metal grid + `SequencerViewModel` + row
-headers; C works against `EffectMetadata.swift` + the inspector view;
-E works against `XLSequenceDocument` + `SequencerViewModel` save/new
-paths. Phase D is complete. Phase F depends on the others — it
-composes the finished pieces (previews, inspector, grid) plus the
-File-menu commands (E) into the final window / menu-bar layout. G
-and H are sequential at the end.
+**Parallelism.** Phases B and C and E are independent and can run
+in parallel (in fact C's C4 is waiting on B's multi-select work).
+B works against the Metal grid + `SequencerViewModel` + row
+headers; C works against `EffectMetadata.swift` + the inspector
+view; E works against `XLSequenceDocument` + `SequencerViewModel`
+save/new paths. Phase F depends on the others — it composes the
+finished pieces (previews, inspector, grid) plus the File-menu
+commands (E) into the final window / menu-bar layout. G and H are
+sequential at the end.
 
 **Preview scope.** Phase D is preview *viewing and appearance*: camera,
 overlays, background, labels, transport, export. Desktop `ModelPreview`

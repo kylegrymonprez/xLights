@@ -23,6 +23,7 @@
 #include "effects/ShaderEffect.h"
 #include "graphics/xlGraphicsAccumulators.h"
 #include "media/AudioManager.h"
+#include "media/MediaCompatibility.h"
 #include "media/VideoReader.h"
 #include "render/ValueCurve.h"
 #include "models/Model.h"
@@ -41,11 +42,15 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 #import <os/proc.h>
 
 @implementation XLSequenceDocument {
     std::unique_ptr<iPadRenderContext> _context;
+    // Snapshot of `SequenceElements::GetChangeCount()` at the last
+    // successful load / save. Current count == snapshot ⇒ clean.
+    unsigned int _lastSavedChangeCount;
 }
 
 - (instancetype)init {
@@ -129,15 +134,84 @@
 }
 
 - (BOOL)openSequence:(NSString*)path {
-    return _context->OpenSequence(std::string([path UTF8String]));
+    BOOL ok = _context->OpenSequence(std::string([path UTF8String]));
+    if (ok) {
+        [self markSequenceClean];
+    }
+    return ok;
 }
 
 - (void)closeSequence {
     _context->CloseSequence();
+    _lastSavedChangeCount = 0;
 }
 
 - (BOOL)isSequenceLoaded {
     return _context->IsSequenceLoaded();
+}
+
+- (BOOL)saveSequence {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    auto* sf = _context->GetSequenceFile();
+    if (!sf) return NO;
+    const std::string path = sf->GetFullPath();
+    if (path.empty()) return NO;
+
+    // Security-scoped access covers files under the show folder
+    // (which is the common case — sequences live in the show dir).
+    // Obtain access before the write in case the file is outside
+    // the show scope (Save-As to an iCloud path).
+    ObtainAccessToURL(path, /*enforceWritable=*/true);
+
+    bool ok = sf->Save(_context->GetSequenceElements());
+    if (ok) {
+        [self markSequenceClean];
+    }
+    return ok ? YES : NO;
+}
+
+- (BOOL)saveSequenceAs:(NSString*)path {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (path.length == 0) return NO;
+    auto* sf = _context->GetSequenceFile();
+    if (!sf) return NO;
+
+    std::string newPath([path UTF8String]);
+    const std::string originalPath = sf->GetFullPath();
+    sf->SetFullPath(newPath);
+
+    ObtainAccessToURL(newPath, /*enforceWritable=*/true);
+    bool ok = sf->Save(_context->GetSequenceElements());
+    if (!ok) {
+        // Roll back so a subsequent `-saveSequence` doesn't write
+        // to the intended-but-failed destination.
+        sf->SetFullPath(originalPath);
+        return NO;
+    }
+    [self markSequenceClean];
+    return YES;
+}
+
+- (NSString*)currentSequencePath {
+    if (!_context) return @"";
+    auto* sf = _context->GetSequenceFile();
+    if (!sf) return @"";
+    const std::string& p = sf->GetFullPath();
+    return [NSString stringWithUTF8String:p.c_str()];
+}
+
+- (BOOL)isSequenceDirty {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    return _context->GetSequenceElements().GetChangeCount() != _lastSavedChangeCount
+        ? YES : NO;
+}
+
+- (void)markSequenceClean {
+    if (!_context || !_context->IsSequenceLoaded()) {
+        _lastSavedChangeCount = 0;
+        return;
+    }
+    _lastSavedChangeCount = _context->GetSequenceElements().GetChangeCount();
 }
 
 - (int)sequenceDurationMS {
@@ -1877,6 +1951,456 @@ std::shared_ptr<MediaCacheEntry> lookupMediaEntry(SequenceMedia& media,
         if (pathStr && typeStr.length) {
             [out addObject:@{@"path": pathStr, @"type": typeStr}];
         }
+    }
+    return out;
+}
+
+// MARK: - Embed / extract (G29)
+
+namespace {
+
+// Called from the Obj-C bridge after a cache mutation that doesn't
+// flow through `SequenceElements::IncrementChangeCount` itself
+// (embed / extract / remove-unused). Passing nullptr is safe —
+// `IncrementChangeCount` only dereferences the `Element*` when the
+// caller wants to trigger a dependency re-render for a timing
+// element.
+inline void bumpSequenceDirty(iPadRenderContext* ctx) {
+    if (!ctx || !ctx->IsSequenceLoaded()) return;
+    ctx->GetSequenceElements().IncrementChangeCount(nullptr);
+}
+
+} // namespace
+
+- (BOOL)embedMediaAtPath:(NSString*)path {
+    if (!_context || path.length == 0) return NO;
+    auto& media = _context->GetSequenceElements().GetSequenceMedia();
+    std::string spath([path UTF8String]);
+    if (!media.HasMedia(spath)) return NO;
+
+    // Establish which type the entry is so we can early-out when the
+    // caller asks to embed something un-embeddable (video / binary).
+    // The inventory is already type-scoped; be defensive anyway.
+    auto paths = media.GetAllMediaPaths();
+    std::optional<MediaType> type;
+    for (const auto& p : paths) {
+        if (p.first == spath) { type = p.second; break; }
+    }
+    if (!type) return NO;
+    auto entry = lookupMediaEntry(media, spath, *type);
+    if (!entry || !entry->IsEmbeddable() || entry->IsEmbedded()) return NO;
+
+    // Load before embed so the base64 payload is populated from
+    // disk. `MediaCacheEntry::Embed` just flips the flag — callers
+    // rely on the embeddedData vector being non-empty when Save
+    // writes.
+    if (!entry->isLoaded()) entry->Load();
+    media.EmbedMedia(spath);
+    bumpSequenceDirty(_context.get());
+    return YES;
+}
+
+- (BOOL)extractMediaAtPath:(NSString*)path {
+    if (!_context || path.length == 0) return NO;
+    auto& media = _context->GetSequenceElements().GetSequenceMedia();
+    std::string spath([path UTF8String]);
+    if (!media.HasMedia(spath)) return NO;
+
+    auto paths = media.GetAllMediaPaths();
+    std::optional<MediaType> type;
+    for (const auto& p : paths) {
+        if (p.first == spath) { type = p.second; break; }
+    }
+    if (!type) return NO;
+    auto entry = lookupMediaEntry(media, spath, *type);
+    if (!entry || !entry->IsEmbedded()) return NO;
+
+    // Resolve the destination so the extracted bytes land next to
+    // where the effect expects them. FixFile will pick the first
+    // writable location under the show / media folders; falling
+    // back to `_filePath` for already-absolute stored paths.
+    std::string dest = FileUtils::FixFile("", spath);
+    if (dest.empty()) dest = entry->GetFilePath();
+    if (dest.empty()) return NO;
+
+    // Desktop's ExtractImageToFile pattern: write the payload out,
+    // flip _isEmbedded off, keep the stored path.
+    if (!entry->SaveToFile(dest)) return NO;
+    media.ExtractMedia(spath);
+    bumpSequenceDirty(_context.get());
+    return YES;
+}
+
+- (int)embedAllMediaOfType:(NSString*)typeFilter {
+    if (!_context) return 0;
+    auto& media = _context->GetSequenceElements().GetSequenceMedia();
+    std::optional<MediaType> onlyType;
+    if (typeFilter.length > 0) {
+        onlyType = stringToMediaType(typeFilter);
+        if (!onlyType) return 0;
+    }
+    auto paths = media.GetAllMediaPaths();
+    int changed = 0;
+    for (const auto& p : paths) {
+        if (onlyType && p.second != *onlyType) continue;
+        auto entry = lookupMediaEntry(media, p.first, p.second);
+        if (!entry || !entry->IsEmbeddable() || entry->IsEmbedded()) continue;
+        if (!entry->isLoaded()) entry->Load();
+        media.EmbedMedia(p.first);
+        changed++;
+    }
+    if (changed > 0) bumpSequenceDirty(_context.get());
+    return changed;
+}
+
+namespace {
+
+// Walk every effect's settings + palette map and push each value
+// into `out`. The media-reference scan uses this to decide which
+// cached paths are still in use. False-positive matches (a text
+// field with a string that happens to match a cached path) keep
+// the entry alive — harmless for cleanup, better than dropping
+// something still referenced.
+void collectAllEffectSettingValues(iPadRenderContext& ctx,
+                                    std::unordered_set<std::string>& out) {
+    auto& se = ctx.GetSequenceElements();
+    for (size_t i = 0; i < se.GetElementCount(); ++i) {
+        Element* el = se.GetElement(i);
+        if (!el) continue;
+        // All Element types iterate effect layers the same way.
+        int nLayers = (int)el->GetEffectLayerCount();
+        for (int li = 0; li < nLayers; ++li) {
+            EffectLayer* layer = el->GetEffectLayer(li);
+            if (!layer) continue;
+            int nEffects = (int)layer->GetEffectCount();
+            for (int ei = 0; ei < nEffects; ++ei) {
+                Effect* eff = layer->GetEffect(ei);
+                if (!eff) continue;
+                for (const auto& kv : eff->GetSettings()) {
+                    out.insert(kv.second);
+                }
+                for (const auto& kv : eff->GetPaletteMap()) {
+                    out.insert(kv.second);
+                }
+            }
+        }
+    }
+}
+
+// Rewrite every effect's settings + palette-map VALUES equal to
+// `oldValue` to `newValue`. Used by the rename path so effects
+// tracking the old filename don't end up broken. Returns the
+// count of settings touched.
+//
+// SettingsMap's public `begin()`/`end()` are const-only (they
+// return `std::map::const_iterator`), so we can't mutate through a
+// range-for. Collect keys in a first pass, then reassign via
+// `operator[]` in a second pass.
+//
+// Per-effect change hooks: settings mutations call
+// `Effect::IncrementChangeCount()` (walks up through `EffectLayer`
+// to `SequenceElements` and drops the effect's render cache);
+// palette mutations go through `PaletteMapUpdated()` which also
+// re-derives `mColors`/`mCC` and then calls `IncrementChangeCount`.
+// The caller therefore doesn't need a separate sequence-level
+// bump when this returns > 0 — the upward propagation handles it.
+int rewriteEffectValues(iPadRenderContext& ctx,
+                         const std::string& oldValue,
+                         const std::string& newValue) {
+    if (oldValue == newValue) return 0;
+    int changed = 0;
+    auto& se = ctx.GetSequenceElements();
+    std::vector<std::string> keys;
+    for (size_t i = 0; i < se.GetElementCount(); ++i) {
+        Element* el = se.GetElement(i);
+        if (!el) continue;
+        int nLayers = (int)el->GetEffectLayerCount();
+        for (int li = 0; li < nLayers; ++li) {
+            EffectLayer* layer = el->GetEffectLayer(li);
+            if (!layer) continue;
+            int nEffects = (int)layer->GetEffectCount();
+            for (int ei = 0; ei < nEffects; ++ei) {
+                Effect* eff = layer->GetEffect(ei);
+                if (!eff) continue;
+
+                keys.clear();
+                for (auto it = eff->GetSettings().begin();
+                     it != eff->GetSettings().end(); ++it) {
+                    if (it->second == oldValue) keys.push_back(it->first);
+                }
+                bool settingsChanged = !keys.empty();
+                for (const auto& k : keys) {
+                    eff->GetSettings()[k] = newValue;
+                    changed++;
+                }
+                if (settingsChanged) {
+                    // Propagate up the tree (EffectLayer → Element
+                    // → SequenceElements) and drop the render
+                    // cache so the next frame picks up the new
+                    // path.
+                    eff->IncrementChangeCount();
+                }
+
+                keys.clear();
+                for (auto it = eff->GetPaletteMap().begin();
+                     it != eff->GetPaletteMap().end(); ++it) {
+                    if (it->second == oldValue) keys.push_back(it->first);
+                }
+                bool paletteChanged = !keys.empty();
+                for (const auto& k : keys) {
+                    eff->GetPaletteMap()[k] = newValue;
+                    changed++;
+                }
+                if (paletteChanged) {
+                    // `PaletteMapUpdated` re-derives `mColors` /
+                    // `mCC` and itself calls `IncrementChangeCount`.
+                    eff->PaletteMapUpdated();
+                }
+            }
+        }
+    }
+    return changed;
+}
+
+} // namespace
+
+- (BOOL)renameMediaFromPath:(NSString*)oldPath
+                      toPath:(NSString*)newPath {
+    if (!_context || oldPath.length == 0 || newPath.length == 0) return NO;
+    if ([oldPath isEqualToString:newPath]) return NO;
+    auto& media = _context->GetSequenceElements().GetSequenceMedia();
+    std::string oldStr([oldPath UTF8String]);
+    std::string newStr([newPath UTF8String]);
+
+    if (!media.HasMedia(oldStr)) return NO;
+    if (media.HasMedia(newStr)) return NO;  // cache-key collision
+
+    // Resolve the entry + its type so we know whether to move on
+    // disk. Videos and binaries can't be embedded, so for those
+    // the rename always needs a disk move; for images / svgs /
+    // shaders / text the disk move is skipped when the entry
+    // is embedded (nothing on disk to move).
+    auto paths = media.GetAllMediaPaths();
+    std::optional<MediaType> type;
+    for (const auto& p : paths) {
+        if (p.first == oldStr) { type = p.second; break; }
+    }
+    if (!type) return NO;
+    auto entry = lookupMediaEntry(media, oldStr, *type);
+    if (!entry) return NO;
+
+    const bool external = !entry->IsEmbedded();
+    if (external) {
+        // Resolve old + new to absolute on-disk paths. oldResolved
+        // must exist (otherwise there's nothing to move); newResolved
+        // must NOT exist (otherwise we'd clobber). Both go through
+        // FixFile so a show-relative path lands under the show
+        // folder.
+        std::string oldResolved = FileUtils::FixFile("", oldStr);
+        if (oldResolved.empty()) oldResolved = entry->GetFilePath();
+        if (oldResolved.empty() || !FileExists(oldResolved)) return NO;
+
+        // For the destination, resolve via FixFile first (handles
+        // a relative target under the show folder). If that
+        // returns the raw path unchanged (meaning not under
+        // show/media) treat the input as absolute-as-given.
+        std::string newResolved = FileUtils::FixFile("", newStr);
+        if (newResolved.empty()) newResolved = newStr;
+
+        // If the target's parent directory doesn't exist, create
+        // it — renaming `Images/foo.png` → `Images/Renamed/bar.png`
+        // should succeed even if `Images/Renamed/` hasn't been
+        // used yet.
+        std::filesystem::path newResPath(newResolved);
+        if (newResPath.has_parent_path()) {
+            std::error_code ec;
+            std::filesystem::create_directories(newResPath.parent_path(), ec);
+        }
+
+        if (FileExists(newResolved)) return NO; // disk collision
+
+        ObtainAccessToURL(oldResolved, true);
+        ObtainAccessToURL(newResolved, true);
+
+        std::error_code ec;
+        std::filesystem::rename(oldResolved, newResolved, ec);
+        if (ec) {
+            // Fall back to copy + remove for cross-filesystem
+            // rename cases (rename fails with EXDEV when the
+            // destination is on a different volume).
+            ec.clear();
+            std::filesystem::copy_file(oldResolved, newResolved,
+                std::filesystem::copy_options::overwrite_existing, ec);
+            if (ec) return NO;
+            std::error_code ec2;
+            std::filesystem::remove(oldResolved, ec2);
+            // Swallow the remove error — the copy succeeded, so
+            // the data is preserved; leaving a stray source is
+            // strictly better than losing it.
+        }
+    }
+
+    // Cache re-key works for every type via the generic helper.
+    if (!media.RenameMedia(oldStr, newStr)) {
+        // On failure we've already moved the file on disk for
+        // externals. Try to roll back to preserve the original
+        // state.
+        if (external) {
+            std::string oldResolved = FileUtils::FixFile("", oldStr);
+            std::string newResolved = FileUtils::FixFile("", newStr);
+            if (newResolved.empty()) newResolved = newStr;
+            if (!oldResolved.empty() && !newResolved.empty()) {
+                std::error_code ec;
+                std::filesystem::rename(newResolved, oldResolved, ec);
+            }
+        }
+        return NO;
+    }
+
+    // Rewrite every effect whose settings reference oldPath.
+    // `rewriteEffectValues` propagates the dirty + cache-drop
+    // hooks per effect; a final explicit bump covers the
+    // no-referencing-effect edge case.
+    (void)rewriteEffectValues(*_context, oldStr, newStr);
+    bumpSequenceDirty(_context.get());
+    return YES;
+}
+
+- (NSString*)videoCompatibilityIssueForPath:(NSString*)path {
+    if (path.length == 0) return nil;
+    // Resolve via FixFile so iCloud / show-relative paths map onto
+    // a real on-disk path AVFoundation can open. Obtain security-
+    // scoped access before the probe so sandboxed destinations
+    // (iCloud Drive) don't trip an access failure that would look
+    // like an incompatibility.
+    std::string raw([path UTF8String]);
+    std::string resolved = FileUtils::FixFile("", raw);
+    if (resolved.empty()) resolved = raw;
+    ObtainAccessToURL(resolved, false);
+
+    std::string reason = MediaCompatibility::CheckVideoFile(resolved);
+    if (reason.empty()) return nil;
+    return [NSString stringWithUTF8String:reason.c_str()];
+}
+
+- (int)removeUnusedMedia {
+    if (!_context) return 0;
+    auto& media = _context->GetSequenceElements().GetSequenceMedia();
+
+    // Collect every value any effect refers to — the "used" set.
+    std::unordered_set<std::string> usedValues;
+    collectAllEffectSettingValues(*_context, usedValues);
+
+    auto paths = media.GetAllMediaPaths();
+    int removed = 0;
+    for (const auto& p : paths) {
+        if (usedValues.count(p.first) == 0) {
+            media.RemoveMedia(p.first);
+            removed++;
+        }
+    }
+    if (removed > 0) bumpSequenceDirty(_context.get());
+    return removed;
+}
+
+- (int)extractAllMediaOfType:(NSString*)typeFilter {
+    if (!_context) return 0;
+    auto& media = _context->GetSequenceElements().GetSequenceMedia();
+    std::optional<MediaType> onlyType;
+    if (typeFilter.length > 0) {
+        onlyType = stringToMediaType(typeFilter);
+        if (!onlyType) return 0;
+    }
+    auto paths = media.GetAllMediaPaths();
+    int changed = 0;
+    for (const auto& p : paths) {
+        if (onlyType && p.second != *onlyType) continue;
+        auto entry = lookupMediaEntry(media, p.first, p.second);
+        if (!entry || !entry->IsEmbedded()) continue;
+        std::string dest = FileUtils::FixFile("", p.first);
+        if (dest.empty()) dest = entry->GetFilePath();
+        if (dest.empty()) continue;
+        if (!entry->SaveToFile(dest)) continue;
+        media.ExtractMedia(p.first);
+        changed++;
+    }
+    if (changed > 0) bumpSequenceDirty(_context.get());
+    return changed;
+}
+
+- (NSArray<NSDictionary<NSString*, id>*>*)mediaInventoryInSequence {
+    if (!_context) return @[];
+    auto& media = _context->GetSequenceElements().GetSequenceMedia();
+    auto paths = media.GetAllMediaPaths();
+    NSMutableArray<NSDictionary<NSString*, id>*>* out =
+        [NSMutableArray arrayWithCapacity:paths.size()];
+
+    for (const auto& p : paths) {
+        NSString* pathStr = [NSString stringWithUTF8String:p.first.c_str()];
+        NSString* typeStr = mediaTypeToString(p.second);
+        if (!pathStr || typeStr.length == 0) continue;
+
+        // Per-type entry lookup — use the type-scoped cache so we
+        // don't create stray wrong-type entries (same pattern as
+        // the thumbnail path).
+        auto entry = lookupMediaEntry(media, p.first, p.second);
+        if (!entry) continue;
+
+        BOOL embedded = entry->IsEmbedded() ? YES : NO;
+
+        // Resolve via FixFile for the on-disk existence check.
+        // `VideoMediaCacheEntry` caches its resolved path; for
+        // everything else run FixFile fresh each call (cheap — it
+        // hits the FileExists short-circuit when the raw path is
+        // already valid).
+        std::string resolved;
+        if (p.second == MediaType::Video) {
+            auto ve = std::static_pointer_cast<VideoMediaCacheEntry>(entry);
+            if (!ve->isLoaded()) ve->Load();
+            resolved = ve->GetResolvedPath();
+        }
+        if (resolved.empty()) {
+            resolved = FileUtils::FixFile("", p.first);
+            if (resolved.empty()) resolved = p.first;
+        }
+
+        BOOL broken = NO;
+        if (!embedded) {
+            broken = FileExists(resolved) ? NO : YES;
+        }
+
+        int widthPx = 0, heightPx = 0, frameCount = 0;
+        if (p.second == MediaType::Image && entry->isLoaded()) {
+            auto ie = std::static_pointer_cast<ImageCacheEntry>(entry);
+            widthPx = ie->GetImageWidth();
+            heightPx = ie->GetImageHeight();
+            frameCount = ie->GetImageCount();
+        } else if (p.second == MediaType::Video && entry->isLoaded()) {
+            auto ve = std::static_pointer_cast<VideoMediaCacheEntry>(entry);
+            // Duration-in-ms / frameTime gives an approximate frame
+            // count; exact frame count needs the decoder which
+            // isn't cheap to open just for a status line.
+            int durMS = ve->GetDurationMS();
+            if (durMS > 0) {
+                int fi = _context->GetSequenceFile()
+                    ? _context->GetSequenceFile()->GetFrameMS() : 50;
+                if (fi > 0) frameCount = durMS / fi;
+            }
+        }
+
+        NSString* resolvedStr = resolved.empty()
+            ? @"" : [NSString stringWithUTF8String:resolved.c_str()];
+
+        [out addObject:@{
+            @"path":         pathStr,
+            @"type":         typeStr,
+            @"resolvedPath": resolvedStr ?: @"",
+            @"isEmbedded":   @(embedded),
+            @"isBroken":     @(broken),
+            @"widthPx":      @(widthPx),
+            @"heightPx":     @(heightPx),
+            @"frameCount":   @(frameCount),
+        }];
     }
     return out;
 }

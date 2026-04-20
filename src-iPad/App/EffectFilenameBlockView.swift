@@ -30,6 +30,10 @@ struct EffectFilenameBlockView: View {
     @State private var presentingPicker = false
     @State private var presentingMediaSheet = false
     @State private var pendingPick: URL?
+    /// Populated after a video commit fails AVFoundation's decode
+    /// check. Non-nil → the "Video may not play on iPad" alert is
+    /// visible. Drives a dialog with a Transcode-on-Desktop hint.
+    @State private var videoCompatIssue: String? = nil
 
     private var currentPath: String {
         viewModel.settingValue(forKey: settingKey, defaultValue: "")
@@ -87,6 +91,7 @@ struct EffectFilenameBlockView: View {
             subdirectory: subdirectory
         ) { storedPath in
             viewModel.setSettingValue(storedPath, forKey: settingKey)
+            checkVideoCompat(storedPath)
         }
         .sheet(isPresented: $presentingMediaSheet) {
             MediaPickerSheet(
@@ -98,6 +103,7 @@ struct EffectFilenameBlockView: View {
                 // path as-is without re-running MediaRelocation.
                 onPick: { storedPath in
                     viewModel.setSettingValue(storedPath, forKey: settingKey)
+                    checkVideoCompat(storedPath)
                 },
                 onBrowse: { presentingPicker = true },
                 onClear: {
@@ -105,6 +111,33 @@ struct EffectFilenameBlockView: View {
                 }
             )
             .environment(viewModel)
+        }
+        .alert("Video May Not Play on iPad",
+               isPresented: Binding(
+                get: { videoCompatIssue != nil },
+                set: { if !$0 { videoCompatIssue = nil } }
+               )) {
+            Button("OK", role: .cancel) { videoCompatIssue = nil }
+        } message: {
+            if let reason = videoCompatIssue {
+                Text("\(reason)\n\niPad can only play videos AVFoundation supports. Convert the file on your desktop with Handbrake or ffmpeg (H.264 / HEVC in a .mov or .mp4 container works) and replace it here.")
+            }
+        }
+    }
+
+    /// Run the bridge's compatibility probe for video files only.
+    /// Non-videos skip — compat applies to AVFoundation decoding,
+    /// not images / shaders / SVG / etc. Surfaces an informational
+    /// alert pointing the user at desktop tooling; the effect
+    /// still references the file so a later replacement works.
+    private func checkVideoCompat(_ storedPath: String) {
+        guard mediaType == "video", !storedPath.isEmpty else { return }
+        let doc = viewModel.document
+        DispatchQueue.global(qos: .utility).async {
+            let reason = doc.videoCompatibilityIssue(forPath: storedPath)
+            DispatchQueue.main.async {
+                videoCompatIssue = reason
+            }
         }
     }
 
