@@ -1,4 +1,29 @@
 import SwiftUI
+import UniformTypeIdentifiers
+
+/// Dynamic UTType for `.xtiming` timing-track files. Declared here
+/// (not in Info.plist) because the import / export UI needs a
+/// content type but the iPad doesn't yet own the file type. Falls
+/// back to `.xml` so the system picker never no-ops.
+let kXTimingFileType: UTType = UTType(filenameExtension: "xtiming") ?? .xml
+
+/// File document wrapper for the Save / Export timing-track flow.
+/// Holds the bytes already-written to a temp path so SwiftUI's
+/// `.fileExporter` can copy them to the user's destination.
+struct XTimingExportDoc: FileDocument {
+    static var readableContentTypes: [UTType] { [kXTimingFileType] }
+    static var writableContentTypes: [UTType] { [kXTimingFileType] }
+    let sourcePath: String
+    init(sourcePath: String) { self.sourcePath = sourcePath }
+    init(configuration: ReadConfiguration) throws { sourcePath = "" }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        if !sourcePath.isEmpty,
+           let data = try? Data(contentsOf: URL(fileURLWithPath: sourcePath)) {
+            return FileWrapper(regularFileWithContents: data)
+        }
+        return FileWrapper(regularFileWithContents: Data())
+    }
+}
 
 /// Six-region effects grid shell with synchronized scrolling. Placeholder
 /// content in each cell — the drawing (effects, timing marks, icons,
@@ -59,6 +84,25 @@ struct SequencerGridV2View: View {
     @State private var loopMenuPresented: Bool = false
     /// B41 waveform filter-picker trigger.
     @State private var waveformMenuPresented: Bool = false
+
+    /// B74 import-xtiming file-picker trigger.
+    @State private var showingXTimingImporter: Bool = false
+    /// B78 import-lyrics sheet state.
+    @State private var importLyricsTargetRow: Int? = nil
+    @State private var importLyricsText: String = ""
+    @State private var importLyricsStart: String = "0.000"
+    @State private var importLyricsEnd: String = ""
+    /// B89 auto-label sheet state.
+    @State private var autoLabelTargetRow: Int? = nil
+    @State private var autoLabelStart: String = "1"
+    @State private var autoLabelEnd: String = "100"
+    @State private var autoLabelOverwrite: Bool = false
+    /// B75 export-xtiming state. Target row is captured when the
+    /// menu fires; the bridge writes to a temp path which the
+    /// fileExporter then copies to the user's chosen destination.
+    @State private var xtimingExportDoc: XTimingExportDoc? = nil
+    @State private var showingXTimingExporter: Bool = false
+    @State private var xtimingDefaultName: String = "Timing.xtiming"
 
     /// B21 edit-timing dialog state. Fields are bound to seconds
     /// strings so users enter `5.25` and see `0.75` for duration;
@@ -431,6 +475,79 @@ struct SequencerGridV2View: View {
         } message: { _ in
             Text("Enter start and end times in seconds.")
         }
+        // B89 auto-label-marks alert.
+        .alert("Auto-Label Marks",
+               isPresented: Binding(
+                get: { autoLabelTargetRow != nil },
+                set: { if !$0 { autoLabelTargetRow = nil } }
+               ),
+               presenting: autoLabelTargetRow) { rowIdx in
+            TextField("Start number", text: $autoLabelStart)
+                .keyboardType(.numberPad)
+            TextField("End number (wraps)", text: $autoLabelEnd)
+                .keyboardType(.numberPad)
+            Toggle("Overwrite existing labels", isOn: $autoLabelOverwrite)
+            Button("Label") {
+                let start = Int(autoLabelStart) ?? 1
+                let end = Int(autoLabelEnd) ?? start
+                _ = viewModel.autoLabelTimingMarks(
+                    rowIndex: rowIdx, startNum: start, endNum: end,
+                    overwrite: autoLabelOverwrite)
+                autoLabelTargetRow = nil
+            }
+            Button("Cancel", role: .cancel) {
+                autoLabelTargetRow = nil
+            }
+        } message: { _ in
+            Text("Number the marks starting at Start; the count wraps back when it passes End. With Overwrite off, only unlabeled marks get numbers.")
+        }
+        // B78 import-lyrics sheet.
+        .sheet(isPresented: Binding(
+            get: { importLyricsTargetRow != nil },
+            set: { if !$0 { importLyricsTargetRow = nil } }
+        )) {
+            if let rowIdx = importLyricsTargetRow {
+                ImportLyricsSheet(
+                    rowIndex: rowIdx,
+                    text: $importLyricsText,
+                    startText: $importLyricsStart,
+                    endText: $importLyricsEnd,
+                    onCommit: { start, end in
+                        let startMS = Int((Double(start) ?? 0.0) * 1000)
+                        let endMS = Int((Double(end) ?? 0.0) * 1000)
+                        _ = viewModel.importLyrics(
+                            rowIndex: rowIdx,
+                            lyrics: importLyricsText,
+                            startMS: startMS, endMS: endMS)
+                        importLyricsTargetRow = nil
+                    },
+                    onCancel: { importLyricsTargetRow = nil }
+                )
+            }
+        }
+        // B74 .xtiming import.
+        .fileImporter(
+            isPresented: $showingXTimingImporter,
+            allowedContentTypes: [kXTimingFileType],
+            allowsMultipleSelection: false
+        ) { result in
+            guard case .success(let urls) = result, let url = urls.first else { return }
+            let path = url.path
+            _ = XLSequenceDocument.obtainAccess(toPath: path,
+                                                  enforceWritable: false)
+            _ = viewModel.importXTiming(path: path)
+        }
+        // B75 .xtiming export.
+        .fileExporter(
+            isPresented: $showingXTimingExporter,
+            document: xtimingExportDoc,
+            contentType: kXTimingFileType,
+            defaultFilename: xtimingDefaultName
+        ) { _ in
+            // Nothing more to do — bridge already wrote the temp
+            // file; the exporter copied it to the user's pick.
+            xtimingExportDoc = nil
+        }
         // B41 waveform filter picker.
         .confirmationDialog(
             "Waveform",
@@ -522,6 +639,21 @@ struct SequencerGridV2View: View {
         return Int((val * 1000.0).rounded())
     }
 
+    /// B75: write the timing track to a temp `.xtiming` file and
+    /// hand that path off to SwiftUI's `.fileExporter` so the user
+    /// picks a destination. The exporter then copies the bytes.
+    private func startXTimingExport(rowIndex: Int, trackName: String) {
+        let safeName = trackName.isEmpty ? "Timing" : trackName
+        let tempDir = FileManager.default.temporaryDirectory
+        let tempPath = tempDir.appendingPathComponent("\(safeName)-\(UUID().uuidString).xtiming").path
+        guard viewModel.exportTimingTrack(rowIndex: rowIndex, path: tempPath) else {
+            return
+        }
+        xtimingExportDoc = XTimingExportDoc(sourcePath: tempPath)
+        xtimingDefaultName = "\(safeName).xtiming"
+        showingXTimingExporter = true
+    }
+
     /// B67: default add-mark duration is 500 ms, clamped against the
     /// next existing mark on that row (min 100 ms) and the sequence
     /// end. Start = tap time (clamped >= previous mark's end).
@@ -584,6 +716,12 @@ struct SequencerGridV2View: View {
                         showAddTimingTrackAlert = true
                     } label: {
                         Label("Add Timing Track…", systemImage: "plus.rectangle")
+                    }
+                    Button {
+                        showingXTimingImporter = true
+                    } label: {
+                        Label("Import Timing Track…",
+                               systemImage: "square.and.arrow.down")
                     }
                     // B37: re-fit the whole sequence into the viewport.
                     Divider()
@@ -783,7 +921,24 @@ struct SequencerGridV2View: View {
                                 sourceRowIndex: row.id, mode: mode)
                         }
                     },
-                    canSubdivide: row.layerIndex == 0 && !row.effects.isEmpty
+                    canSubdivide: row.layerIndex == 0 && !row.effects.isEmpty,
+                    onExportTimingTrack: {
+                        startXTimingExport(rowIndex: row.id,
+                                             trackName: row.timing?.elementName ?? row.displayName)
+                    },
+                    onImportLyrics: {
+                        importLyricsTargetRow = row.id
+                        importLyricsText = ""
+                        importLyricsStart = "0.000"
+                        let endSec = Double(viewModel.sequenceDurationMS) / 1000.0
+                        importLyricsEnd = String(format: "%.3f", endSec)
+                    },
+                    onAutoLabelMarks: {
+                        autoLabelTargetRow = row.id
+                        autoLabelStart = "1"
+                        autoLabelEnd = "\(max(1, row.effects.count))"
+                        autoLabelOverwrite = false
+                    }
                 )
             }
         }
@@ -1093,6 +1248,58 @@ private struct PlayheadShape: Shape {
         // Full-height line.
         p.addRect(CGRect(x: cx - 1, y: 0, width: 2, height: rect.height))
         return p
+    }
+}
+
+/// B78 lyrics-import sheet. Multi-line text field + start/end
+/// seconds. On commit, the parent view dispatches to
+/// `SequencerViewModel.importLyrics(rowIndex:lyrics:startMS:endMS:)`.
+private struct ImportLyricsSheet: View {
+    let rowIndex: Int
+    @Binding var text: String
+    @Binding var startText: String
+    @Binding var endText: String
+    let onCommit: (_ startSec: String, _ endSec: String) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Paste lyrics below — one phrase per line. The full time range is divided evenly into phrases. Blank lines are skipped.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                TextEditor(text: $text)
+                    .font(.system(.body, design: .monospaced))
+                    .frame(minHeight: 240)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.4)))
+                HStack {
+                    VStack(alignment: .leading) {
+                        Text("Start (seconds)").font(.caption).foregroundStyle(.secondary)
+                        TextField("0.000", text: $startText)
+                            .keyboardType(.decimalPad)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                    VStack(alignment: .leading) {
+                        Text("End (seconds)").font(.caption).foregroundStyle(.secondary)
+                        TextField("0.000", text: $endText)
+                            .keyboardType(.decimalPad)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+            }
+            .padding()
+            .navigationTitle("Import Lyrics")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Import") { onCommit(startText, endText) }
+                        .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
     }
 }
 

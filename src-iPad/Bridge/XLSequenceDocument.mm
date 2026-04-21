@@ -19,6 +19,8 @@
 #include "render/Effect.h"
 #include "render/SequenceElements.h"
 #include "render/SequenceMedia.h"
+#include "render/SequenceFile.h"
+#include "utils/UtilFunctions.h"
 #include "effects/RenderableEffect.h"
 #include "effects/EffectManager.h"
 #include "effects/ShaderEffect.h"
@@ -635,6 +637,124 @@ static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
     if (!te || !te->IsFixedTiming()) return NO;
     te->SetFixedTiming(0);
     _context->GetSequenceElements().PopulateRowInformation();
+    return YES;
+}
+
+- (int)importLyricsAtRow:(int)rowIndex
+                 phrases:(NSArray<NSString*>*)phrases
+                 startMS:(int)startMS
+                   endMS:(int)endMS {
+    auto& se = _context->GetSequenceElements();
+    auto* row = se.GetRowInformation(rowIndex);
+    if (!row || !row->element) return 0;
+    if (row->element->GetType() != ElementType::ELEMENT_TYPE_TIMING) return 0;
+    TimingElement* te = dynamic_cast<TimingElement*>(row->element);
+    if (!te) return 0;
+    if (!phrases || phrases.count == 0) return 0;
+
+    // Clean + count non-empty phrases up front.
+    NSMutableArray<NSString*>* cleaned = [NSMutableArray array];
+    for (NSString* raw in phrases) {
+        if (!raw) continue;
+        NSString* line = [raw stringByTrimmingCharactersInSet:
+                            [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (line.length == 0) continue;
+        // Strip common smart-quote unicode + illegal XML bits.
+        line = [line stringByReplacingOccurrencesOfString:@"’" withString:@"'"];
+        line = [line stringByReplacingOccurrencesOfString:@"Ș" withString:@"'"];
+        line = [line stringByReplacingOccurrencesOfString:@"“" withString:@"\""];
+        line = [line stringByReplacingOccurrencesOfString:@"”" withString:@"\""];
+        line = [line stringByReplacingOccurrencesOfString:@"\"" withString:@""];
+        line = [line stringByReplacingOccurrencesOfString:@"<" withString:@""];
+        line = [line stringByReplacingOccurrencesOfString:@">" withString:@""];
+        if (line.length == 0) continue;
+        [cleaned addObject:line];
+    }
+    if (cleaned.count == 0) return 0;
+
+    // Clamp range. Desktop falls back to full-sequence range if the
+    // user-entered times are nonsensical.
+    int seqEnd = se.GetSequenceEnd();
+    if (startMS < 0) startMS = 0;
+    if (endMS <= 0 || endMS > seqEnd) endMS = seqEnd;
+    if (endMS <= startMS) { startMS = 0; endMS = seqEnd; }
+    if (endMS <= startMS) return 0;
+
+    // Replace all layers with a single fresh phrase layer.
+    te->SetFixedTiming(0);
+    while (te->GetEffectLayerCount() > 0) {
+        te->RemoveEffectLayer((int)te->GetEffectLayerCount() - 1);
+    }
+    EffectLayer* phraseLayer = te->AddEffectLayer();
+    if (!phraseLayer) return 0;
+
+    double freq = se.GetFrequency();
+    int intervalMS = (endMS - startMS) / (int)cleaned.count;
+    int curStart = startMS;
+    int added = 0;
+    for (NSUInteger i = 0; i < cleaned.count; i++) {
+        int curEnd = RoundToMultipleOfPeriod(curStart + intervalMS, freq);
+        if (i == cleaned.count - 1 || curEnd > endMS) curEnd = endMS;
+        if (curEnd <= curStart) break;
+        std::string lbl = [cleaned[i] UTF8String];
+        if (phraseLayer->AddEffect(0, lbl, "", "",
+                                    curStart, curEnd,
+                                    /*EFFECT_NOT_SELECTED*/ 0, false)) {
+            added++;
+        }
+        curStart = curEnd;
+    }
+    se.PopulateRowInformation();
+    return added;
+}
+
+- (int)importXTimingFromPath:(NSString*)path {
+    if (!path || path.length == 0) return 0;
+    SequenceFile* sf = _context->GetSequenceFile();
+    if (!sf) return 0;
+    int countBefore = _context->GetSequenceElements().GetNumberOfTimingElements();
+    std::vector<std::string> filenames;
+    filenames.push_back(std::string([path UTF8String]));
+    sf->ProcessXTiming(filenames, _context.get());
+    int countAfter = _context->GetSequenceElements().GetNumberOfTimingElements();
+    if (countAfter > countBefore) {
+        // Mirror desktop's post-import behavior: make the newest
+        // imported timing track active.
+        _context->GetSequenceElements().DeactivateAllTimingElements();
+        TimingElement* te = _context->GetSequenceElements().GetTimingElement(countAfter - 1);
+        if (te) te->SetActive(true);
+        _context->GetSequenceElements().PopulateRowInformation();
+    }
+    return countAfter - countBefore;
+}
+
+- (BOOL)exportTimingTrackAtRow:(int)rowIndex toPath:(NSString*)path {
+    if (!path || path.length == 0) return NO;
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    if (row->element->GetType() != ElementType::ELEMENT_TYPE_TIMING) return NO;
+    TimingElement* te = dynamic_cast<TimingElement*>(row->element);
+    if (!te) return NO;
+    // Build the full `.xtiming` document:
+    //   <?xml version="1.0" encoding="UTF-8"?>
+    //   <timing name="..." subType="..." SourceVersion="...">
+    //     <EffectLayer><Effect .../>…</EffectLayer>
+    //     …
+    //   </timing>
+    std::string doc;
+    doc.reserve(2048);
+    doc += "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n";
+    doc += "<timing name=\"" + XmlSafe(te->GetName()) + "\" ";
+    doc += "subType=\"" + te->GetSubType() + "\" ";
+    doc += std::string("SourceVersion=\"") + xlights_version_string + "\">\n";
+    doc += te->GetExport();
+    doc += "</timing>\n";
+    NSData* data = [NSData dataWithBytes:doc.data() length:doc.size()];
+    NSError* err = nil;
+    if (![data writeToFile:path options:NSDataWritingAtomic error:&err]) {
+        NSLog(@"exportTimingTrack failed: %@", err);
+        return NO;
+    }
     return YES;
 }
 

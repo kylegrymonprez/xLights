@@ -31,6 +31,12 @@ struct TimingRowHeader: View {
     /// the whole view-model enum by type.
     var onSubdivide: ((_ rawMode: Int) -> Void)?
     var canSubdivide: Bool = false
+    /// B75: fires when the user picks "Export Timing Track…".
+    var onExportTimingTrack: (() -> Void)?
+    /// B78: fires when the user picks "Import Lyrics…".
+    var onImportLyrics: (() -> Void)?
+    /// B89: fires when the user picks "Auto-Label Marks…".
+    var onAutoLabelMarks: (() -> Void)?
 
     // Active state is carried on `row.timing?.isActive` so a toggle
     // here flips the struct equality and re-runs the grid body —
@@ -149,6 +155,24 @@ struct TimingRowHeader: View {
                     } label: {
                         Label("Generate Subdivided Timing Track…",
                                systemImage: "square.split.2x1")
+                    }
+                }
+                if let fire = onExportTimingTrack {
+                    Button { fire() } label: {
+                        Label("Export Timing Track…",
+                               systemImage: "square.and.arrow.up")
+                    }
+                }
+                if let fire = onImportLyrics {
+                    Button { fire() } label: {
+                        Label("Import Lyrics…",
+                               systemImage: "text.bubble")
+                    }
+                }
+                if let fire = onAutoLabelMarks {
+                    Button { fire() } label: {
+                        Label("Auto-Label Marks…",
+                               systemImage: "number")
                     }
                 }
                 Button(role: .destructive) {

@@ -1734,6 +1734,74 @@ class SequencerViewModel {
         return true
     }
 
+    /// B89: label every mark on the given timing row with an
+    /// incrementing integer in `[startNum, endNum]`, wrapping back
+    /// to `startNum` when it rolls past `endNum`. `overwrite=false`
+    /// preserves any mark that already has a non-empty label
+    /// (matches desktop `EffectsGrid::AUTOLABEL`). Undo is wired
+    /// via the existing per-mark `renameTimingMark` path.
+    @discardableResult
+    func autoLabelTimingMarks(rowIndex: Int, startNum: Int, endNum: Int,
+                               overwrite: Bool) -> Int {
+        guard rowIndex >= 0, rowIndex < rows.count else { return 0 }
+        let row = rows[rowIndex]
+        guard row.timing != nil else { return 0 }
+        if row.effects.isEmpty { return 0 }
+        let increment = startNum <= endNum ? 1 : -1
+        var current = startNum
+        undoManager.beginUndoGrouping()
+        var count = 0
+        for (idx, mark) in row.effects.enumerated() {
+            if !overwrite && !mark.name.isEmpty { continue }
+            _ = renameTimingMark(rowIndex: rowIndex, markIndex: idx,
+                                  label: "\(current)")
+            count += 1
+            current += increment
+            if increment == 1 && current > endNum {
+                current = startNum
+            } else if increment == -1 && current < endNum {
+                current = startNum
+            }
+        }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName("Auto-Label Marks")
+        return count
+    }
+
+    /// B78: populate a timing row with phrase marks from raw lyrics
+    /// text (one line per phrase). Replaces all existing layers on
+    /// the target row. `startMS`/`endMS` default to the full sequence
+    /// range if zero. Returns the number of marks added.
+    @discardableResult
+    func importLyrics(rowIndex: Int, lyrics: String,
+                       startMS: Int = 0, endMS: Int = 0) -> Int {
+        let lines = lyrics.components(separatedBy: .newlines)
+        let added = Int(document.importLyrics(atRow: Int32(rowIndex),
+                                                phrases: lines,
+                                                startMS: Int32(startMS),
+                                                endMS: Int32(endMS)))
+        if added > 0 { reloadRows() }
+        return added
+    }
+
+    // MARK: - xtiming I/O (B74 / B75)
+
+    /// B74: import an `.xtiming` file. Returns the number of tracks
+    /// added (0 on parse failure). Caller must ensure security-scoped
+    /// access to `path` before calling.
+    @discardableResult
+    func importXTiming(path: String) -> Int {
+        let added = Int(document.importXTiming(fromPath: path))
+        if added > 0 { reloadRows() }
+        return added
+    }
+
+    /// B75: export the given timing row to `path` as `.xtiming`.
+    @discardableResult
+    func exportTimingTrack(rowIndex: Int, path: String) -> Bool {
+        return document.exportTimingTrack(atRow: Int32(rowIndex), toPath: path)
+    }
+
     /// B76: convert a fixed-interval timing track to variable
     /// (user-editable). Existing marks are kept in place; only the
     /// fixed-period flag is cleared. Not undo-able for first cut.

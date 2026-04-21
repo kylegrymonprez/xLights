@@ -265,6 +265,39 @@
 - (BOOL)makeTimingTrackVariableAtRow:(int)rowIndex
     NS_SWIFT_NAME(makeTimingTrackVariable(atRow:));
 
+// B74 import: read an `.xtiming` file (single `<timing>` or
+// multi-`<timings>` wrapper) and add each entry as a new timing
+// track. Names uniquified on collision (same rule as
+// `addTimingTrack`). Returns the number of tracks added (0 on
+// parse failure). Routes through
+// `SequenceFile::ProcessXTiming({path}, iPadRenderContext)`.
+- (int)importXTimingFromPath:(NSString*)path
+    NS_SWIFT_NAME(importXTiming(fromPath:));
+
+// B78 import lyrics: replace the target timing element's layers
+// with a single phrase layer populated from `phrases`. Each non-
+// empty phrase gets one mark spanning its slice of
+// [startMS, endMS], end times snapped to the sequence's frame
+// period. `phrases` should already have whitespace trimmed per
+// line; this method still strips a few common illegal XML chars
+// and smart-quote unicode variants. Returns the number of marks
+// added (0 on failure / empty input).
+- (int)importLyricsAtRow:(int)rowIndex
+                 phrases:(NSArray<NSString*>*)phrases
+                 startMS:(int)startMS
+                   endMS:(int)endMS
+    NS_SWIFT_NAME(importLyrics(atRow:phrases:startMS:endMS:));
+
+// B75 export: write the timing element at `rowIndex` to `path` as a
+// self-contained `.xtiming` XML document (wraps
+// `TimingElement::GetExport()` with the standard `<?xml ...?>` +
+// `<timing name=... subType=... SourceVersion=...>` envelope).
+// Returns NO if the row isn't a timing row or the write failed.
+// Caller is responsible for obtaining security-scoped access to
+// `path` before calling.
+- (BOOL)exportTimingTrackAtRow:(int)rowIndex toPath:(NSString*)path
+    NS_SWIFT_NAME(exportTimingTrack(atRow:toPath:));
+
 // Timing track rename / delete. `renameTiming…` wires through
 // `SequenceElements::RenameTimingTrack` so effect references to
 // the old name update in-place. `deleteTiming…` goes through

@@ -355,8 +355,27 @@ Most mark-editing + breakdown work landed. What's left:
 
 ### 5.1 Track management
 
-- **Gap B74 — Import Timing Track** from `.xtiming`. **P1.**
-- **Gap B75 — Export Timing Track** to `.xtiming`. **P1.**
+- **Gap B74 — Import Timing Track** from `.xtiming`. **[landed
+  2026-04-20].** "Import Timing Track…" entry on the View-picker
+  menu opens a `.fileImporter`; the picked path flows through
+  new bridge `-importXTimingFromPath:` which calls
+  `SequenceFile::ProcessXTiming({path}, iPadRenderContext)`. On
+  success, other timing tracks are deactivated and the newly
+  imported one goes active (matches desktop
+  `ExecuteImportTimingElement`). Handles both single-`<timing>`
+  and multi-track `<timings>` wrappers.
+- **Gap B75 — Export Timing Track** to `.xtiming`. **[landed
+  2026-04-20].** "Export Timing Track…" entry on the timing-row
+  header long-press menu. New bridge
+  `-exportTimingTrackAtRow:toPath:` wraps
+  `TimingElement::GetExport()` in the standard `<?xml ?>` +
+  `<timing name subType SourceVersion>` envelope matching
+  desktop's `RowHeading.cpp:1276-1296`. iPad first writes to a
+  temp `.xtiming` path, then presents SwiftUI's
+  `.fileExporter` so the user picks a destination. Single-track
+  export only for the first cut (desktop's
+  `SelectTimingsDialog` multi-track export defers to a later
+  polish pass).
 - **Gap B76 — Make Timing Track Variable.** **[landed
   2026-04-20].** "Make Variable" entry on a fixed-interval
   timing-row header (gated by `timingTrackIsFixed`). New bridge
@@ -366,7 +385,20 @@ Most mark-editing + breakdown work landed. What's left:
   Paired query `-timingTrackIsFixedAtRow:` surfaces the state
   for the gate.
 - **Gap B77 — Import Notes** (MIDI / note file). **P2.**
-- **Gap B78 — Import Lyrics** (text file). **P1.**
+- **Gap B78 — Import Lyrics.** **[landed 2026-04-20].** "Import
+  Lyrics…" entry on the timing-row header long-press menu opens
+  an `ImportLyricsSheet` with a multi-line `TextEditor` +
+  Start/End seconds fields (default Start=0, End=sequence
+  duration). On commit, non-empty lines are distributed evenly
+  across the time range, each line's end snapped to the
+  sequence frame period. New bridge
+  `-importLyricsAtRow:phrases:startMS:endMS:` mirrors desktop
+  `RowHeading::ImportLyrics`: clears all existing layers,
+  unfixes the track, adds a single phrase layer, strips smart-
+  quote unicode + a few illegal XML chars per line. Not
+  undo-able in first cut (replaces layer structure; layer-
+  level undo is follow-up). Paste-from-clipboard etc. comes
+  for free via SwiftUI's `TextEditor`.
 - **Gap B79 — AI Speech 2 Lyrics.** Needs an iOS bridge for the
   AI call path. **P2.**
 - **Gap B80 — Generate Subdivided Timing Tracks.** **[landed
@@ -406,8 +438,18 @@ Most mark-editing + breakdown work landed. What's left:
   `TimingElement`. Lock-guard same as `BreakdownPhrases`:
   rejected if any word/phoneme mark is locked. Not undo-able
   in the first cut (mutates layer structure).
-- **Gap B89 — Auto Label Timings** (populate labels from loaded
-  lyric text). Follows from B78. **P1.**
+- **Gap B89 — Auto Label Timings.** **[landed 2026-04-20].**
+  Labels every mark on a timing row with an incrementing integer
+  in `[start, end]` (wraps back to `start` when it rolls past
+  `end`; reversed direction supported via `start > end`).
+  Overwrite toggle preserves already-labeled marks when off —
+  matches desktop `EffectsGrid::AUTOLABEL` (`EffectsGrid.cpp:
+  1105-1135`). Note: the original plan phrasing ("populate from
+  loaded lyric text") was a misread — desktop's Auto-Label is
+  numeric. Text-from-lyrics is what B78 already does. Entry:
+  timing-row header long-press → "Auto-Label Marks…" alert with
+  Start / End number fields + Overwrite toggle. Single undo
+  group.
 - **Gap B90 — Add / Remove "-shimmer" suffix.** Convenience op on
   timing labels. **P2.**
 - **Gap B91 — Divide Timings (Halve).** Subdivide each mark.
@@ -623,11 +665,11 @@ feedback.
 | B64 | Layer-count [N] indicator | Row heading | P2 |
 | B65 | Tooltip on truncated row name | Row heading | ✓ landed |
 | B66 | Muted row visual state | Row heading | P2 |
-| B74 | Import Timing Track (.xtiming) | Timing | P1 |
-| B75 | Export Timing Track (.xtiming) | Timing | P1 |
+| B74 | Import Timing Track (.xtiming) | Timing | ✓ landed |
+| B75 | Export Timing Track (.xtiming) | Timing | ✓ landed |
 | B76 | Make fixed timing track variable | Timing | ✓ landed |
 | B77 | Import Notes (MIDI) | Timing | P2 |
-| B78 | Import Lyrics | Timing | P1 |
+| B78 | Import Lyrics | Timing | ✓ landed |
 | B79 | AI Speech 2 Lyrics | Timing | P2 |
 | B80 | Generate Subdivided Timing Tracks | Timing | ✓ landed |
 | B81 | Hide All / Show All Timing | Timing | P2 |
@@ -636,7 +678,7 @@ feedback.
 | B84 (per-mark) | Single-mark phrase breakdown | Timing | P2 |
 | B85 | Breakdown Word / Words | Timing | Deferred |
 | B87 | Remove Words / Phonemes | Timing | ✓ landed |
-| B89 | Auto Label Timings (from lyrics) | Timing | P1 |
+| B89 | Auto Label Timings (numeric) | Timing | ✓ landed |
 | B90 | Add / Remove "-shimmer" suffix | Timing | P2 |
 | B91 | Divide Timings (Halve) | Timing | P2 |
 | B92 | Double-tap timing mark → loop-play region | Timing | P2 |
