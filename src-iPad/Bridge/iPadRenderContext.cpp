@@ -587,6 +587,27 @@ Model* iPadRenderContext::GetModel(const std::string& name) const {
     return nullptr;
 }
 
+PhonemeDictionary& iPadRenderContext::GetPhonemeDictionary() {
+    if (!_phonemeDict) {
+        _phonemeDict = std::make_unique<PhonemeDictionary>();
+    }
+    // Always call LoadDictionaries — the method short-circuits if
+    // the map is already populated, so repeat calls are cheap.
+    // Search dirs: show folder first (so user-override
+    // `user_dictionary` files win), then the app bundle's
+    // `dictionaries/` folder (where the shipped corpus lives).
+    std::vector<std::string> searchDirs;
+    if (!_showDir.empty()) {
+        searchDirs.push_back(_showDir);
+    }
+    std::string res = FileUtils::GetResourcesDir();
+    if (!res.empty()) {
+        searchDirs.push_back(res + "/dictionaries");
+    }
+    _phonemeDict->LoadDictionaries(searchDirs);
+    return *_phonemeDict;
+}
+
 TimingElement* iPadRenderContext::AddTimingElement(const std::string& name,
                                                     const std::string& subType) {
     // Mirrors xLightsFrame::AddTimingElement (tabSequencer.cpp:3502).

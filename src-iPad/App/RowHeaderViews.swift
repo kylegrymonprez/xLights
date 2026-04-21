@@ -18,6 +18,10 @@ struct TimingRowHeader: View {
     /// can't use.
     var canBreakdownPhrases: Bool = false
     var onBreakdownPhrases: (() -> Void)?
+    /// B85: surfaced as "Breakdown Words" once a Words layer exists
+    /// (i.e. Breakdown Phrases has already run).
+    var canBreakdownWords: Bool = false
+    var onBreakdownWords: (() -> Void)?
     /// B87: surfaced as "Remove Words / Phonemes" when the phrase
     /// layer has extra sub-layers to strip.
     var canRemoveWordsAndPhonemes: Bool = false
@@ -80,6 +84,7 @@ struct TimingRowHeader: View {
                     )
                     .frame(width: 14, height: 14)
                     .contentShape(Rectangle())
+                    .hoverEffect(.highlight)   // B30
                     .onTapGesture {
                         document.setTimingRowActive(!isActive, at: Int32(row.id))
                         onRowsChanged()
@@ -111,6 +116,7 @@ struct TimingRowHeader: View {
         // isn't included because its `.contentShape` carves out its
         // own hit area.
         .contentShape(Rectangle())
+        .hoverEffect(showCollapseOnHeading ? .highlight : .lift)   // B30
         .onTapGesture {
             if showCollapseOnHeading {
                 document.toggleElementCollapsed(at: Int32(row.id))
@@ -127,6 +133,12 @@ struct TimingRowHeader: View {
                     Button { fire() } label: {
                         Label("Breakdown Phrases",
                                systemImage: "text.append")
+                    }
+                }
+                if canBreakdownWords, let fire = onBreakdownWords {
+                    Button { fire() } label: {
+                        Label("Breakdown Words",
+                               systemImage: "text.badge.plus")
                     }
                 }
                 if canRemoveWordsAndPhonemes, let fire = onRemoveWordsAndPhonemes {
@@ -300,6 +312,7 @@ struct ModelRowHeader: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .hoverEffect(.highlight)   // B30
             } else {
                 Spacer().frame(width: 14)
             }
@@ -314,6 +327,7 @@ struct ModelRowHeader: View {
                 }
                 .buttonStyle(.plain)
                 .frame(width: 12)
+                .hoverEffect(.highlight)   // B30
             }
 
             if isGroup {

@@ -28,6 +28,7 @@
 #include "models/OutputModelManager.h"
 #include "models/ViewObjectManager.h"
 #include "utils/JobPool.h"
+#include "lyrics/PhonemeDictionary.h"
 #include "utils/xlImage.h"
 
 #include <list>
@@ -141,6 +142,14 @@ public:
     ModelManager& GetModelManager() { return *_modelManager; }
     ViewObjectManager& GetAllObjects() { return *_viewObjectManager; }
     SequenceFile* GetSequenceFile() { return _sequenceFile.get(); }
+
+    // B85 — lazy-loaded phoneme dictionary. First call loads
+    // `standard_dictionary` / `extended_dictionary` /
+    // `user_dictionary` / `phoneme_mapping` from the bundled
+    // `dictionaries/` resource folder (+ the show dir for
+    // user overrides). Thread-safe is NOT required — callers are
+    // on the main thread.
+    PhonemeDictionary& GetPhonemeDictionary();
     // Virtual preview canvas size from <settings><previewWidth/Height>
     // in xlights_rgbeffects.xml, defaulted to desktop's 1280×720 when
     // absent. Consumed by iPadModelPreview in House Preview mode so the
@@ -276,6 +285,9 @@ private:
 
     std::vector<NamedLayoutGroup> _namedLayoutGroups;
     std::string _activeLayoutGroup = "Default";
+
+    // B85 phoneme dictionary, lazy-loaded.
+    std::unique_ptr<PhonemeDictionary> _phonemeDict;
 
     ViewpointMgr _viewpointMgr;
 

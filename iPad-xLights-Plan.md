@@ -20,12 +20,17 @@ Everything above the core baseline — effects grid, inspector, output,
 preview chrome — has been rebuilt for touch. The effects grid is now
 Metal-backed, the inspector is metadata-driven with a four-tab shell,
 and both previews are interactive on device. A 2026-04-20 parity
-audit caught ~100 missing authoring behaviours vs desktop; the P0
-bundle (multi-select + marquee, align/split, timing-mark editing,
-phrase breakdown, lyric sub-layer rendering, follow-playhead) has
-been cleared except for the loop-region / tags / render-selected
-cluster. Remaining work is one P0 bundle plus a long tail of P1/P2
-polish — see [`plans/phase-b-grid-parity.md`](plans/phase-b-grid-parity.md).
+audit caught ~100 missing authoring behaviours vs desktop; across the
+2026-04-20 and 2026-04-21 sessions the full P0 bundle and 20+ P1s
+landed (multi-select + marquee, every align variant, timing-mark
+editing + loop region + tags-less-tags, phrase and word breakdown,
+lyric sub-layer rendering, follow-playhead, trackpad scroll, drag-to-
+scrub, waveform filters, pointer hover, `.xtiming` I/O, import lyrics,
+auto-label, cut/copy row + model, multi-effect clipboard with relative
+timing, and column-resize). Open work is **6 P1s** (tags B34/B35,
+randomize/reset B15, presets-menu stub B19, export-model B49, visible
+scrollbars B94) plus ~40 P2 polish items — see
+[`plans/phase-b-grid-parity.md`](plans/phase-b-grid-parity.md).
 
 ### Code layout
 
@@ -78,7 +83,7 @@ variants in `libdbg-ios/`.
 | Phase | Title | Status | Sub-plan |
 |---|---|---|---|
 | A | Core-path hardening | ✓ complete | — (one small follow-up in [`plans/followups.md`](plans/followups.md)) |
-| B | Effects grid parity with desktop | In progress — all original P0 gaps closed 2026-04-20: multi-select + two-finger marquee, align family, split-at-play-marker, timing-mark editing (create / drag / rename / delete / split / merge / add-track), row-level phrase breakdown, lyric sub-layer rendering, follow-playhead, trackpad scroll. One P0 bundle still open (loop region / tags / render-selected-region) plus a long tail of P1 polish (row-heading ops, waveform filter variants, `.xtiming` import/export, drag-to-scrub). | [`plans/phase-b-grid-parity.md`](plans/phase-b-grid-parity.md) |
+| B | Effects grid parity with desktop | In progress — all original P0s closed + 20+ P1s landed across 2026-04-20/21 (loop region, waveform filters, word breakdown, `.xtiming` I/O, import lyrics, auto-label, cut/copy row+model, multi-effect clipboard, pointer hover, column resize, etc.). **6 P1s open** (tags B34/B35, randomize B15, presets stub B19, export model B49, scrollbars B94) + ~40 P2 polish. | [`plans/phase-b-grid-parity.md`](plans/phase-b-grid-parity.md) |
 | B-Metal | Grid render pipeline migration (CG → Metal) | ✓ complete | — |
 | C | Effect settings inspector | ✓ complete — two polish follow-ups (MH colour/path authoring, DMX state persistence) tracked in [`plans/followups.md`](plans/followups.md) | — |
 | D | Model Preview + preview polish | ✓ complete — layout-editor overlays parked in [`plans/future-layout-editing.md`](plans/future-layout-editing.md) | [`plans/phase-d-preview.md`](plans/phase-d-preview.md) |

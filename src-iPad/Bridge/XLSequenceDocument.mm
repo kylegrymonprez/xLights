@@ -21,6 +21,8 @@
 #include "render/SequenceMedia.h"
 #include "render/SequenceFile.h"
 #include "utils/UtilFunctions.h"
+#include "lyrics/PhonemeDictionary.h"
+#include "lyrics/LyricBreakdown.h"
 #include "render/SequenceViewManager.h"
 #include "effects/RenderableEffect.h"
 #include "effects/EffectManager.h"
@@ -1039,6 +1041,49 @@ static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
             }
             curStart = curEnd;
         }
+    }
+    se.PopulateRowInformation();
+    return YES;
+}
+
+- (BOOL)breakdownWordsAtRow:(int)rowIndex {
+    auto& se = _context->GetSequenceElements();
+    auto* row = se.GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    if (row->element->GetType() != ElementType::ELEMENT_TYPE_TIMING) return NO;
+    TimingElement* te = dynamic_cast<TimingElement*>(row->element);
+    if (!te) return NO;
+    // Need layer 1 (words) populated. If the element only has a
+    // phrases layer, the user hasn't broken down phrases yet — punt.
+    if (te->GetEffectLayerCount() < 2) return NO;
+
+    // Lock guard — refuse if any existing phoneme mark is locked.
+    if (te->GetEffectLayerCount() > 2) {
+        EffectLayer* phonemeLayer = te->GetEffectLayer(2);
+        if (phonemeLayer) {
+            for (auto&& eff : phonemeLayer->GetAllEffects()) {
+                if (eff && eff->IsLocked()) return NO;
+            }
+        }
+        te->RemoveEffectLayer(2);
+    }
+    EffectLayer* wordLayer = te->GetEffectLayer(1);
+    if (!wordLayer) return NO;
+    EffectLayer* phonemeLayer = te->AddEffectLayer();
+    if (!phonemeLayer) return NO;
+
+    PhonemeDictionary& dict = _context->GetPhonemeDictionary();
+    double freq = se.GetFrequency();
+    auto& undoMgr = se.get_undo_mgr();
+    for (int i = 0; i < wordLayer->GetEffectCount(); i++) {
+        Effect* effect = wordLayer->GetEffect(i);
+        if (!effect) continue;
+        std::string word = effect->GetEffectName();
+        if (word.empty()) continue;
+        BreakdownWord(phonemeLayer,
+                       effect->GetStartTimeMS(),
+                       effect->GetEndTimeMS(),
+                       word, freq, dict, undoMgr);
     }
     se.PopulateRowInformation();
     return YES;

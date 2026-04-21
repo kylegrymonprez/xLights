@@ -133,6 +133,17 @@ struct EffectsMetalGridView: UIViewRepresentable {
         var marqueeStartWorld: CGPoint?
         var marqueeCurrentWorld: CGPoint?
 
+        // B30 pointer-hover state. Fired only by Magic Keyboard /
+        // trackpad (UIHoverGestureRecognizer never triggers for
+        // finger touches). When non-nil, the renderer paints a
+        // handle highlight on the hovered zone.
+        struct HoverHit {
+            let rowIndex: Int
+            let effectIndex: Int
+            let zone: EffectsMetalGridMTKView.HitZone
+        }
+        var hover: HoverHit?
+
         // Gesture-local state.
         struct DragLocal {
             enum Kind { case move, resizeLeft, resizeRight, fadeIn, fadeOut }
@@ -576,6 +587,17 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
                              fill: (0.95, 0.30, 0.25))
         }
 
+        // B30 hover highlight — only painted when a
+        // `UIHoverGestureRecognizer` is tracking a Magic Keyboard /
+        // trackpad pointer. Touch-only users never see this. For
+        // `leftEdge` / `rightEdge` the corresponding bracket edge
+        // gets a brighter white overlay line; for fade zones the
+        // top-strip of the effect rect lights up subtly.
+        if c.drag == nil, let h = c.hover {
+            drawHoverHighlight(bridge: bridge, viewport: viewport,
+                                c: c, hover: h)
+        }
+
         // Drag feedback pill.
         drawDragPill(bridge: bridge, viewport: viewport, c: c)
 
@@ -630,6 +652,68 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
         bridge.appendLineX1(x - r,    y1: y,     x2: x,        y2: y - r,
                              r: 1, g: 1, b: 1, a: 1)
         bridge.flushLineBatch()
+    }
+
+    /// B30 hover highlight. Locates the hovered effect's on-screen
+    /// rect and draws a subtle brighter overlay on the relevant
+    /// handle zone: a 3-pt white wedge on the hovered edge (left or
+    /// right), or a white ring around the hovered fade diamond.
+    /// Center-zone hover draws nothing — the whole effect is already
+    /// styled, and a full-rect hover would fight with the selection
+    /// stroke.
+    private func drawHoverHighlight(bridge: XLGridMetalBridge,
+                                     viewport: CGSize,
+                                     c: EffectsMetalGridView.Coordinator,
+                                     hover: EffectsMetalGridView.Coordinator.HoverHit) {
+        // Resolve the on-screen rect of the hovered effect.
+        guard let row = c.rows.first(where: { $0.id == hover.rowIndex }),
+              hover.effectIndex < row.effects.count else { return }
+        let effect = row.effects[hover.effectIndex]
+        // Row y-top (replicating the layout walk used elsewhere).
+        var y: CGFloat = -c.scrollOffsetY
+        var rowTop: CGFloat = 0
+        var rowH: CGFloat = c.metrics.rowHeight
+        for r in c.rows {
+            let h = (r.id == c.selection?.rowIndex)
+                ? c.metrics.selectedRowHeight : c.metrics.rowHeight
+            if r.id == hover.rowIndex { rowTop = y; rowH = h; break }
+            y += h
+        }
+        let top = rowTop + 1
+        let bottom = rowTop + rowH - 1
+        let x1 = CGFloat(effect.startTimeMS) * c.pixelsPerMS - c.scrollOffsetX
+        let x2 = CGFloat(effect.endTimeMS) * c.pixelsPerMS - c.scrollOffsetX
+
+        switch hover.zone {
+        case .leftEdge, .rightEdge:
+            let edgeX = hover.zone == .leftEdge ? x1 + 0.5 : x2 - 0.5
+            bridge.beginLineBatch()
+            // Two adjacent lines for a 1-2 px brighter stroke.
+            bridge.appendLineX1(edgeX, y1: top, x2: edgeX, y2: bottom,
+                                 r: 1, g: 1, b: 1, a: 0.95)
+            bridge.appendLineX1(edgeX + (hover.zone == .leftEdge ? 1 : -1),
+                                 y1: top,
+                                 x2: edgeX + (hover.zone == .leftEdge ? 1 : -1),
+                                 y2: bottom,
+                                 r: 1, g: 1, b: 1, a: 0.6)
+            bridge.flushLineBatch()
+        case .fadeIn, .fadeOut:
+            // Small rect in the top fade strip of the hovered half.
+            let midX = (x1 + x2) / 2
+            let hx1 = hover.zone == .fadeIn ? x1 : midX
+            let hx2 = hover.zone == .fadeIn ? midX : x2
+            bridge.beginFilledRectBatch()
+            bridge.appendFilledRectX(hx1, y: top,
+                                      w: max(CGFloat(1), hx2 - hx1),
+                                      h: CGFloat(7),
+                                      r: 1, g: 1, b: 1, a: 0.18)
+            bridge.flushFilledRectBatch()
+        case .center:
+            // No hover overlay — the whole effect rect is already
+            // the primary affordance and a full overlay would fight
+            // the selection stroke.
+            break
+        }
     }
 
     private func drawDragPill(bridge: XLGridMetalBridge, viewport: CGSize,
@@ -697,6 +781,12 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
         let tap = UITapGestureRecognizer(target: self, action: #selector(onTap(_:)))
         tap.delegate = del
         addGestureRecognizer(tap)
+        // B30: pointer hover from Magic Keyboard / trackpad. Never
+        // fires for finger touches, so this is a no-cost addition
+        // for touch-only users.
+        let hover = UIHoverGestureRecognizer(target: self,
+                                               action: #selector(onHover(_:)))
+        addGestureRecognizer(hover)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(onPan(_:)))
         pan.delegate = del
         // Single-finger pan: scroll or effect-drag. Clamping prevents
@@ -817,6 +907,31 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
                 ? max(0, Int((p.x + c.scrollOffsetX) / c.pixelsPerMS))
                 : nil
             c.actions.onTapEmpty(rowId, ms)
+        }
+    }
+
+    @objc func onHover(_ g: UIHoverGestureRecognizer) {
+        guard let c = coordinator else { return }
+        let newHover: EffectsMetalGridView.Coordinator.HoverHit?
+        switch g.state {
+        case .began, .changed:
+            let p = g.location(in: self)
+            if let hit = hitTestEffect(at: p) {
+                newHover = .init(rowIndex: hit.rowIndex,
+                                  effectIndex: hit.effectIndex,
+                                  zone: hit.zone)
+            } else {
+                newHover = nil
+            }
+        default:
+            newHover = nil
+        }
+        let changed = (newHover?.rowIndex != c.hover?.rowIndex)
+            || (newHover?.effectIndex != c.hover?.effectIndex)
+            || (newHover?.zone != c.hover?.zone)
+        if changed {
+            c.hover = newHover
+            setNeedsDisplay()
         }
     }
 

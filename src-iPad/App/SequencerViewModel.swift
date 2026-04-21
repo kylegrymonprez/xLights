@@ -1885,6 +1885,29 @@ class SequencerViewModel {
         return true
     }
 
+    /// B85: break every word mark on layer 1 of the target timing
+    /// element into per-phoneme sub-marks on layer 2. Uses the
+    /// bundled `PhonemeDictionary` via the iPadRenderContext. Gated
+    /// by `canBreakdownWords` (requires a Words layer). Not
+    /// undo-able for first cut (mutates layer structure).
+    @discardableResult
+    func breakdownWords(rowIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        guard rows[rowIndex].timing != nil else { return false }
+        if !document.breakdownWords(atRow: Int32(rowIndex)) { return false }
+        reloadRows()
+        return true
+    }
+
+    /// True iff the given timing row is layer 0 of an element with
+    /// at least a Words layer (i.e. BreakdownPhrases already ran).
+    func canBreakdownWords(rowIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        let row = rows[rowIndex]
+        guard row.timing != nil, row.layerIndex == 0 else { return false }
+        return Int(document.rowLayerCount(at: Int32(rowIndex))) >= 2
+    }
+
     /// Returns true if the given timing row is the phrase layer
     /// (layer 0) of an element that has at least one mark with a
     /// non-empty label — gate for the "Breakdown Phrases" menu.
@@ -3016,6 +3039,33 @@ class SequencerViewModel {
     func pasteEffect(rowIndex: Int, startMS: Int) {
         guard !clipboardEntries.isEmpty else { return }
         guard rowIndex >= 0 && rowIndex < rows.count else { return }
+        // B14 paste-by-cell: with exactly one clipboard entry AND an
+        // active timing cell bracketing `startMS`, stretch the
+        // pasted effect to fill the cell rather than preserving the
+        // copied duration. Matches desktop's "paste respects the
+        // selected cell" semantic — the cell is defined by the
+        // active timing track's marks. Multi-entry clipboards fall
+        // through to the relative-offset layout (B98) since "fill
+        // this cell with N effects" has no obvious extension.
+        if clipboardEntries.count == 1,
+           let entry = clipboardEntries.first,
+           rows[rowIndex].timing == nil,
+           let cell = activeTimingCell(forMS: startMS) {
+            let targetStart = cell.startMS
+            let targetEnd = min(cell.endMS, sequenceDurationMS)
+            if targetEnd > targetStart {
+                undoManager.beginUndoGrouping()
+                _ = addEffectWithSettings(rowIndex: rowIndex, name: entry.name,
+                                            settings: entry.settings,
+                                            palette: entry.palette,
+                                            startMS: targetStart,
+                                            endMS: targetEnd)
+                undoManager.endUndoGrouping()
+                undoManager.setActionName("Paste Effect in Cell")
+                return
+            }
+        }
+
         undoManager.beginUndoGrouping()
         for entry in clipboardEntries {
             let targetRow = rowIndex + entry.rowOffset

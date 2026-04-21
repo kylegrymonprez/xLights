@@ -348,6 +348,16 @@
 - (BOOL)breakdownPhrasesAtRow:(int)rowIndex
     NS_SWIFT_NAME(breakdownPhrases(atRow:));
 
+// B85: break every word mark on the Words layer (layer 1) into
+// per-phoneme sub-marks on a fresh Phonemes layer (layer 2). Uses
+// the phoneme dictionary owned by `iPadRenderContext` (lazy-loaded
+// from the bundled `dictionaries/` resource folder on first call).
+// Rejects when the element doesn't yet have a Words layer (caller
+// should Breakdown Phrases first) or when a locked phoneme mark
+// is in the way. Returns NO on rejection.
+- (BOOL)breakdownWordsAtRow:(int)rowIndex
+    NS_SWIFT_NAME(breakdownWords(atRow:));
+
 // Views (view picker).
 - (NSArray<NSString*>*)availableViews;
 - (int)currentViewIndex;

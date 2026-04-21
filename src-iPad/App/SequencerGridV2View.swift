@@ -959,6 +959,10 @@ struct SequencerGridV2View: View {
                     onBreakdownPhrases: {
                         _ = viewModel.breakdownPhrases(rowIndex: row.id)
                     },
+                    canBreakdownWords: viewModel.canBreakdownWords(rowIndex: row.id),
+                    onBreakdownWords: {
+                        _ = viewModel.breakdownWords(rowIndex: row.id)
+                    },
                     canRemoveWordsAndPhonemes: viewModel.canRemoveWordsAndPhonemes(rowIndex: row.id),
                     onRemoveWordsAndPhonemes: {
                         _ = viewModel.removeWordsAndPhonemes(rowIndex: row.id)
