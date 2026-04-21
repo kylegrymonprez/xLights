@@ -14,6 +14,34 @@ XLIGHTS/NUTCRACKER RELEASE NOTES
     -enh (dkulp)                AI services backend moved to wx-free core (src-core/ai/). Services now expose their
                                 settings as a declarative ServiceProperty schema; secrets go through an injectable
                                 IServiceSettingsStore so platform secure storage can be plugged in.
+    -enh (dkulp)                Waveform: new "View as spectrogram" right-click entry replaces the peak polygons with an
+                                STFT magnitude view (log-frequency y-axis, dB-scaled magenta→yellow colormap). Computation
+                                happens once per track; zoom/scroll just resample the cached buffer into a new texture.
+    -enh (dkulp)                Timing tracks: new "Audio Chords" option in the "Add Timing Track" dialog (after the FPP
+                                entries, before VAMP plugins). Builds a chromagram, matches against 24 major/minor templates,
+                                estimates key via Krumhansl–Schmuckler, and drops a variable timing track whose back-to-back
+                                marks are labelled with the detected chord names.
+    -enh (dkulp)                Waveform: new "Vocals waveform (center extract)" filter emphasises centre-panned content
+                                via M - α|S| — a lightweight counterpart to the existing "Non Vocals" filter.
+    -enh (dkulp)                Waveform: new "Show Pitch Contour" right-click toggle overlays a colour-coded pitch-vs-time
+                                polyline (colour = pitch class) scaled to a log-frequency y-axis. Useful for vocal / melody
+                                timing work; unvoiced frames break the polyline.
+    -enh (dkulp)                Timing tracks: new "Audio Tempo" option in the "Add Timing Track" dialog runs
+                                autocorrelation on the audio's onset envelope, confirms the detected BPM, and drops a fixed
+                                timing track with back-to-back marks at each beat.
+    -enh (dkulp)                Waveform (macOS): "Classify Audio…" right-click entry runs Apple's SNClassifySoundRequest
+                                offline and lets you pick a detected class (drums, vocals, guitar, …); the waveform then
+                                scales to show amplitude only where that class is present. Linux/Windows builds exclude
+                                this via ifdef since the classifier framework is Apple-only.
+    -enh (dkulp)                Waveform: new "Perceptual (LUFS)" filter renders the BS.1770 K-weighted momentary-loudness
+                                envelope so timing marks line up with what the ear actually hears on heavily-compressed
+                                tracks where raw amplitude plateaus.
+    -enh (dkulp)                Waveform: new "Show Onsets" right-click entry overlays faint amber verticals at detected
+                                percussive onsets. The "Add Timing Track" dialog gains an "Audio Onsets" option that drops
+                                a new variable timing track with back-to-back marks between detected onsets. Spectral-flux
+                                detection runs entirely on-device.
+    -enh (dkulp)                Waveform: overlay the RMS energy band on top of the peak polygon so compressed sections
+                                read as "loud" even when their peaks plateau.
     -enh (dkulp)                Shape effect: Effect panel now organises its 27 properties into Shape / Size / Motion /
                                 Triggers tabs instead of a flat scroll, matching the grouped layout other large effects use.
     -enh (PB)                   Value curve Exponential, Logarithmic, and Parabolic types now support Start/End.

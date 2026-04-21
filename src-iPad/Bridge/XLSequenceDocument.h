@@ -757,21 +757,98 @@
 - (void)setAudioPlaybackRate:(float)rate;
 
 // Waveform data — returns downsampled peaks for display
-// Returns array of alternating min/max float values for the given time range
+// Returns per-bucket float triples `{min, max, rms}` for the given
+// time range. `peaks[i*3+0]` = bucket min (<=0), `peaks[i*3+1]` = max
+// (>=0), `peaks[i*3+2]` = RMS (>=0, used by A10 RMS overlay).
 - (NSData*)waveformDataFromMS:(long)startMS
                          toMS:(long)endMS
                    numSamples:(int)numSamples;
 
 // B41: same as above, with a filter type parameter matching
 // `AUDIOSAMPLETYPE` (0=RAW, 1=BASS, 2=TREBLE, 3=ALTO, 4=NONVOCALS).
-// If `GetFilteredAudioData` returns null (unfiltered source), the
-// method falls back to the raw waveform rather than returning an
-// empty buffer.
+// A9.1 extends the id space with 5=CUSTOM — a parametric band filter
+// whose MIDI-note range is taken from `lowNote` / `highNote` (see the
+// `lowNote:highNote:` overload). If `GetFilteredAudioData` returns
+// null (unfiltered source), the method falls back to the raw waveform
+// rather than returning an empty buffer.
 - (NSData*)waveformDataFromMS:(long)startMS
                          toMS:(long)endMS
                    numSamples:(int)numSamples
                    filterType:(int)filterType
     NS_SWIFT_NAME(waveformData(fromMS:toMS:numSamples:filterType:));
+
+// A9.1 parametric-band variant. `lowNote` / `highNote` are MIDI note
+// numbers (0–127) and are only consulted for filterType=5 (CUSTOM);
+// other filter types use their hardcoded ranges. Callers that don't
+// need the custom band should use the 4-argument overload.
+- (NSData*)waveformDataFromMS:(long)startMS
+                         toMS:(long)endMS
+                   numSamples:(int)numSamples
+                   filterType:(int)filterType
+                      lowNote:(int)lowNote
+                     highNote:(int)highNote
+    NS_SWIFT_NAME(waveformData(fromMS:toMS:numSamples:filterType:lowNote:highNote:));
+
+// A2 onset detection. Runs the spectral-flux detector over the full
+// audio track, returning onset positions in milliseconds (ascending).
+// `sensitivity` is the adaptive-threshold multiplier: higher = fewer
+// onsets. Blocks until audio is loaded — expect a few hundred ms for
+// typical 3–4 minute tracks on modern iPad hardware.
+- (NSArray<NSNumber*>*)detectOnsetsWithSensitivity:(float)sensitivity
+    NS_SWIFT_NAME(detectOnsets(sensitivity:));
+
+// A7 sound classification. Runs Apple's SNClassifySoundRequest over
+// the entire audio track and returns the top-N sound classes with
+// per-second confidence curves. Keys of the returned dictionary are
+// class names ("music.drums", "music.vocals", …); values are
+// `[NSNumber]` floats in [0, 1], one per `timeStepSeconds` (also
+// reported). Blocks — typical 3–4 minute tracks take a few seconds
+// on Apple Silicon.
+- (NSDictionary*)classifySound
+    NS_SWIFT_NAME(classifySound());
+// Time-step (seconds) for the last `classifySound` call. Set by the
+// call above; 0 if classification has never been run on this track.
+@property(nonatomic, readonly) float lastClassificationTimeStep;
+
+// A4 tempo detection. Runs autocorrelation on the onset envelope
+// to find the most likely period, then phase-locks a Dirac comb to
+// produce beat positions. Returns a dictionary with:
+//   "bpm"        — NSNumber(float)    — detected BPM, 0 on failure
+//   "confidence" — NSNumber(float)    — 0..1 heuristic confidence
+//   "beats"      — NSArray<NSNumber*> — ascending ms beat positions
+// Blocks; a 3–4 minute track finishes in well under a second.
+- (NSDictionary*)detectTempo
+    NS_SWIFT_NAME(detectTempo());
+
+// A5 pitch contour. Per-frame fundamental-frequency estimate from
+// FFT-based autocorrelation. Returns a flat Float array laid out as
+// (timeMS, frequency, confidence) triples (3 entries per sample).
+// Unvoiced frames have frequency=0 but still carry a confidence.
+- (NSData*)detectPitchContour
+    NS_SWIFT_NAME(detectPitchContour());
+
+// A9 chord + key detection via chromagram + 24 major/minor templates
+// and Krumhansl–Schmuckler. Returns:
+//   "key"    — NSString (e.g. "C major", "A minor"; empty on failure)
+//   "chords" — NSArray<NSDictionary*> with {startMS, endMS, name}
+- (NSDictionary*)detectChords
+    NS_SWIFT_NAME(detectChords());
+
+// A6 spectrogram computation. Runs the STFT once and retains the
+// magnitude buffer on the bridge; returns YES on success. Subsequent
+// `spectrogramBGRAForRangeMS:...` calls resample the cached buffer
+// into viewport-sized BGRA images without recomputing the FFT.
+- (BOOL)ensureSpectrogramComputed
+    NS_SWIFT_NAME(ensureSpectrogramComputed());
+
+// Renders the cached spectrogram at [startMS, endMS] into an
+// `outWidth × outHeight` BGRA buffer (length = w*h*4). Returns nil
+// if the spectrogram hasn't been computed yet.
+- (NSData*)spectrogramBGRAForRangeMS:(long)startMS
+                                toMS:(long)endMS
+                               width:(int)outWidth
+                              height:(int)outHeight
+    NS_SWIFT_NAME(spectrogramBGRA(fromMS:toMS:width:height:));
 
 // Effect-background batch append. Mirrors desktop's
 // `EffectsGrid::DrawEffectBackground` helper — resolves the

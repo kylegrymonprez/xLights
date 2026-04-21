@@ -18,6 +18,11 @@
     <ClCompile Include="..\src-ui-wx\setup\IPEntryDialog.cpp" />
     <ClCompile Include="..\src-ui-wx\model\MatrixFaceDownloadDialog.cpp" />
     <ClCompile Include="..\src-core\media\AudioManager.cpp" />
+    <ClCompile Include="..\src-core\media\OnsetDetector.cpp" />
+    <ClCompile Include="..\src-core\media\TempoDetector.cpp" />
+    <ClCompile Include="..\src-core\media\PitchDetector.cpp" />
+    <ClCompile Include="..\src-core\media\ChordDetector.cpp" />
+    <ClCompile Include="..\src-core\media\Spectrogram.cpp" />
     <ClCompile Include="..\src-core\media\MediaCompatibility.cpp" />
     <ClCompile Include="..\src-core\media\VideoTranscoder.cpp" />
     <ClCompile Include="..\src-core\media\AudioLoader.cpp" />
@@ -1344,6 +1349,11 @@
     <ClInclude Include="..\src-core\utils\AnimatedImage.h" />
     <ClInclude Include="..\src-ui-wx\setup\IPEntryDialog.h" />
     <ClInclude Include="..\src-core\media\AudioManager.h" />
+    <ClInclude Include="..\src-core\media\OnsetDetector.h" />
+    <ClInclude Include="..\src-core\media\TempoDetector.h" />
+    <ClInclude Include="..\src-core\media\PitchDetector.h" />
+    <ClInclude Include="..\src-core\media\ChordDetector.h" />
+    <ClInclude Include="..\src-core\media\Spectrogram.h" />
     <ClInclude Include="..\src-core\media\MediaCompatibility.h" />
     <ClInclude Include="..\src-core\media\VideoTranscoder.h" />
     <ClInclude Include="..\src-core\media\AudioLoader.h" />

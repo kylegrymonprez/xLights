@@ -61,11 +61,14 @@ class SequencerViewModel {
     var waveformEndMS: Int = 0
 
     // B41 waveform filter type. Matches the bridge's filterType
-    // parameter (0=RAW, 1=BASS, 2=TREBLE, 3=ALTO, 4=NONVOCALS).
-    // Observed so the ruler right-click menu's radio state stays
-    // in sync and a zoom-triggered reload keeps the filter.
+    // parameter (0=RAW, 1=BASS, 2=TREBLE, 3=ALTO, 4=NONVOCALS,
+    // 5=CUSTOM). A9.1 adds `.custom`; the low/high MIDI notes live in
+    // `customBandLowNote` / `customBandHighNote` on the view model so
+    // the enum stays a plain `Int` for the confirmationDialog ForEach.
+    // Observed so the ruler right-click menu's radio state stays in
+    // sync and a zoom-triggered reload keeps the filter.
     enum WaveformFilter: Int, CaseIterable {
-        case raw = 0, bass = 1, treble = 2, alto = 3, nonVocals = 4
+        case raw = 0, bass = 1, treble = 2, alto = 3, nonVocals = 4, custom = 5, lufs = 6, vocals = 7
         var displayName: String {
             switch self {
             case .raw:       return "Full Range"
@@ -73,11 +76,31 @@ class SequencerViewModel {
             case .treble:    return "Treble"
             case .alto:      return "Alto"
             case .nonVocals: return "Non-Vocals"
+            case .custom:    return "Custom Band…"
+            case .lufs:      return "Perceptual (LUFS)"
+            case .vocals:    return "Vocals (center-extract)"
             }
         }
     }
     var waveformFilter: WaveformFilter = .raw {
         didSet { if oldValue != waveformFilter { reloadWaveformCurrent() } }
+    }
+    /// A9.1: MIDI note bounds for `WaveformFilter.custom`. Defaults
+    /// roughly cover "vocal" (C3–C5). Changing either while `custom`
+    /// is active re-samples the waveform through the new band.
+    var customBandLowNote: Int = 48 {
+        didSet {
+            if customBandLowNote != oldValue, waveformFilter == .custom {
+                reloadWaveformCurrent()
+            }
+        }
+    }
+    var customBandHighNote: Int = 72 {
+        didSet {
+            if customBandHighNote != oldValue, waveformFilter == .custom {
+                reloadWaveformCurrent()
+            }
+        }
     }
     // Peak count used to build the current `waveformPeaks`. Compared against
     // the target-for-current-zoom to decide whether to re-sample.
@@ -85,6 +108,49 @@ class SequencerViewModel {
     // Debounce task for zoom-driven waveform re-sampling so rapid pinches
     // don't swamp the main actor with redundant bridge calls.
     @ObservationIgnored private var waveformReloadTask: Task<Void, Never>?
+
+    // A2 onset detection. `onsetTimesMS` is populated by
+    // `computeOnsets()` (spectral-flux detector in the bridge);
+    // `showOnsets` flips the overlay on the waveform strip. Cached
+    // per-sequence — we invalidate when a new sequence loads.
+    var onsetTimesMS: [Int] = []
+    var showOnsets: Bool = false
+    @ObservationIgnored var isComputingOnsets: Bool = false
+    @ObservationIgnored private var onsetsComputed: Bool = false
+
+    // A5 pitch contour overlay. `pitchContour` is per-frame
+    // (timeMS, frequency Hz, confidence) triples from the bridge's
+    // detector. `showPitchContour` toggles the overlay on the Metal
+    // waveform. Unvoiced frames keep frequency=0 — the Metal view
+    // breaks the polyline across them so silence doesn't produce a
+    // spurious slope.
+    var pitchContour: [Float] = []   // flat [t,f,c, t,f,c, ...]
+    var showPitchContour: Bool = false
+    @ObservationIgnored var isComputingPitch: Bool = false
+    @ObservationIgnored private var pitchComputed: Bool = false
+
+    // A6 spectrogram view mode. When `showSpectrogram` is true, the
+    // waveform strip renders the STFT magnitude spectrum (log-
+    // frequency y-axis, dB-scaled colormap) instead of the peak
+    // polygons. Compute is lazy + cached in the bridge.
+    var showSpectrogram: Bool = false
+    @ObservationIgnored var spectrogramReady: Bool = false
+
+    // A7 SoundAnalysis classification. `soundClasses` maps class
+    // identifier ("music.drums" etc.) to a per-`soundClassTimeStep`
+    // confidence array. `selectedSoundClass` selects one for gating
+    // the waveform — each bucket's peaks are multiplied by the
+    // class's interpolated confidence at that time, so picking
+    // "Drums" produces a waveform that's tall where drums dominate
+    // and near-zero elsewhere.
+    var soundClasses: [String: [Float]] = [:]
+    var selectedSoundClass: String? = nil {
+        didSet {
+            if oldValue != selectedSoundClass { reloadWaveformCurrent() }
+        }
+    }
+    var isClassifyingSound: Bool = false
+    @ObservationIgnored var soundClassTimeStep: Float = 1.0
 
     // Controller output
     var isOutputting = false
@@ -628,6 +694,18 @@ class SequencerViewModel {
         hasAudio = false
         rows = []
         waveformPeaks = []
+        onsetTimesMS = []
+        showOnsets = false
+        onsetsComputed = false
+        soundClasses = [:]
+        selectedSoundClass = nil
+        isClassifyingSound = false
+        pitchContour = []
+        showPitchContour = false
+        pitchComputed = false
+        isComputingPitch = false
+        showSpectrogram = false
+        spectrogramReady = false
     }
 
     // MARK: - Memory Pressure
@@ -3159,17 +3237,290 @@ class SequencerViewModel {
                    min(Self.waveformMaxSamples, ideal))
     }
 
+    /// A7: run Apple's SNClassifySoundRequest over the audio track
+    /// and populate `soundClasses`. Synchronous — a 3–4 minute track
+    /// takes a couple of seconds on modern Apple Silicon. Idempotent.
+    func classifySound() {
+        guard hasAudio else { return }
+        if isClassifyingSound { return }
+        isClassifyingSound = true
+        defer { isClassifyingSound = false }
+        let dict = document.classifySound() as? [String: [NSNumber]] ?? [:]
+        soundClassTimeStep = document.lastClassificationTimeStep
+        var result: [String: [Float]] = [:]
+        for (key, numbers) in dict {
+            result[key] = numbers.map { $0.floatValue }
+        }
+        soundClasses = result
+    }
+
+    /// A7: linear-interpolated confidence lookup for the currently
+    /// selected class at a given absolute track time (ms). Returns 1.0
+    /// when no class is selected so the waveform passes through
+    /// unchanged.
+    func soundClassGate(atMS ms: Int) -> Float {
+        guard let key = selectedSoundClass, let arr = soundClasses[key], !arr.isEmpty else {
+            return 1.0
+        }
+        let step = max(0.001, Float(soundClassTimeStep))
+        let t = Float(ms) / (step * 1000.0)
+        let i0 = max(0, min(arr.count - 1, Int(floor(t))))
+        let i1 = max(0, min(arr.count - 1, i0 + 1))
+        let frac = t - Float(i0)
+        return arr[i0] + (arr[i1] - arr[i0]) * max(0, min(1, frac))
+    }
+
+    /// A2: compute percussive onsets via the bridge's spectral-flux
+    /// detector. Idempotent — skips the work if already computed for
+    /// this sequence. Synchronous; 3–4 minute tracks finish in tens
+    /// of milliseconds on modern iPad hardware, so the main-thread
+    /// stall is imperceptible. (A `Task.detached` pass would need a
+    /// Sendable bridge — cross that bridge later if profiling shows
+    /// the block.)
+    func computeOnsets(force: Bool = false) {
+        guard hasAudio else { return }
+        if isComputingOnsets { return }
+        if onsetsComputed && !force { return }
+        isComputingOnsets = true
+        let arr = (document.detectOnsets(sensitivity: 1.5) as [NSNumber])
+        onsetTimesMS = arr.map { $0.intValue }
+        onsetsComputed = true
+        isComputingOnsets = false
+    }
+
+    /// A2: toggle the onset-overlay on the waveform strip. First
+    /// activation kicks off the detector if it hasn't run yet.
+    func toggleShowOnsets() {
+        showOnsets.toggle()
+        if showOnsets && !onsetsComputed {
+            computeOnsets()
+        }
+    }
+
+    /// A9: detect chord progression + estimated key. Returns
+    /// `(key, chords: [(startMS, endMS, name)])`. Synchronous —
+    /// a 4-minute track finishes in well under a second.
+    func detectChords() -> (key: String, chords: [(Int, Int, String)]) {
+        guard hasAudio else { return ("", []) }
+        let dict = document.detectChords() as? [String: Any] ?? [:]
+        let key = (dict["key"] as? String) ?? ""
+        let raw = (dict["chords"] as? [[String: Any]]) ?? []
+        let chords: [(Int, Int, String)] = raw.compactMap { d in
+            guard let s = (d["startMS"] as? NSNumber)?.intValue,
+                  let e = (d["endMS"] as? NSNumber)?.intValue,
+                  let n = d["name"] as? String else { return nil }
+            return (s, e, n)
+        }
+        return (key, chords)
+    }
+
+    /// A9: create a variable timing track labelled with chord names
+    /// at the detected segment boundaries. Track name carries the
+    /// key so users can tell auto-generated tracks apart. Each mark's
+    /// label is the chord name, matching the existing lyric / phoneme
+    /// labelled-mark idiom so chord names render directly in the
+    /// timeline.
+    @discardableResult
+    func generateChordTimingTrack() -> Int? {
+        guard hasAudio else { return nil }
+        let result = detectChords()
+        if result.chords.isEmpty { return nil }
+        let name = result.key.isEmpty
+            ? "Chords"
+            : "Chords in \(result.key)"
+        guard document.addTimingTrackNamed(name) else { return nil }
+        reloadRows()
+        guard let rowIdx = rows.lastIndex(where: {
+            guard let t = $0.timing else { return false }
+            return t.elementName == name || t.elementName.hasPrefix(name + "_")
+        }) else { return nil }
+        let duration = sequenceDurationMS
+        for (startMS, endMS, chordName) in result.chords {
+            let s = max(0, startMS)
+            let e = min(duration, endMS)
+            if e <= s { continue }
+            _ = document.addTimingMark(atRow: Int32(rowIdx),
+                                        startMS: Int32(s),
+                                        endMS: Int32(e),
+                                        label: chordName)
+        }
+        reloadRows()
+        return rowIdx
+    }
+
+    /// A6: toggle spectrogram view mode. First activation kicks the
+    /// bridge's STFT so subsequent redraws just resample the cached
+    /// magnitude buffer into a viewport-sized BGRA.
+    func toggleShowSpectrogram() {
+        showSpectrogram.toggle()
+        if showSpectrogram && !spectrogramReady {
+            spectrogramReady = document.ensureSpectrogramComputed()
+            if !spectrogramReady {
+                showSpectrogram = false
+            }
+        }
+    }
+
+    /// A6: fetch a rendered BGRA spectrogram image for the given
+    /// time range at the given pixel size. Returns nil if the bridge
+    /// doesn't have a spectrogram cached.
+    func spectrogramBGRA(fromMS: Int, toMS: Int, width: Int, height: Int) -> Data? {
+        guard spectrogramReady else { return nil }
+        return document.spectrogramBGRA(fromMS: fromMS, toMS: toMS,
+                                         width: Int32(width), height: Int32(height)) as Data?
+    }
+
+    /// A5: compute pitch contour via the bridge's FFT-ACF detector.
+    /// Synchronous; a 4-minute track takes a second or so. Idempotent.
+    func computePitchContour(force: Bool = false) {
+        guard hasAudio else { return }
+        if isComputingPitch { return }
+        if pitchComputed && !force { return }
+        isComputingPitch = true
+        defer { isComputingPitch = false }
+        guard let data = document.detectPitchContour() else {
+            pitchContour = []
+            pitchComputed = true
+            return
+        }
+        let count = data.count / MemoryLayout<Float>.size
+        var floats = [Float](repeating: 0, count: count)
+        floats.withUnsafeMutableBufferPointer { buf in
+            _ = data.copyBytes(to: buf)
+        }
+        pitchContour = floats
+        pitchComputed = true
+    }
+
+    /// A5: toggle the pitch overlay. First activation computes the
+    /// contour if needed.
+    func toggleShowPitchContour() {
+        showPitchContour.toggle()
+        if showPitchContour && !pitchComputed {
+            computePitchContour()
+        }
+    }
+
+    /// A4: detect tempo + beat positions. Returns (bpm, confidence,
+    /// beatMS). Synchronous; autocorrelation over a 4-minute track is
+    /// comfortably sub-second on modern iPad hardware.
+    func detectTempo() -> (bpm: Float, confidence: Float, beats: [Int]) {
+        guard hasAudio else { return (0, 0, []) }
+        let dict = document.detectTempo() as? [String: Any] ?? [:]
+        let bpm = (dict["bpm"] as? NSNumber)?.floatValue ?? 0
+        let conf = (dict["confidence"] as? NSNumber)?.floatValue ?? 0
+        let beats = (dict["beats"] as? [NSNumber])?.map { $0.intValue } ?? []
+        return (bpm, conf, beats)
+    }
+
+    /// A4: create a fixed timing track populated with marks at each
+    /// detected beat. Track name carries the detected BPM so users
+    /// can tell auto-generated tracks from hand-placed ones at a
+    /// glance. Each mark is 20 ms wide (matches the onset track).
+    @discardableResult
+    func generateTempoTimingTrack() -> Int? {
+        guard hasAudio else { return nil }
+        let result = detectTempo()
+        if result.beats.isEmpty { return nil }
+        let name = "Tempo (\(Int(result.bpm.rounded())) BPM)"
+        guard document.addTimingTrackNamed(name) else { return nil }
+        reloadRows()
+        guard let rowIdx = rows.lastIndex(where: {
+            guard let t = $0.timing else { return false }
+            return t.elementName == name || t.elementName.hasPrefix(name + "_")
+        }) else { return nil }
+        let duration = sequenceDurationMS
+        // Back-to-back marks: each beat region runs to the next beat
+        // (last one to track end) so effects can snap to the full
+        // bar segment.
+        for (i, ms) in result.beats.enumerated() {
+            let start = max(0, ms)
+            let end = i + 1 < result.beats.count
+                ? min(duration, result.beats[i + 1])
+                : duration
+            if end <= start { continue }
+            _ = document.addTimingMark(atRow: Int32(rowIdx),
+                                        startMS: Int32(start),
+                                        endMS: Int32(end),
+                                        label: "")
+        }
+        reloadRows()
+        return rowIdx
+    }
+
+    /// A2: create a new variable timing track populated with marks at
+    /// each detected onset. Marks are labelled empty (plain timing
+    /// marks, not lyric words) and given a 20 ms nominal width so the
+    /// existing overlap check doesn't reject adjacent onsets. Returns
+    /// the row index of the new track, or nil if nothing was created.
+    @discardableResult
+    func generateTimingTrackFromOnsets(name: String = "Onsets") -> Int? {
+        guard hasAudio else { return nil }
+        if !onsetsComputed {
+            // Synchronous fallback — the user just asked for this and
+            // expects marks to appear. Still fast on modern iPads.
+            let arr = (document.detectOnsets(sensitivity: 1.5) as [NSNumber])
+            onsetTimesMS = arr.map { $0.intValue }
+            onsetsComputed = true
+        }
+        if onsetTimesMS.isEmpty { return nil }
+        guard document.addTimingTrackNamed(name) else { return nil }
+        reloadRows()
+        // The bridge's addTimingTrackNamed auto-uniquifies the name
+        // on collision. Look up by prefix match, preferring the last
+        // row that matches — the new track is the most recent one.
+        guard let rowIdx = rows.lastIndex(where: {
+            guard let t = $0.timing else { return false }
+            return t.elementName == name || t.elementName.hasPrefix(name + "_")
+        }) else { return nil }
+        let duration = sequenceDurationMS
+        // Back-to-back marks: each region runs from one onset to the
+        // next (last one to track end).
+        for (i, ms) in onsetTimesMS.enumerated() {
+            let start = max(0, ms)
+            let end = i + 1 < onsetTimesMS.count
+                ? min(duration, onsetTimesMS[i + 1])
+                : duration
+            if end <= start { continue }
+            _ = document.addTimingMark(atRow: Int32(rowIdx),
+                                        startMS: Int32(start),
+                                        endMS: Int32(end),
+                                        label: "")
+        }
+        reloadRows()
+        return rowIdx
+    }
+
     func loadWaveform(startMS: Int, endMS: Int, numSamples: Int = 2000) {
         guard hasAudio else { return }
         guard let data = document.waveformData(fromMS: Int(startMS),
                                                 toMS: Int(endMS),
                                                 numSamples: Int32(numSamples),
-                                                filterType: Int32(waveformFilter.rawValue)) else { return }
+                                                filterType: Int32(waveformFilter.rawValue),
+                                                lowNote: Int32(customBandLowNote),
+                                                highNote: Int32(customBandHighNote)) else { return }
 
         let count = data.count / MemoryLayout<Float>.size
         var floats = [Float](repeating: 0, count: count)
         floats.withUnsafeMutableBufferPointer { buf in
             _ = data.copyBytes(to: buf)
+        }
+        // A7: if a sound class is selected, multiply each bucket's
+        // min/max/rms triplet by the class's confidence at the bucket
+        // midpoint so the waveform visually collapses where the
+        // selected class isn't present.
+        if selectedSoundClass != nil, !soundClasses.isEmpty {
+            let buckets = count / 3
+            if buckets > 0 {
+                let rangeMS = endMS - startMS
+                for i in 0..<buckets {
+                    let midMS = startMS + rangeMS * i / buckets
+                    let gain = soundClassGate(atMS: midMS)
+                    floats[i*3]   *= gain
+                    floats[i*3+1] *= gain
+                    floats[i*3+2] *= gain
+                }
+            }
         }
         waveformPeaks = floats
         waveformStartMS = startMS

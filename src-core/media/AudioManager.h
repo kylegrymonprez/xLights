@@ -31,6 +31,9 @@ enum class AUDIOSAMPLETYPE {
     CUSTOM,
     ALTO,
     NONVOCALS,
+    LUFS,       // A3: BS.1770 K-weighted momentary-loudness envelope
+    VOCALS,     // A8 (partial): center-channel extraction — M - α|S|
+    CLASSIFIED, // A7: raw signal gated by a SoundAnalysis class curve
     ANY
 };
 
@@ -94,6 +97,12 @@ class AudioManager {
     MEDIAPLAYINGSTATE _media_state;
     bool _polyphonicTranscriptionDone = false;
     std::vector<FilteredAudioData*> _filtered;
+    // A7: state for `AUDIOSAMPLETYPE::CLASSIFIED`. Populated by
+    // `SetClassifyGate`. The gate curve is re-interpolated per-
+    // sample inside `EnsureFilteredAudioData(CLASSIFIED)`.
+    std::string _classifyGateClass;
+    std::vector<float> _classifyGateCurve;
+    float _classifyGateTimeStep = 1.0f;
     int _sdlid = 0;
     bool _ok = false;
     std::string _hash;
@@ -188,7 +197,7 @@ public:
     float GetRawRightData(long offset);
     float GetRawLeftData(long offset);
     void SwitchTo(AUDIOSAMPLETYPE type, int lowNote = 0, int highNote = 127);
-    void GetLeftDataMinMax(long start, long end, float& minimum, float& maximum, AUDIOSAMPLETYPE type = AUDIOSAMPLETYPE::ANY, int lowNote = -1, int highNote = -1);
+    void GetLeftDataMinMax(long start, long end, float& minimum, float& maximum, AUDIOSAMPLETYPE type = AUDIOSAMPLETYPE::ANY, int lowNote = -1, int highNote = -1, float* rms = nullptr);
     float* GetFilteredRightDataPtr(long offset);
     float* GetFilteredLeftDataPtr(long offset);
     float* GetRawRightDataPtr(long offset);
@@ -209,6 +218,25 @@ public:
     };
 
     FilteredAudioData* GetFilteredAudioData(AUDIOSAMPLETYPE type, int lowNote, int highNote);
+
+    // A7: provide the per-second confidence curve that
+    // `AUDIOSAMPLETYPE::CLASSIFIED` should gate the raw signal by.
+    // Clearing any existing CLASSIFIED cache entry so the next
+    // `EnsureFilteredAudioData(CLASSIFIED)` rebuilds with the new
+    // curve. `timeStepSec` is the hop between consecutive confidence
+    // samples (Apple's default is 1.0 s).
+    void SetClassifyGate(const std::string& className,
+                          const std::vector<float>& confidencePerStep,
+                          float timeStepSec);
+
+    // Lazy variant of `GetFilteredAudioData` — if the cache doesn't
+    // already hold an entry matching `type`/`lowNote`/`highNote` it
+    // builds one (same factory logic as `SwitchTo`) and returns it.
+    // Unlike `SwitchTo`, this does NOT overwrite `_pcmdata`/`_data`
+    // — it leaves playback untouched. Safe to call from the iPad
+    // waveform bridge where we want filtered samples for display
+    // only. Returns nullptr if the track isn't loaded yet.
+    FilteredAudioData* EnsureFilteredAudioData(AUDIOSAMPLETYPE type, int lowNote, int highNote);
     bool WriteCurrentAudio(const std::string& path, long bitrate);
     static bool EncodeAudio(const std::vector<float>& left_channel,
                             const std::vector<float>& right_channel,

@@ -31,6 +31,12 @@
 #include "xLightsMain.h"
 #include "MainSequencer.h"
 #include "sequencer/NoteRangeDialog.h"
+#include "media/OnsetDetector.h"
+#include "media/PitchDetector.h"
+#include "media/Spectrogram.h"
+#ifdef __APPLE__
+#include "media/SoundClassifier.h"
+#endif
 
 #include <log.h>
 
@@ -57,7 +63,16 @@ const long Waveform::ID_WAVE_MNU_ALTO = wxNewId();
 const long Waveform::ID_WAVE_MNU_TREBLE = wxNewId();
 const long Waveform::ID_WAVE_MNU_CUSTOM = wxNewId();
 const long Waveform::ID_WAVE_MNU_NONVOCALS = wxNewId();
+const long Waveform::ID_WAVE_MNU_LUFS = wxNewId();
+const long Waveform::ID_WAVE_MNU_VOCALS = wxNewId();
 const long Waveform::ID_WAVE_MNU_DOUBLEHEIGHT = wxNewId();
+const long Waveform::ID_WAVE_MNU_SHOW_ONSETS = wxNewId();
+const long Waveform::ID_WAVE_MNU_SHOW_PITCH = wxNewId();
+const long Waveform::ID_WAVE_MNU_SHOW_SPECTROGRAM = wxNewId();
+#ifdef __APPLE__
+const long Waveform::ID_WAVE_MNU_CLASSIFY = wxNewId();
+const long Waveform::ID_WAVE_MNU_CLASSIFY_CLEAR = wxNewId();
+#endif
 // Reserve 32 IDs for audio track submenu items (base + 0..31)
 const long Waveform::ID_WAVE_MNU_AUDIO_TRACK_BASE = wxNewId();
 static long _audioTrackIdPool[32];
@@ -89,6 +104,37 @@ Waveform::Waveform(wxPanel* parent, wxWindowID id, const wxPoint &pos, const wxS
 Waveform::~Waveform()
 {
     CloseMedia();
+    if (_spectrogramTexture) {
+        delete _spectrogramTexture;
+        _spectrogramTexture = nullptr;
+    }
+}
+
+void Waveform::ResetAnalysisState()
+{
+    _showOnsets = false;
+    _onsetsComputed = false;
+    _onsetMS.clear();
+    _showPitchContour = false;
+    _pitchComputed = false;
+    _pitchContour.clear();
+    _showSpectrogram = false;
+    _spectrogramComputed = false;
+    _spectrogram = Spectrogram{};
+    if (_spectrogramTexture) {
+        delete _spectrogramTexture;
+        _spectrogramTexture = nullptr;
+    }
+    _spectrogramTexW = 0;
+    _spectrogramTexH = 0;
+    _spectrogramRangeStartMS = -1;
+    _spectrogramRangeEndMS = -1;
+#ifdef __APPLE__
+    _soundClasses.clear();
+    _selectedSoundClass.clear();
+    _soundClassTimeStep = 1.0f;
+#endif
+    _doubleHeight = false;
 }
 
 void Waveform::CloseMedia()
@@ -98,7 +144,8 @@ void Waveform::CloseMedia()
     _type = AUDIOSAMPLETYPE::RAW;
     _lowNote = -1;
     _highNote = -1;
-	_media = nullptr;
+    _media = nullptr;
+    ResetAnalysisState();
     mParent->Refresh();
 }
 
@@ -200,8 +247,30 @@ void Waveform::rightClick(wxMouseEvent& event)
         mnuWave.AppendRadioItem(ID_WAVE_MNU_ALTO, "Alto waveform")->Check(_type == AUDIOSAMPLETYPE::ALTO);
         mnuWave.AppendRadioItem(ID_WAVE_MNU_CUSTOM, "Custom filtered waveform")->Check(_type == AUDIOSAMPLETYPE::CUSTOM);
         mnuWave.AppendRadioItem(ID_WAVE_MNU_NONVOCALS, "Non Vocals waveform")->Check(_type == AUDIOSAMPLETYPE::NONVOCALS);
+        mnuWave.AppendRadioItem(ID_WAVE_MNU_VOCALS, "Vocals waveform (center extract)")->Check(_type == AUDIOSAMPLETYPE::VOCALS);
+        mnuWave.AppendRadioItem(ID_WAVE_MNU_LUFS, "Perceptual (LUFS)")->Check(_type == AUDIOSAMPLETYPE::LUFS);
+#ifdef __APPLE__
+        // Keep the classify entry inside the same radio group so its
+        // checkmark moves with `_type == CLASSIFIED` — otherwise the
+        // radio defaults to showing "Raw" as selected while the
+        // classified filter is active.
+        wxString classifyLabel = _selectedSoundClass.empty()
+            ? wxString("Classify Audio…")
+            : wxString::Format("Classified: %s…", _selectedSoundClass);
+        mnuWave.AppendRadioItem(ID_WAVE_MNU_CLASSIFY, classifyLabel)
+            ->Check(_type == AUDIOSAMPLETYPE::CLASSIFIED);
+#endif
         mnuWave.AppendSeparator();
         mnuWave.AppendCheckItem(ID_WAVE_MNU_DOUBLEHEIGHT, "Double height waveform")->Check(_doubleHeight);
+        mnuWave.AppendCheckItem(ID_WAVE_MNU_SHOW_ONSETS, "Show onsets")->Check(_showOnsets);
+        mnuWave.AppendCheckItem(ID_WAVE_MNU_SHOW_PITCH, "Show pitch contour")->Check(_showPitchContour);
+        mnuWave.AppendCheckItem(ID_WAVE_MNU_SHOW_SPECTROGRAM, "View as spectrogram")->Check(_showSpectrogram);
+#ifdef __APPLE__
+        if (!_selectedSoundClass.empty()) {
+            mnuWave.AppendSeparator();
+            mnuWave.Append(ID_WAVE_MNU_CLASSIFY_CLEAR, "Clear sound-class gating");
+        }
+#endif
     }
 
     // Audio Track submenu — outside the _media guard so the user can always switch
@@ -256,6 +325,10 @@ void Waveform::OnGridPopup(wxCommandEvent& event)
         _type = AUDIOSAMPLETYPE::ALTO;
     } else if (id == ID_WAVE_MNU_NONVOCALS) {
         _type = AUDIOSAMPLETYPE::NONVOCALS;
+    } else if (id == ID_WAVE_MNU_VOCALS) {
+        _type = AUDIOSAMPLETYPE::VOCALS;
+    } else if (id == ID_WAVE_MNU_LUFS) {
+        _type = AUDIOSAMPLETYPE::LUFS;
     } else if (id == ID_WAVE_MNU_CUSTOM) {
         int origLow = _lowNote;
         int origHigh = _highNote;
@@ -270,6 +343,108 @@ void Waveform::OnGridPopup(wxCommandEvent& event)
         _type = AUDIOSAMPLETYPE::CUSTOM;
     } else if (id == ID_WAVE_MNU_DOUBLEHEIGHT) {
         _doubleHeight = !_doubleHeight;
+    } else if (id == ID_WAVE_MNU_SHOW_ONSETS) {
+        _showOnsets = !_showOnsets;
+        if (_showOnsets && !_onsetsComputed && _media != nullptr) {
+            wxSetCursor(wxCURSOR_WAIT);
+            _onsetMS = DetectOnsets(_media);
+            _onsetsComputed = true;
+            wxSetCursor(wxCURSOR_ARROW);
+        }
+        ForceRedraw();
+        Refresh();
+        return;
+    } else if (id == ID_WAVE_MNU_SHOW_SPECTROGRAM) {
+        _showSpectrogram = !_showSpectrogram;
+        if (_showSpectrogram && !_spectrogramComputed && _media != nullptr) {
+            wxSetCursor(wxCURSOR_WAIT);
+            _spectrogram = ComputeSpectrogram(_media);
+            _spectrogramComputed = _spectrogram.frames > 0;
+            wxSetCursor(wxCURSOR_ARROW);
+            if (!_spectrogramComputed) _showSpectrogram = false;
+        }
+        _spectrogramRangeStartMS = -1;
+        _spectrogramRangeEndMS = -1;
+        ForceRedraw();
+        Refresh();
+        return;
+    } else if (id == ID_WAVE_MNU_SHOW_PITCH) {
+        _showPitchContour = !_showPitchContour;
+        if (_showPitchContour && !_pitchComputed && _media != nullptr) {
+            wxSetCursor(wxCURSOR_WAIT);
+            PitchContour c = DetectPitch(_media);
+            _pitchContour.clear();
+            _pitchContour.reserve(c.samples.size() * 3);
+            for (const auto& s : c.samples) {
+                _pitchContour.push_back(float(s.timeMS));
+                _pitchContour.push_back(s.frequency);
+                _pitchContour.push_back(s.confidence);
+            }
+            _pitchComputed = true;
+            wxSetCursor(wxCURSOR_ARROW);
+        }
+        ForceRedraw();
+        Refresh();
+        return;
+#ifdef __APPLE__
+    } else if (id == ID_WAVE_MNU_CLASSIFY) {
+        if (_media == nullptr) return;
+        if (_soundClasses.empty()) {
+            wxSetCursor(wxCURSOR_WAIT);
+            SoundClassification r = ClassifySound(_media);
+            wxSetCursor(wxCURSOR_ARROW);
+            _soundClassTimeStep = r.timeStepSeconds > 0 ? r.timeStepSeconds : 1.0f;
+            _soundClasses.clear();
+            for (auto& c : r.classes) {
+                _soundClasses.emplace_back(c.name, c.confidence);
+            }
+        }
+        if (_soundClasses.empty()) {
+            wxMessageBox("No sound classes detected above the confidence threshold.",
+                         "Classify Audio", wxOK | wxICON_INFORMATION);
+            return;
+        }
+        wxArrayString names;
+        for (const auto& c : _soundClasses) {
+            names.Add(wxString::FromUTF8(c.first));
+        }
+        wxSingleChoiceDialog dlg(this,
+            "Pick a sound class to gate the waveform by.\n"
+            "Only moments where the class is present will show amplitude.",
+            "Classify Audio", names);
+        if (dlg.ShowModal() == wxID_OK) {
+            _selectedSoundClass = names[dlg.GetSelection()].ToStdString();
+            // Push the chosen class's confidence curve down to
+            // AudioManager so the CLASSIFIED filter type can gate
+            // both display and playback. Then route through the
+            // regular filter-switch path so playback follows.
+            std::vector<float> curve;
+            for (const auto& c : _soundClasses) {
+                if (c.first == _selectedSoundClass) { curve = c.second; break; }
+            }
+            if (_media) {
+                _media->SetClassifyGate(_selectedSoundClass, curve, _soundClassTimeStep);
+            }
+            _type = AUDIOSAMPLETYPE::CLASSIFIED;
+            views.clear();
+            mCurrentWaveView = NO_WAVE_VIEW_SELECTED;
+            // Fall through to the common switch-and-rebuild path so
+            // SwitchTo runs.
+        } else {
+            ForceRedraw();
+            Refresh();
+            return;
+        }
+    } else if (id == ID_WAVE_MNU_CLASSIFY_CLEAR) {
+        _selectedSoundClass.clear();
+        if (_media) {
+            _media->SetClassifyGate("", {}, 1.0f);
+        }
+        _type = AUDIOSAMPLETYPE::RAW;
+        views.clear();
+        mCurrentWaveView = NO_WAVE_VIEW_SELECTED;
+        // Fall through so SwitchTo restores raw playback.
+#endif
     } else {
         // Check if this is an audio track selection
         EnsureAudioTrackIds();
@@ -417,6 +592,7 @@ int Waveform::OpenfileMedia(AudioManager* media, wxString& error)
     _highNote = -1;
     _media = media;
     views.clear();
+    ResetAnalysisState();
 	if (_media != nullptr) {
         _media->SwitchTo(_type);
 		float samplesPerLine = GetSamplesPerLineFromZoomLevel(mZoomLevel);
@@ -534,7 +710,56 @@ void Waveform::DrawWaveView(xlGraphicsContext* ctx, const WaveView& wv)
 
     int max_wave_ht = mWindowHeight - VERTICAL_PADDING;
 
-    if (_media != nullptr) {
+    // A6: spectrogram view — render the cached STFT as a texture
+    // covering the waveform strip instead of the peak polygons.
+    // Re-upload the BGRA image whenever the visible time range or
+    // the strip size changes. Overlays (onsets / pitch) still draw
+    // on top further down in this function.
+    bool spectrogramDrawn = false;
+    if (_showSpectrogram && _spectrogramComputed && _media != nullptr && mTimeline != nullptr) {
+        int texW = std::max(1, int(mWindowWidth));
+        int texH = std::max(1, int(mWindowHeight));
+        // Timeline position math is in LOGICAL pixels, but on Metal
+        // `mWindowWidth` is in BACKING pixels (2x on retina). Convert
+        // the right edge back to logical before feeding it into
+        // `GetTimeMSfromPosition`, otherwise we ask for a time twice
+        // as far into the track as the viewport actually shows and
+        // the right half of the spectrogram ends up pointing at
+        // frames past the end (= silent = black).
+        int logicalWidth = drawingUsingLogicalSize()
+            ? mWindowWidth
+            : int(GetSize().GetWidth());
+        long visStartMS = long(mTimeline->GetTimeMSfromPosition(mStartPixelOffset));
+        long visEndMS = long(mTimeline->GetTimeMSfromPosition(mStartPixelOffset + logicalWidth));
+        if (visEndMS > visStartMS && texW > 0 && texH > 0) {
+            bool rebuild = (_spectrogramTexture == nullptr) ||
+                           texW != _spectrogramTexW || texH != _spectrogramTexH ||
+                           visStartMS != _spectrogramRangeStartMS ||
+                           visEndMS != _spectrogramRangeEndMS;
+            if (rebuild) {
+                if (_spectrogramTexture == nullptr ||
+                    texW != _spectrogramTexW || texH != _spectrogramTexH) {
+                    if (_spectrogramTexture) {
+                        delete _spectrogramTexture;
+                        _spectrogramTexture = nullptr;
+                    }
+                    _spectrogramTexture = ctx->createTexture(texW, texH, true, true);
+                    _spectrogramTexture->SetName("WaveSpectrogram");
+                    _spectrogramTexW = texW;
+                    _spectrogramTexH = texH;
+                }
+                std::vector<uint8_t> buf;
+                RenderSpectrogramBGRA(_spectrogram, visStartMS, visEndMS, texW, texH, buf);
+                _spectrogramTexture->UpdateData(buf.data(), true, true);
+                _spectrogramRangeStartMS = visStartMS;
+                _spectrogramRangeEndMS = visEndMS;
+            }
+            ctx->drawTexture(_spectrogramTexture, 0, 0, mWindowWidth, mWindowHeight);
+            spectrogramDrawn = true;
+        }
+    }
+
+    if (_media != nullptr && !spectrogramDrawn) {
         xlColor c(130, 178, 207, 255);
         if (xLightsApp::GetFrame() != nullptr) {
             c = xLightsApp::GetFrame()->color_mgr.GetColor(ColorManager::COLOR_WAVEFORM);
@@ -547,11 +772,14 @@ void Waveform::DrawWaveView(xlGraphicsContext* ctx, const WaveView& wv)
             if (wv.background.get() == nullptr) {
                 wv.background = std::unique_ptr<xlVertexAccumulator>(ctx->createVertexAccumulator()->SetName("WaveFill"));
                 wv.outline = std::unique_ptr<xlVertexAccumulator>(ctx->createVertexAccumulator()->SetName("WaveLines"));
+                wv.rmsFill = std::unique_ptr<xlVertexAccumulator>(ctx->createVertexAccumulator()->SetName("WaveRMS"));
             }
             wv.background->Reset();
             wv.outline->Reset();
+            wv.rmsFill->Reset();
             wv.background->PreAlloc((mWindowWidth + 2) * 2);
             wv.outline->PreAlloc((mWindowWidth + 2) + 4);
+            wv.rmsFill->PreAlloc((mWindowWidth + 2) * 2);
 
             std::vector<double> vertexes;
             vertexes.resize((mWindowWidth + 2));
@@ -560,12 +788,18 @@ void Waveform::DrawWaveView(xlGraphicsContext* ctx, const WaveView& wv)
                 int index = x;
                 index += pixelOffset;
                 if (index >= 0 && index < (int)wv.MinMaxs.size()) {
-
                     double y1 = DoubleHeight(wv.MinMaxs[index].min, _doubleHeight, max_wave_ht) + (mWindowHeight / 2);
                     double y2 = DoubleHeight(wv.MinMaxs[index].max, _doubleHeight, max_wave_ht) + (mWindowHeight / 2);
 
                     wv.background->AddVertex(x, y1);
                     wv.background->AddVertex(x, y2);
+
+                    // A10: RMS band centred on the axis, mirrored ±rms.
+                    double r = wv.MinMaxs[index].rms;
+                    double ry1 = DoubleHeight(-r, _doubleHeight, max_wave_ht) + (mWindowHeight / 2);
+                    double ry2 = DoubleHeight( r, _doubleHeight, max_wave_ht) + (mWindowHeight / 2);
+                    wv.rmsFill->AddVertex(x, ry1);
+                    wv.rmsFill->AddVertex(x, ry2);
 
                     wv.outline->AddVertex(x, y1);
                     vertexes[x] = y2;
@@ -583,13 +817,124 @@ void Waveform::DrawWaveView(xlGraphicsContext* ctx, const WaveView& wv)
             wv.lastRenderStart = mStartPixelOffset;
             wv.background->FlushRange(0, wv.background->getCount());
             wv.outline->FlushRange(0, wv.outline->getCount());
+            wv.rmsFill->FlushRange(0, wv.rmsFill->getCount());
         }
         if (wv.background.get() && wv.background->getCount()) {
             ctx->drawTriangleStrip(wv.background.get(), c);
         }
+        if (wv.rmsFill.get() && wv.rmsFill->getCount()) {
+            // Lighter tint on top of the peak fill — makes the
+            // "average energy" band read independently of transients.
+            xlColor rmsC(c.red + (255 - c.red) * 3 / 5,
+                         c.green + (255 - c.green) * 3 / 5,
+                         c.blue + (255 - c.blue) * 3 / 5,
+                         220);
+            ctx->enableBlending();
+            ctx->drawTriangleStrip(wv.rmsFill.get(), rmsC);
+            ctx->disableBlending();
+        }
         if (wv.outline.get() && wv.outline->getCount()) {
             ctx->drawLineStrip(wv.outline.get(), xlWHITE);
         }
+    }
+
+    // A2 onset overlay — faint amber verticals across the waveform
+    // strip at each detected onset position.
+    if (_showOnsets && !_onsetMS.empty() && mTimeline != nullptr) {
+        xlVertexColorAccumulator* onsets = ctx->createVertexColorAccumulator();
+        xlColor onsetColor(255, 170, 60, 200);
+        for (long ms : _onsetMS) {
+            int px = mTimeline->GetPositionFromTimeMS(int(ms));
+            if (px < 0 || px > mWindowWidth) continue;
+            float f = translateOffset(px);
+            onsets->AddVertex(f, 1, 0, onsetColor);
+            onsets->AddVertex(f, mWindowHeight - 1, 0, onsetColor);
+        }
+        if (onsets->getCount() > 0) {
+            ctx->enableBlending();
+            ctx->drawLines(onsets);
+            ctx->disableBlending();
+        }
+        delete onsets;
+    }
+
+    // A5 pitch contour overlay. Line segments colour-coded by pitch
+    // class (12 hues around the wheel) with frequency mapped to a log
+    // y-scale. Unvoiced frames (freq=0) break the polyline so silence
+    // doesn't produce a spurious slope.
+    if (_showPitchContour && _pitchContour.size() >= 6 && mTimeline != nullptr) {
+        // HSL → RGB helper for colour-by-note.
+        auto hueToRGB = [](float h, float s, float l, uint8_t& R, uint8_t& G, uint8_t& B) {
+            auto hue2rgb = [](float p, float q, float t) {
+                if (t < 0) t += 1;
+                if (t > 1) t -= 1;
+                if (t < 1.0f / 6) return p + (q - p) * 6 * t;
+                if (t < 0.5f)     return q;
+                if (t < 2.0f / 3) return p + (q - p) * (2.0f / 3 - t) * 6;
+                return p;
+            };
+            float q = l < 0.5f ? l * (1 + s) : l + s - l * s;
+            float p = 2 * l - q;
+            R = uint8_t(255 * hue2rgb(p, q, h + 1.0f / 3));
+            G = uint8_t(255 * hue2rgb(p, q, h));
+            B = uint8_t(255 * hue2rgb(p, q, h - 1.0f / 3));
+        };
+        // Range choice: detector runs 75–1200 Hz, display adds a bit
+        // of headroom (60–1800 Hz) so pitches near the detector's
+        // upper bound don't pin the line to the top of the strip.
+        const float logMin = std::log2(60.0f);
+        const float logMax = std::log2(1800.0f);
+        const float logRange = logMax - logMin;
+        const float yTop = 2.0f;
+        const float yBottom = float(mWindowHeight) - 2.0f;
+        const float yRange = yBottom - yTop;
+        // Draw each segment as a thickened ribbon by stacking
+        // parallel line pairs offset in y by ±1 backing-pixel. On
+        // retina that's ~3 physical pixels of stroke, visible at
+        // normal zoom.
+        const float thicknessStep = translateOffset(1.0f) - translateOffset(0.0f);
+        const int thicknessLines = 3; // centre + one above + one below
+
+        xlVertexColorAccumulator* pitch = ctx->createVertexColorAccumulator();
+        const int triples = int(_pitchContour.size() / 3);
+        bool havePrev = false;
+        float prevX = 0, prevY = 0;
+        uint8_t prevR = 0, prevG = 0, prevB = 0;
+        for (int i = 0; i < triples; i++) {
+            float t = _pitchContour[i * 3];
+            float freq = _pitchContour[i * 3 + 1];
+            int px = mTimeline->GetPositionFromTimeMS(int(t));
+            if (px < -8 || px > mWindowWidth + 8) { havePrev = false; continue; }
+            if (freq <= 0) { havePrev = false; continue; }
+            float x = translateOffset(px);
+            float logF = std::log2(freq);
+            float norm = (logF - logMin) / logRange;
+            if (norm < 0) norm = 0;
+            if (norm > 1) norm = 1;
+            float y = yBottom - norm * yRange;
+            float semitones = 12.0f * (logF - std::log2(440.0f));
+            int noteClass = ((int(std::round(semitones)) % 12) + 12) % 12;
+            float hue = float(noteClass) / 12.0f;
+            uint8_t R, G, B;
+            hueToRGB(hue, 0.7f, 0.55f, R, G, B);
+            xlColor col(R, G, B, 240);
+            if (havePrev) {
+                xlColor prevCol(prevR, prevG, prevB, 240);
+                for (int k = -(thicknessLines / 2); k <= thicknessLines / 2; k++) {
+                    float offset = float(k) * thicknessStep;
+                    pitch->AddVertex(prevX, prevY + offset, 0, prevCol);
+                    pitch->AddVertex(x, y + offset, 0, col);
+                }
+            }
+            prevX = x; prevY = y; prevR = R; prevG = G; prevB = B;
+            havePrev = true;
+        }
+        if (pitch->getCount() > 0) {
+            ctx->enableBlending();
+            ctx->drawLines(pitch);
+            ctx->disableBlending();
+        }
+        delete pitch;
     }
 
     xlVertexColorAccumulator* vac = ctx->createVertexColorAccumulator();
@@ -774,10 +1119,12 @@ void Waveform::WaveView::SetMinMaxSampleSet(float SamplesPerPixel, AudioManager*
 			}
 			minimum = 1;
 			maximum = -1;
-            media->GetLeftDataMinMax(start, end, minimum, maximum, type, lowNote, highNote);
+            float rms = 0.0f;
+            media->GetLeftDataMinMax(start, end, minimum, maximum, type, lowNote, highNote, &rms);
 			MINMAX mm;
 			mm.min = minimum;
 			mm.max = maximum;
+			mm.rms = rms;
 			MinMaxs.push_back(mm);
 		}
     }

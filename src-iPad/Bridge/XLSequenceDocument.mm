@@ -29,6 +29,12 @@
 #include "effects/ShaderEffect.h"
 #include "graphics/xlGraphicsAccumulators.h"
 #include "media/AudioManager.h"
+#include "media/OnsetDetector.h"
+#include "media/SoundClassifier.h"
+#include "media/TempoDetector.h"
+#include "media/PitchDetector.h"
+#include "media/ChordDetector.h"
+#include "media/Spectrogram.h"
 #include "media/MediaCompatibility.h"
 #include "media/VideoReader.h"
 #include "render/ValueCurve.h"
@@ -44,6 +50,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -60,7 +67,20 @@
     // Snapshot of `SequenceElements::GetChangeCount()` at the last
     // successful load / save. Current count == snapshot ⇒ clean.
     unsigned int _lastSavedChangeCount;
+    // A7: time-step (seconds) reported by the last classifySound run
+    // so Swift callers can turn per-second confidence arrays into MS
+    // lookups.
+    float _lastClassificationTimeStep;
+    // A6: cached spectrogram data. Populated lazily by
+    // -ensureSpectrogramComputed; cleared whenever the sequence is
+    // closed. `_spectrogramAudioHash` keeps us from handing out a
+    // spectrogram that no longer matches the loaded audio after a
+    // reload.
+    Spectrogram _spectrogram;
+    std::string _spectrogramAudioHash;
 }
+
+@synthesize lastClassificationTimeStep = _lastClassificationTimeStep;
 
 - (instancetype)init {
     self = [super init];
@@ -2746,13 +2766,25 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
                          toMS:(long)endMS
                    numSamples:(int)numSamples {
     return [self waveformDataFromMS:startMS toMS:endMS
-                         numSamples:numSamples filterType:0];
+                         numSamples:numSamples filterType:0
+                            lowNote:0 highNote:127];
 }
 
 - (NSData*)waveformDataFromMS:(long)startMS
                          toMS:(long)endMS
                    numSamples:(int)numSamples
                    filterType:(int)filterType {
+    return [self waveformDataFromMS:startMS toMS:endMS
+                         numSamples:numSamples filterType:filterType
+                            lowNote:0 highNote:127];
+}
+
+- (NSData*)waveformDataFromMS:(long)startMS
+                         toMS:(long)endMS
+                   numSamples:(int)numSamples
+                   filterType:(int)filterType
+                      lowNote:(int)lowNote
+                     highNote:(int)highNote {
     auto* am = [self audioManager];
     if (!am || !am->IsOk() || numSamples <= 0) return nil;
 
@@ -2770,22 +2802,41 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
 
     // Source-pointer resolution: raw path or filter-specific path.
     // Filter ids map to `AUDIOSAMPLETYPE` (RAW/BASS/TREBLE/ALTO/
-    // NONVOCALS in that order). `GetFilteredAudioData` may return
-    // nullptr when the AudioManager hasn't finished filtering yet
-    // (first-time build of that filter) or when the source isn't
-    // filter-capable; fall back to raw so the user still sees a
-    // waveform.
+    // NONVOCALS in that order, with CUSTOM=5 appended for A9.1's
+    // parametric band). `GetFilteredAudioData` may return nullptr when
+    // the AudioManager hasn't finished filtering yet (first-time build
+    // of that filter) or when the source isn't filter-capable; fall
+    // back to raw so the user still sees a waveform.
     float* sourceData = nullptr;
     AUDIOSAMPLETYPE type = AUDIOSAMPLETYPE::RAW;
+    int lo = 0, hi = 127;
     switch (filterType) {
         case 1: type = AUDIOSAMPLETYPE::BASS; break;
         case 2: type = AUDIOSAMPLETYPE::TREBLE; break;
         case 3: type = AUDIOSAMPLETYPE::ALTO; break;
         case 4: type = AUDIOSAMPLETYPE::NONVOCALS; break;
+        case 5:
+            type = AUDIOSAMPLETYPE::CUSTOM;
+            lo = std::clamp(lowNote, 0, 127);
+            hi = std::clamp(highNote, 0, 127);
+            if (hi <= lo) hi = std::min(127, lo + 1);
+            break;
+        case 6: type = AUDIOSAMPLETYPE::LUFS; break;
+        case 7: type = AUDIOSAMPLETYPE::VOCALS; break;
         default: break;
     }
     if (type != AUDIOSAMPLETYPE::RAW) {
-        FilteredAudioData* fad = am->GetFilteredAudioData(type, 0, 127);
+        // Use `EnsureFilteredAudioData` so the cache entry is built on
+        // demand for iPad callers — we can't use `SwitchTo` here since
+        // it would also overwrite `_pcmdata` / `_data` and change
+        // playback. For BASS/TREBLE/etc lowNote=-1 is the "any range"
+        // sentinel — the ensure path uses hard-coded defaults per
+        // type — while CUSTOM passes explicit lo/hi.
+        int qLo = lo, qHi = hi;
+        if (type != AUDIOSAMPLETYPE::CUSTOM) {
+            qLo = -1; qHi = -1;
+        }
+        FilteredAudioData* fad = am->EnsureFilteredAudioData(type, qLo, qHi);
         if (fad && fad->data0) {
             sourceData = fad->data0 + startSample;
         }
@@ -2795,22 +2846,138 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
         if (!sourceData) return nil;
     }
 
-    // Output: numSamples * 2 floats (min, max pairs)
-    std::vector<float> peaks(numSamples * 2);
+    // Output: numSamples * 3 floats — {min, max, rms} per bucket. RMS
+    // is the A10 peak-vs-RMS overlay data; consumers that only want
+    // the peak polygon can ignore the third lane.
+    std::vector<float> peaks(numSamples * 3);
     for (int i = 0; i < numSamples; i++) {
         long bucketStart = i * samplesPerBucket;
         long bucketEnd = std::min(bucketStart + samplesPerBucket, totalSamples);
         float mn = 0, mx = 0;
+        double sumSq = 0;
+        long count = 0;
         for (long s = bucketStart; s < bucketEnd; s++) {
             float v = sourceData[s];
             if (v < mn) mn = v;
             if (v > mx) mx = v;
+            sumSq += double(v) * double(v);
+            count++;
         }
-        peaks[i * 2] = mn;
-        peaks[i * 2 + 1] = mx;
+        peaks[i * 3] = mn;
+        peaks[i * 3 + 1] = mx;
+        peaks[i * 3 + 2] = count > 0 ? (float)std::sqrt(sumSq / double(count)) : 0.0f;
     }
 
     return [NSData dataWithBytes:peaks.data() length:peaks.size() * sizeof(float)];
+}
+
+- (NSArray<NSNumber*>*)detectOnsetsWithSensitivity:(float)sensitivity {
+    auto* am = [self audioManager];
+    if (!am || !am->IsOk()) return @[];
+    OnsetDetectorOptions opts;
+    if (sensitivity > 0) opts.sensitivity = sensitivity;
+    std::vector<long> onsets = DetectOnsets(am, opts);
+    NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:onsets.size()];
+    for (long ms : onsets) {
+        [arr addObject:@(ms)];
+    }
+    return arr;
+}
+
+- (BOOL)ensureSpectrogramComputed {
+    auto* am = [self audioManager];
+    if (!am || !am->IsOk()) return NO;
+    std::string currentHash = am->Hash();
+    if (_spectrogram.frames > 0 && _spectrogramAudioHash == currentHash) {
+        return YES;
+    }
+    _spectrogram = ComputeSpectrogram(am);
+    _spectrogramAudioHash = currentHash;
+    return _spectrogram.frames > 0;
+}
+
+- (NSData*)spectrogramBGRAForRangeMS:(long)startMS
+                                toMS:(long)endMS
+                               width:(int)outWidth
+                              height:(int)outHeight {
+    if (_spectrogram.frames <= 0) return nil;
+    if (outWidth <= 0 || outHeight <= 0) return nil;
+    std::vector<uint8_t> buf;
+    RenderSpectrogramBGRA(_spectrogram, startMS, endMS, outWidth, outHeight, buf);
+    return [NSData dataWithBytes:buf.data() length:buf.size()];
+}
+
+- (NSDictionary*)detectChords {
+    auto* am = [self audioManager];
+    NSMutableDictionary* out = [NSMutableDictionary dictionaryWithCapacity:2];
+    out[@"key"] = @"";
+    out[@"chords"] = @[];
+    if (!am || !am->IsOk()) return out;
+    HarmonyAnalysis r = DetectChords(am);
+    out[@"key"] = [NSString stringWithUTF8String:r.key.c_str()];
+    NSMutableArray* segs = [NSMutableArray arrayWithCapacity:r.chords.size()];
+    for (const auto& s : r.chords) {
+        [segs addObject:@{
+            @"startMS": @(s.startMS),
+            @"endMS":   @(s.endMS),
+            @"name":    [NSString stringWithUTF8String:s.name.c_str()],
+        }];
+    }
+    out[@"chords"] = segs;
+    return out;
+}
+
+- (NSData*)detectPitchContour {
+    auto* am = [self audioManager];
+    if (!am || !am->IsOk()) return nil;
+    PitchContour c = DetectPitch(am);
+    if (c.samples.empty()) return nil;
+    std::vector<float> flat;
+    flat.reserve(c.samples.size() * 3);
+    for (const auto& s : c.samples) {
+        flat.push_back(float(s.timeMS));
+        flat.push_back(s.frequency);
+        flat.push_back(s.confidence);
+    }
+    return [NSData dataWithBytes:flat.data()
+                           length:flat.size() * sizeof(float)];
+}
+
+- (NSDictionary*)detectTempo {
+    auto* am = [self audioManager];
+    NSMutableDictionary* out = [NSMutableDictionary dictionaryWithCapacity:3];
+    if (!am || !am->IsOk()) {
+        out[@"bpm"] = @(0);
+        out[@"confidence"] = @(0);
+        out[@"beats"] = @[];
+        return out;
+    }
+    TempoResult r = DetectTempo(am);
+    out[@"bpm"] = @(r.bpm);
+    out[@"confidence"] = @(r.confidence);
+    NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:r.beatMS.size()];
+    for (long ms : r.beatMS) {
+        [arr addObject:@(ms)];
+    }
+    out[@"beats"] = arr;
+    return out;
+}
+
+- (NSDictionary*)classifySound {
+    auto* am = [self audioManager];
+    if (!am || !am->IsOk()) return @{};
+    SoundClassification result = ClassifySound(am);
+    _lastClassificationTimeStep = result.timeStepSeconds;
+    NSMutableDictionary* out = [NSMutableDictionary dictionaryWithCapacity:result.classes.size()];
+    for (const auto& c : result.classes) {
+        NSMutableArray<NSNumber*>* arr = [NSMutableArray arrayWithCapacity:c.confidence.size()];
+        for (float v : c.confidence) {
+            [arr addObject:@(v)];
+        }
+        NSString* key = [NSString stringWithUTF8String:c.name.c_str()];
+        out[key] = arr;
+    }
+    return out;
 }
 
 // MARK: - Effect icons (XPM -> BGRA)

@@ -25,6 +25,9 @@
 #include "color/ColorManager.h"
 #include "render/SequenceElements.h"
 #include "media/AudioManager.h"
+#include "media/OnsetDetector.h"
+#include "media/TempoDetector.h"
+#include "media/ChordDetector.h"
 #include "xLightsMain.h"
 #include "xLightsApp.h"
 #include "sequencer/NewTimingDialog.h"
@@ -219,6 +222,9 @@ const long RowHeading::ID_ROW_MNU_REMOVE_TIMING_WORDS_PHONEMES = wxNewId();
 const long RowHeading::ID_ROW_MNU_HIDEALLTIMING = wxNewId();
 const long RowHeading::ID_ROW_MNU_SHOWALLTIMING = wxNewId();
 const long RowHeading::ID_ROW_MNU_GENERATE_SUBDIVIDED_TRACKS = wxNewId();
+const long RowHeading::ID_ROW_MNU_GENERATE_FROM_ONSETS = wxNewId();
+const long RowHeading::ID_ROW_MNU_GENERATE_FROM_TEMPO = wxNewId();
+const long RowHeading::ID_ROW_MNU_GENERATE_FROM_CHORDS = wxNewId();
 const long RowHeading::ID_ROW_MNU_SETLAYERNAME = wxNewId();
 
 int DEFAULT_ROW_HEADING_HEIGHT = 22;
@@ -595,6 +601,11 @@ void RowHeading::rightClick( wxMouseEvent& event)
                     mnuLayer.Append(ID_ROW_MNU_ADD_TIMING_TRACK_ALL_VIEWS, "Add Timing Tracks to All Views");
                     mnuLayer.Append(ID_ROW_MNU_SELECT_TIMING_EFFECTS, "Select Timing Marks");
                     mnuLayer.Append(ID_ROW_MNU_GENERATE_SUBDIVIDED_TRACKS, "Generate Subdivided Timing Tracks");
+                    // A2/A4/A9: audio-analysis generators live inside
+                    // the "Add Timing Track" dialog's timing-type
+                    // picker (alongside VAMP plugins), not here —
+                    // keep this row-popup focused on operations on
+                    // the existing timing track.
                     mnuLayer.Append(ID_ROW_MNU_IMPORT_NOTES, "Import Notes");
                     if ( xLightsApp::GetFrame()->GetAIService(aiType::SPEECH2TEXT) != nullptr) {
                         SequenceFile* xml_file = xLightsApp::GetFrame()->CurrentSeqXmlFile;
@@ -698,8 +709,8 @@ static void ImportLyrics(SequenceElements* seqElements, TimingElement* element, 
             end_time = sequenceEndMS;
         }
 
-        xLightsFrame* xframe = xLightsApp::GetFrame();
         int interval_ms = (end_time - start_time) / num_phrases;
+        
         for( int i = 0; i < total_num_phrases; i++ )
         {
             wxString wxLine = dlgLyrics->TextCtrlLyrics->GetLineText(i).Trim(true).Trim(false);
@@ -910,6 +921,18 @@ void RowHeading::OnLayerPopup(wxCommandEvent& event)
         std::list<std::string> plugins;
         if (vampMedia != nullptr) {
             plugins = vampMedia->GetVamp()->GetAvailablePlugins(vampMedia);
+
+            // A2/A4/A9: the built-in detectors produce timing tracks
+            // directly from audio analysis. Listed after the FPP
+            // options (which end the default list) but before VAMP
+            // plugins so the dialog reads as: built-in → xLights
+            // detectors → VAMP analyzers.
+            if (xml_file->GetMedia() != nullptr) {
+                dialog.Choice_New_Fixed_Timing->Append("Audio Onsets");
+                dialog.Choice_New_Fixed_Timing->Append("Audio Tempo");
+                dialog.Choice_New_Fixed_Timing->Append("Audio Chords");
+            }
+
             if (plugins.size() == 0) {
                 dialog.Choice_New_Fixed_Timing->Append("Download Queen Mary Vamp plugins for audio analysis");
             } else {
@@ -918,7 +941,7 @@ void RowHeading::OnLayerPopup(wxCommandEvent& event)
                 }
             }
         }
-        
+
         dialog.Fit();
         OptimiseDialogPosition(&dialog);
         
@@ -928,6 +951,20 @@ void RowHeading::OnLayerPopup(wxCommandEvent& event)
             
             if (selected_timing == "Download Queen Mary Vamp plugins for audio analysis") {
                 DownloadVamp();
+            } else if (selected_timing == "Audio Onsets" ||
+                       selected_timing == "Audio Tempo" ||
+                       selected_timing == "Audio Chords") {
+                // Dispatch to the corresponding built-in detector via
+                // the existing menu handlers — reuse the same code
+                // path so behavior stays consistent.
+                long detectorId =
+                    selected_timing == "Audio Onsets" ? ID_ROW_MNU_GENERATE_FROM_ONSETS :
+                    selected_timing == "Audio Tempo" ? ID_ROW_MNU_GENERATE_FROM_TEMPO :
+                    ID_ROW_MNU_GENERATE_FROM_CHORDS;
+                dialog.Destroy();
+                wxCommandEvent evt(wxEVT_MENU, detectorId);
+                OnLayerPopup(evt);
+                return;
             } else {
                 if (std::find(plugins.begin(), plugins.end(), selected_timing) != plugins.end()) {
                     name = vamp.ProcessPlugin(xml_file, xLightsApp::GetFrame(), selected_timing, vampMedia);
@@ -1219,6 +1256,174 @@ void RowHeading::OnLayerPopup(wxCommandEvent& event)
                     }
                 }
             }
+        }
+
+        wxCommandEvent eventRowHeaderChanged(EVT_ROW_HEADINGS_CHANGED);
+        wxPostEvent(GetParent(), eventRowHeaderChanged);
+    } else if (id == ID_ROW_MNU_GENERATE_FROM_ONSETS) {
+        // A2: derive a variable timing track from percussive onsets in
+        // the current audio. Marks get a 20 ms nominal width so the
+        // existing overlap check doesn't reject adjacent onsets.
+        SequenceFile* xml_file = xLightsApp::GetFrame()->CurrentSeqXmlFile;
+        if (xml_file == nullptr || xml_file->GetMedia() == nullptr) {
+            DisplayError("No audio media loaded — cannot detect onsets.");
+            return;
+        }
+        AudioManager* media = xml_file->GetMedia();
+        wxSetCursor(wxCURSOR_WAIT);
+        std::vector<long> onsets = DetectOnsets(media);
+        wxSetCursor(wxCURSOR_ARROW);
+        if (onsets.empty()) {
+            DisplayError("No onsets detected in the current audio.");
+            return;
+        }
+
+        std::string trackName = "Onsets";
+        int suffix = 2;
+        while (xml_file->TimingAlreadyExists(trackName, xLightsApp::GetFrame())) {
+            trackName = wxString::Format("Onsets_%d", suffix++).ToStdString();
+        }
+        xml_file->AddNewTimingSection(trackName, xLightsApp::GetFrame());
+        Element* newElement = mSequenceElements->GetElement(trackName);
+        if (newElement == nullptr) {
+            DisplayError("Failed to create timing track '" + trackName + "'");
+            return;
+        }
+        EffectLayer* layer = newElement->GetEffectLayer(0);
+        if (layer == nullptr) {
+            DisplayError("Failed to get effect layer for '" + trackName + "'");
+            return;
+        }
+        long lengthMS = media->LengthMS();
+        // Each mark spans from one onset to the next (last one runs
+        // to track end) — matches the back-to-back idiom that fixed
+        // timing tracks like "100ms" use, and lets effects snap to
+        // the full region between beats.
+        for (size_t i = 0; i < onsets.size(); i++) {
+            long start = onsets[i];
+            long end = (i + 1 < onsets.size()) ? onsets[i + 1] : lengthMS;
+            if (end <= start) continue;
+            layer->AddEffect(0, "", "", "", start, end, EFFECT_NOT_SELECTED, false);
+        }
+
+        wxCommandEvent eventRowHeaderChanged(EVT_ROW_HEADINGS_CHANGED);
+        wxPostEvent(GetParent(), eventRowHeaderChanged);
+    } else if (id == ID_ROW_MNU_GENERATE_FROM_CHORDS) {
+        // A9: detect chord progression + key, offer to create a
+        // variable timing track whose mark labels are chord names.
+        SequenceFile* xml_file = xLightsApp::GetFrame()->CurrentSeqXmlFile;
+        if (xml_file == nullptr || xml_file->GetMedia() == nullptr) {
+            DisplayError("No audio media loaded — cannot detect chords.");
+            return;
+        }
+        AudioManager* media = xml_file->GetMedia();
+        wxSetCursor(wxCURSOR_WAIT);
+        HarmonyAnalysis harmony = DetectChords(media);
+        wxSetCursor(wxCURSOR_ARROW);
+        if (harmony.chords.empty()) {
+            DisplayError("Could not detect chords in the current audio.");
+            return;
+        }
+
+        wxString preview;
+        int previewCount = std::min<int>(12, int(harmony.chords.size()));
+        for (int i = 0; i < previewCount; i++) {
+            if (i > 0) preview += " → ";
+            preview += harmony.chords[i].name;
+        }
+        wxString prompt = wxString::Format(
+            "Detected key: %s\nSegments: %d\n\nOpening progression:\n%s\n\n"
+            "Create a timing track with chord-labelled marks?",
+            harmony.key.empty() ? "(unknown)" : harmony.key,
+            int(harmony.chords.size()), preview);
+        if (wxMessageBox(prompt, "Detected Chords", wxYES_NO | wxICON_INFORMATION) != wxYES) {
+            return;
+        }
+
+        std::string trackName = harmony.key.empty()
+            ? std::string("Chords")
+            : std::string("Chords in ") + harmony.key;
+        int suffix = 2;
+        std::string tryName = trackName;
+        while (xml_file->TimingAlreadyExists(tryName, xLightsApp::GetFrame())) {
+            tryName = wxString::Format("%s_%d", trackName, suffix++).ToStdString();
+        }
+        trackName = tryName;
+
+        xml_file->AddNewTimingSection(trackName, xLightsApp::GetFrame());
+        Element* newElement = mSequenceElements->GetElement(trackName);
+        if (newElement == nullptr) {
+            DisplayError("Failed to create timing track '" + trackName + "'");
+            return;
+        }
+        EffectLayer* layer = newElement->GetEffectLayer(0);
+        if (layer == nullptr) {
+            DisplayError("Failed to get effect layer for '" + trackName + "'");
+            return;
+        }
+        long lengthMS = media->LengthMS();
+        long prevEnd = 0;
+        for (const auto& seg : harmony.chords) {
+            long s = std::max(long(seg.startMS), prevEnd);
+            long e = std::min(long(seg.endMS), lengthMS);
+            if (e <= s) continue;
+            layer->AddEffect(0, seg.name, "", "", s, e, EFFECT_NOT_SELECTED, false);
+            prevEnd = e;
+        }
+
+        wxCommandEvent eventRowHeaderChanged(EVT_ROW_HEADINGS_CHANGED);
+        wxPostEvent(GetParent(), eventRowHeaderChanged);
+    } else if (id == ID_ROW_MNU_GENERATE_FROM_TEMPO) {
+        // A4: detect BPM, confirm, then add a fixed timing track with
+        // one mark per beat.
+        SequenceFile* xml_file = xLightsApp::GetFrame()->CurrentSeqXmlFile;
+        if (xml_file == nullptr || xml_file->GetMedia() == nullptr) {
+            DisplayError("No audio media loaded — cannot detect tempo.");
+            return;
+        }
+        AudioManager* media = xml_file->GetMedia();
+        wxSetCursor(wxCURSOR_WAIT);
+        TempoResult tempo = DetectTempo(media);
+        wxSetCursor(wxCURSOR_ARROW);
+        if (tempo.beatMS.empty() || tempo.bpm <= 0) {
+            DisplayError("Could not detect a tempo in the current audio.");
+            return;
+        }
+
+        wxString prompt = wxString::Format(
+            "Detected tempo: %.1f BPM\nConfidence: %.0f%%\nBeats: %d\n\nCreate a timing track with one mark per beat?",
+            tempo.bpm, tempo.confidence * 100.0f, int(tempo.beatMS.size()));
+        if (wxMessageBox(prompt, "Detected Tempo", wxYES_NO | wxICON_INFORMATION) != wxYES) {
+            return;
+        }
+
+        std::string trackName = wxString::Format("Tempo (%d BPM)", int(std::round(tempo.bpm))).ToStdString();
+        int suffix = 2;
+        while (xml_file->TimingAlreadyExists(trackName, xLightsApp::GetFrame())) {
+            trackName = wxString::Format("Tempo (%d BPM)_%d", int(std::round(tempo.bpm)), suffix++).ToStdString();
+        }
+        xml_file->AddNewTimingSection(trackName, xLightsApp::GetFrame());
+        Element* newElement = mSequenceElements->GetElement(trackName);
+        if (newElement == nullptr) {
+            DisplayError("Failed to create timing track '" + trackName + "'");
+            return;
+        }
+        EffectLayer* layer = newElement->GetEffectLayer(0);
+        if (layer == nullptr) {
+            DisplayError("Failed to get effect layer for '" + trackName + "'");
+            return;
+        }
+        long lengthMS = media->LengthMS();
+        // Back-to-back marks: each beat region runs to the next beat
+        // (last one to track end) so effects can snap to the full
+        // bar segment, not just a 20 ms tick at the downbeat.
+        for (size_t i = 0; i < tempo.beatMS.size(); i++) {
+            long start = tempo.beatMS[i];
+            long end = (i + 1 < tempo.beatMS.size())
+                ? tempo.beatMS[i + 1]
+                : lengthMS;
+            if (end <= start) continue;
+            layer->AddEffect(0, "", "", "", start, end, EFFECT_NOT_SELECTED, false);
         }
 
         wxCommandEvent eventRowHeaderChanged(EVT_ROW_HEADINGS_CHANGED);

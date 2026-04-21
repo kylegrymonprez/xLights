@@ -99,6 +99,16 @@ struct SequencerGridV2View: View {
     @State private var loopMenuPresented: Bool = false
     /// B41 waveform filter-picker trigger.
     @State private var waveformMenuPresented: Bool = false
+    /// A9.1 custom-band picker sheet trigger.
+    @State private var customBandSheetPresented: Bool = false
+    /// A7 sound-class picker sheet trigger.
+    @State private var classifyPickerPresented: Bool = false
+    /// A4 tempo-preview sheet trigger + stashed result.
+    @State private var tempoPreviewPresented: Bool = false
+    @State private var tempoPreview: (bpm: Float, confidence: Float, beats: [Int])? = nil
+    /// A9 chord-preview sheet trigger + stashed result.
+    @State private var chordPreviewPresented: Bool = false
+    @State private var chordPreview: (key: String, chords: [(Int, Int, String)])? = nil
 
     /// B74 import-xtiming file-picker trigger.
     @State private var showingXTimingImporter: Bool = false
@@ -174,7 +184,16 @@ struct SequencerGridV2View: View {
                                 viewModel.setLoopRegion(startMS: start, endMS: end)
                             },
                             onLoopMenu: { _ in loopMenuPresented = true },
-                            onWaveformMenu: { waveformMenuPresented = true }
+                            onWaveformMenu: { waveformMenuPresented = true },
+                            showOnsets: viewModel.showOnsets,
+                            onsetMS: viewModel.showOnsets ? viewModel.onsetTimesMS : [],
+                            showPitchContour: viewModel.showPitchContour,
+                            pitchContour: viewModel.showPitchContour ? viewModel.pitchContour : [],
+                            showSpectrogram: viewModel.showSpectrogram,
+                            spectrogramFetcher: { s, e, w, h in
+                                viewModel.spectrogramBGRA(fromMS: s, toMS: e,
+                                                           width: w, height: h)
+                            }
                         )
                         .frame(height: metrics.topChromeHeight)
                     }
@@ -570,7 +589,15 @@ struct SequencerGridV2View: View {
         ) {
             ForEach(SequencerViewModel.WaveformFilter.allCases, id: \.rawValue) { filter in
                 Button {
-                    viewModel.waveformFilter = filter
+                    if filter == .custom {
+                        // Opening the custom-band sheet implicitly
+                        // activates the filter so the user can see
+                        // live preview as they drag the sliders.
+                        viewModel.waveformFilter = .custom
+                        customBandSheetPresented = true
+                    } else {
+                        viewModel.waveformFilter = filter
+                    }
                 } label: {
                     if viewModel.waveformFilter == filter {
                         Label(filter.displayName, systemImage: "checkmark")
@@ -579,7 +606,131 @@ struct SequencerGridV2View: View {
                     }
                 }
             }
+            // A2 onset overlay — independent of the filter radio
+            // group so it stacks on top of any chosen filter band.
+            Button {
+                viewModel.toggleShowOnsets()
+            } label: {
+                if viewModel.showOnsets {
+                    Label("Hide Onsets", systemImage: "checkmark")
+                } else {
+                    Text("Show Onsets")
+                }
+            }
+            // A5 pitch contour overlay. Same "overlay on top of any
+            // filter choice" idiom as onsets.
+            Button {
+                viewModel.toggleShowPitchContour()
+            } label: {
+                if viewModel.showPitchContour {
+                    Label("Hide Pitch Contour", systemImage: "checkmark")
+                } else {
+                    Text("Show Pitch Contour")
+                }
+            }
+            // A6 spectrogram view — replaces the peak polygons with
+            // an STFT magnitude image. Not an overlay: mutually
+            // exclusive with the waveform view, though other overlays
+            // (onsets, pitch) still render on top.
+            Button {
+                viewModel.toggleShowSpectrogram()
+            } label: {
+                if viewModel.showSpectrogram {
+                    Label("Switch to Waveform", systemImage: "checkmark")
+                } else {
+                    Text("View as Spectrogram")
+                }
+            }
+            // A7 sound classification — stacks on top of the filter
+            // pick too. First tap kicks off classification (or re-
+            // presents the picker if already done); tapping again
+            // with a class selected clears it.
+            if viewModel.selectedSoundClass == nil {
+                Button {
+                    classifyPickerPresented = true
+                } label: {
+                    Text("Classify Audio…")
+                }
+            } else {
+                Button {
+                    viewModel.selectedSoundClass = nil
+                } label: {
+                    Label("Clear \(viewModel.selectedSoundClass ?? "")",
+                           systemImage: "checkmark")
+                }
+                Button {
+                    classifyPickerPresented = true
+                } label: {
+                    Text("Change Class…")
+                }
+            }
             Button("Cancel", role: .cancel) {}
+        }
+        // A9 chord-detection preview sheet.
+        .sheet(isPresented: $chordPreviewPresented) {
+            if let cp = chordPreview {
+                ChordPreviewSheet(
+                    key: cp.key,
+                    chords: cp.chords,
+                    onCommit: {
+                        _ = viewModel.generateChordTimingTrack()
+                        chordPreviewPresented = false
+                        chordPreview = nil
+                    },
+                    onCancel: {
+                        chordPreviewPresented = false
+                        chordPreview = nil
+                    })
+            } else {
+                Text("No chords detected.")
+                    .padding()
+            }
+        }
+        // A4 tempo-detection preview sheet.
+        .sheet(isPresented: $tempoPreviewPresented) {
+            if let tp = tempoPreview {
+                TempoPreviewSheet(
+                    bpm: tp.bpm,
+                    confidence: tp.confidence,
+                    beatCount: tp.beats.count,
+                    onCommit: {
+                        _ = viewModel.generateTempoTimingTrack()
+                        tempoPreviewPresented = false
+                        tempoPreview = nil
+                    },
+                    onCancel: {
+                        tempoPreviewPresented = false
+                        tempoPreview = nil
+                    })
+            } else {
+                Text("No tempo detected.")
+                    .padding()
+            }
+        }
+        // A7 class picker sheet.
+        .sheet(isPresented: $classifyPickerPresented) {
+            SoundClassifyPickerSheet(
+                classes: viewModel.soundClasses,
+                isBusy: viewModel.isClassifyingSound,
+                onClassify: {
+                    viewModel.classifySound()
+                },
+                onPick: { name in
+                    viewModel.selectedSoundClass = name
+                    classifyPickerPresented = false
+                },
+                onCancel: { classifyPickerPresented = false })
+        }
+        // A9.1 custom parametric band editor.
+        .sheet(isPresented: $customBandSheetPresented) {
+            CustomBandSheet(
+                lowNote: Binding(
+                    get: { viewModel.customBandLowNote },
+                    set: { viewModel.customBandLowNote = $0 }),
+                highNote: Binding(
+                    get: { viewModel.customBandHighNote },
+                    set: { viewModel.customBandHighNote = $0 }),
+                onDone: { customBandSheetPresented = false })
         }
         // B32 loop-region context menu (long-press inside the loop
         // band). Actions: toggle Play Loop (B33), Render Loop Region
@@ -765,6 +916,37 @@ struct SequencerGridV2View: View {
                         Label("Import Timing Track…",
                                systemImage: "square.and.arrow.down")
                     }
+                    // A2: derive a timing track from the audio's
+                    // percussive onsets. Disabled when there's no
+                    // loaded audio.
+                    Button {
+                        _ = viewModel.generateTimingTrackFromOnsets()
+                    } label: {
+                        Label("Generate Timing Track from Onsets",
+                               systemImage: "waveform.badge.plus")
+                    }
+                    .disabled(!viewModel.hasAudio || viewModel.isComputingOnsets)
+                    // A4: detect tempo and drop a beat-aligned fixed
+                    // timing track. Confirmation in a preview sheet
+                    // lets the user back out if the BPM is wrong.
+                    Button {
+                        tempoPreview = viewModel.detectTempo()
+                        tempoPreviewPresented = tempoPreview != nil
+                    } label: {
+                        Label("Detect Tempo…",
+                               systemImage: "metronome")
+                    }
+                    .disabled(!viewModel.hasAudio)
+                    // A9: detect chord progression; preview sheet
+                    // shows key + chord count before committing.
+                    Button {
+                        chordPreview = viewModel.detectChords()
+                        chordPreviewPresented = chordPreview != nil
+                    } label: {
+                        Label("Detect Chords…",
+                               systemImage: "pianokeys")
+                    }
+                    .disabled(!viewModel.hasAudio)
                     // B37: re-fit the whole sequence into the viewport.
                     Divider()
                     Button {
@@ -1394,6 +1576,316 @@ private struct ImportLyricsSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Import") { onCommit(startText, endText) }
                         .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - A9.1 Custom Band sheet
+
+/// Parametric waveform band editor. Sliders are MIDI note numbers
+/// (0–127) to match `AudioManager::SwitchTo(CUSTOM, lowNote,
+/// highNote)`. Shows the resolved Hz range so users who think in
+/// frequencies can sanity-check. Presets pick common percussion /
+/// vocal ranges.
+struct CustomBandSheet: View {
+    @Binding var lowNote: Int
+    @Binding var highNote: Int
+    let onDone: () -> Void
+
+    private func midiToHz(_ n: Int) -> Double {
+        440.0 * pow(2.0, (Double(n) - 69.0) / 12.0)
+    }
+    private func hzLabel(_ n: Int) -> String {
+        let hz = midiToHz(n)
+        if hz >= 1000 { return String(format: "%.1f kHz", hz / 1000.0) }
+        return String(format: "%.0f Hz", hz)
+    }
+
+    /// Name, lowNote, highNote. Note numbers are MIDI (C4 = 60).
+    private static let presets: [(String, Int, Int)] = [
+        ("Kick",   24, 40),   // ~32 Hz – ~105 Hz
+        ("Bass",   36, 55),   // ~65 Hz – ~247 Hz
+        ("Snare",  50, 74),   // ~147 Hz – ~587 Hz
+        ("Vocal",  48, 84),   // ~131 Hz – ~1047 Hz
+        ("Lead",   60, 96),   // ~262 Hz – ~2093 Hz
+        ("Hat",    90, 120),  // ~1.5 kHz – ~8.4 kHz
+    ]
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Range") {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("Low").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(lowNote)  (\(hzLabel(lowNote)))")
+                                .font(.caption.monospacedDigit())
+                        }
+                        Slider(value: Binding(
+                            get: { Double(lowNote) },
+                            set: { v in
+                                lowNote = min(Int(v), highNote - 1)
+                            }), in: 0...126, step: 1)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Text("High").font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                            Text("\(highNote)  (\(hzLabel(highNote)))")
+                                .font(.caption.monospacedDigit())
+                        }
+                        Slider(value: Binding(
+                            get: { Double(highNote) },
+                            set: { v in
+                                highNote = max(Int(v), lowNote + 1)
+                            }), in: 1...127, step: 1)
+                    }
+                }
+                Section("Presets") {
+                    ForEach(Self.presets, id: \.0) { preset in
+                        Button {
+                            lowNote = preset.1
+                            highNote = preset.2
+                        } label: {
+                            HStack {
+                                Text(preset.0)
+                                Spacer()
+                                Text("\(hzLabel(preset.1)) – \(hzLabel(preset.2))")
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Custom Band")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { onDone() }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - A9 Chord preview sheet
+
+/// Shows detected key + a sample of the chord progression so the
+/// user can sanity-check before a timing track is created.
+struct ChordPreviewSheet: View {
+    let key: String
+    let chords: [(Int, Int, String)]
+    let onCommit: () -> Void
+    let onCancel: () -> Void
+
+    private var uniqueChordCount: Int {
+        Set(chords.map { $0.2 }).count
+    }
+
+    /// First dozen segments in progression order — enough to see
+    /// the flavour (verse → chorus) without dumping the whole song.
+    private var previewRow: String {
+        chords.prefix(12).map { $0.2 }.joined(separator: " → ")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack {
+                        Text("Key")
+                        Spacer()
+                        Text(key.isEmpty ? "—" : key)
+                            .font(.title3.bold())
+                    }
+                    HStack {
+                        Text("Segments")
+                        Spacer()
+                        Text("\(chords.count)")
+                            .font(.callout.monospacedDigit())
+                    }
+                    HStack {
+                        Text("Unique chords")
+                        Spacer()
+                        Text("\(uniqueChordCount)")
+                            .font(.callout.monospacedDigit())
+                    }
+                }
+                if !previewRow.isEmpty {
+                    Section("Opening progression") {
+                        Text(previewRow)
+                            .font(.callout.monospaced())
+                            .lineLimit(2)
+                    }
+                }
+                Section {
+                    Text("Chord detection is a rough guide. Works best on tonal music with clean harmonic content — jazz voicings, ambiguous modal passages, and dense mixes will produce false positives. Treat it as a starting point for manual review.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Detected Chords")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create Timing Track") { onCommit() }
+                        .disabled(chords.isEmpty)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - A4 Tempo preview sheet
+
+/// Shows the detected BPM + confidence + beat count and gives the
+/// user a last chance to bail before a timing track is added.
+struct TempoPreviewSheet: View {
+    let bpm: Float
+    let confidence: Float
+    let beatCount: Int
+    let onCommit: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack {
+                        Text("BPM")
+                        Spacer()
+                        Text(String(format: "%.1f", bpm))
+                            .font(.title2.monospacedDigit().bold())
+                    }
+                    HStack {
+                        Text("Confidence")
+                        Spacer()
+                        Text(String(format: "%.0f%%", confidence * 100))
+                            .font(.callout.monospacedDigit())
+                            .foregroundStyle(confidence > 0.4 ? .primary : .secondary)
+                    }
+                    HStack {
+                        Text("Beats")
+                        Spacer()
+                        Text("\(beatCount)")
+                            .font(.callout.monospacedDigit())
+                    }
+                } footer: {
+                    if confidence < 0.3 {
+                        Text("Low confidence — the audio may be too loose / free-form for a fixed BPM, or mostly ambient. Consider A2 onset detection instead.")
+                            .font(.caption)
+                    }
+                }
+            }
+            .navigationTitle("Detected Tempo")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create Timing Track") { onCommit() }
+                        .disabled(beatCount == 0)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - A7 Sound Classify picker sheet
+
+/// Surface the top detected sound classes with average-confidence
+/// readouts. If classification hasn't been run yet, show a "Classify"
+/// button that triggers it (blocking — the view model manages its own
+/// busy state). Picking a class invokes `onPick` and dismisses.
+struct SoundClassifyPickerSheet: View {
+    let classes: [String: [Float]]
+    let isBusy: Bool
+    let onClassify: () -> Void
+    let onPick: (String) -> Void
+    let onCancel: () -> Void
+
+    /// Friendlier label than the raw identifier (`"music.drums"` →
+    /// `"Music / Drums"`). Dots and underscores become separators;
+    /// leading component is title-cased.
+    private func prettyName(_ id: String) -> String {
+        let parts = id.replacingOccurrences(of: "_", with: " ")
+            .split(separator: ".", omittingEmptySubsequences: true)
+            .map { $0.capitalized }
+        return parts.joined(separator: " / ")
+    }
+
+    private var sorted: [(String, Float, [Float])] {
+        classes.map { (key, conf) -> (String, Float, [Float]) in
+            let avg = conf.isEmpty ? 0 : conf.reduce(0, +) / Float(conf.count)
+            return (key, avg, conf)
+        }
+        .sorted { $0.1 > $1.1 }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if isBusy {
+                    VStack(spacing: 12) {
+                        ProgressView()
+                        Text("Classifying audio…")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if classes.isEmpty {
+                    VStack(spacing: 12) {
+                        Text("Apple's built-in classifier identifies percussion, vocals, instruments, and ambient sounds in your audio. The waveform is then scaled to show only moments where the chosen class is present.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
+                        Button {
+                            onClassify()
+                        } label: {
+                            Label("Classify", systemImage: "waveform.and.magnifyingglass")
+                                .padding(.horizontal, 20).padding(.vertical, 8)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Form {
+                        Section("Detected classes") {
+                            ForEach(sorted, id: \.0) { triple in
+                                Button {
+                                    onPick(triple.0)
+                                } label: {
+                                    HStack {
+                                        Text(prettyName(triple.0))
+                                        Spacer()
+                                        Text(String(format: "%.0f%%", triple.1 * 100))
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Classify Audio")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+                if !classes.isEmpty && !isBusy {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Reclassify") { onClassify() }
+                    }
                 }
             }
         }
