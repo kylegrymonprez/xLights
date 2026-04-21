@@ -310,6 +310,10 @@ struct SequencerGridV2View: View {
             }
             TimeDisplayLabel()
                 .font(.system(.caption, design: .monospaced))
+            SelectionReadout()
+                .font(.system(.caption2, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
             Spacer()
         }
         .padding(6)
@@ -537,6 +541,38 @@ struct SequencerGridV2View: View {
 }
 
 // MARK: - Subviews whose bodies read high-churn view-model state
+
+/// B31: compact readout for the currently-selected effect. Shows
+/// name, time range, duration, and row name when one effect is
+/// selected; shows "N effects selected" when multi-selected; blank
+/// when idle. Isolated as a subview so its re-renders on selection
+/// change stay scoped to this small label.
+private struct SelectionReadout: View {
+    @Environment(SequencerViewModel.self) var viewModel
+    var body: some View {
+        if let sel = viewModel.selectedEffect {
+            let dur = sel.endTimeMS - sel.startTimeMS
+            let rowName = (sel.rowIndex >= 0 && sel.rowIndex < viewModel.rows.count)
+                ? viewModel.rows[sel.rowIndex].displayName
+                : ""
+            Text("\(sel.name) · \(Self.ms(sel.startTimeMS))–\(Self.ms(sel.endTimeMS)) · \(Self.dur(dur)) · \(rowName)")
+        } else if viewModel.selectedEffects.count > 1 {
+            Text("\(viewModel.selectedEffects.count) effects selected")
+        } else {
+            // Reserve the line so layout doesn't shift on select/deselect.
+            Text(" ").hidden()
+        }
+    }
+    private static func ms(_ m: Int) -> String {
+        return String(format: "%d:%02d.%03d",
+                      m / 60000, (m / 1000) % 60, m % 1000)
+    }
+    private static func dur(_ m: Int) -> String {
+        let s = Double(m) / 1000.0
+        return s >= 10 ? String(format: "%.1fs", s)
+                        : String(format: "%.2fs", s)
+    }
+}
 
 /// Isolated time-display subview so the main grid body doesn't re-evaluate
 /// every playback tick. SwiftUI's @Observable tracks reads per-body, so

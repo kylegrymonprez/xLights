@@ -149,11 +149,17 @@ the *range* and *snap* ops.
   time. Desktop's modified-arrow semantics (Shift stretches,
   Ctrl fine-nudges by 1 ms, Alt by 1 frame) aren't implemented.
   **P1.**
-- **Gap B5 — Snap-to-timing on resize / move.** The grid renders
-  guide lines from the active timing track but dragging doesn't
-  snap to them. Desktop snaps when within ~4 px.
-  Tap-to-create already snaps to the active timing cell; this is
-  the same primitive applied to the drag / resize path. **P1.**
+- **Gap B5 — Snap-to-timing on resize / move.** **[landed
+  2026-04-20].** `snapMS(_:c:snapPx:)` helper in
+  `EffectsMetalGridView` looks up the nearest entry in
+  `c.timingMarkTimesMS` (the same sorted active-mark list that
+  drives the vertical guide lines) within 10 px. Applied in
+  `updateEffectDrag` to move (snaps whichever of start/end is
+  nearer, preserves duration), resize-left (snaps start), and
+  resize-right (snaps end). Fade-handle drags skip snapping.
+  Snap is bypassed when the drop position is already invalid
+  (overlap collision) so snapping doesn't push the effect
+  further into an unresolvable state.
 - **Gap B6 — Nudge by timing mark.** Desktop Ctrl+PageUp /
   Ctrl+PageDown moves selection forward / back one timing mark.
   **P2.**
@@ -208,12 +214,14 @@ All depend on B1.
 
 ### 1.4 Create / drop
 
-- **Gap B16 — Drag from palette with live preview.** Desktop
-  drags the effect icon onto the grid with a ghost rectangle
-  showing where it'll land. iPad arms a palette effect by tap
-  and places it on the next empty-row tap. No preview ghost, no
-  cancel-mid-drag. **P0** — this is the first-impression
-  authoring interaction.
+- **Gap B16 — Drag from palette with live preview.**
+  **Deferred 2026-04-20 pending user feedback.** The current
+  tap-to-arm + tap-to-place model is working well in practice
+  and may actually suit touch better than desktop's drag-and-
+  drop — one arm-tap enables multiple placements without
+  returning to the palette between each. Revisit if real
+  users report discoverability issues or ask for drop
+  cancellation mid-gesture.
 - **Gap B17 — Random effect.** Desktop has a "random effect"
   button in the `EffectIconPanel` that places a random type at
   the cursor. iPad palette is explicit-choose only. **P2.**
@@ -299,10 +307,14 @@ What desktop renders that iPad doesn't:
   pointer (trackpad / Magic Keyboard) hover states via
   `.hoverEffect`. No hover rendering on the grid — no resize
   cursor, no edge-highlight before the drag begins. **P1.**
-- **Gap B31 — Status bar.** Desktop updates the status bar with
-  effect name / start / end / duration / row on selection. iPad's
-  drag-pill shows this only *while* dragging. When selected-
-  idle, no numeric readout anywhere. **P1.**
+- **Gap B31 — Status bar.** **[landed 2026-04-20].** New
+  `SelectionReadout` subview in the top-left corner (under the
+  time display) shows the currently-selected effect's
+  `name · start–end · duration · row` while idle; shows
+  `N effects selected` for multi-select; blank otherwise.
+  Isolated as its own view so selection-change invalidations
+  stay scoped to the small label instead of re-rendering the
+  grid.
 
 ---
 
@@ -522,11 +534,21 @@ These are how lyric videos get built. All **P0** for that workflow.
 - **Gap B87 — Remove Words / Phonemes / Words-and-Phonemes.**
   Bulk clear of sub-layer labels.
 - **Gap B88 — Phoneme / word / phrase sub-layer rendering.**
-  iPad renders a single-row timing track; desktop shows a
-  stack of phrase-row / word-row / phoneme-row under it. This
-  is a *rendering* gap in addition to the editing gaps —
-  existing phoneme / word data in the XML is not visible on
-  iPad. **P0.**
+  **[landed 2026-04-20 — rendering only; editing still in B67-B72].**
+  The row builder (`reloadRows()`) already produces one row per
+  expanded timing element layer via `visibleRowCount` →
+  `GetRowInformationSize()`, so multi-layer Papagayo elements
+  were coming across as separate rows; the iPad just rendered
+  them with plain white labels. `TimingEffectsMetalGridView`
+  now picks a per-layer label background:
+  `Phrases`/layer-0-of-multi → `(153,255,153)`,
+  `Words`/layer-1 → `(255,218,145)`,
+  `Phonemes`/layer-2 → `(255,181,218)`
+  (desktop's `COLOR_PHRASES` / `COLOR_WORDS` / `COLOR_PHONEMES`
+  from `ColorManager.h`). Each colored label gets a
+  `(103,103,103)` outline and renders its text black for
+  legibility on the pale fill. Plain (single-layer) timing
+  tracks keep the existing white-on-stripe label style.
 - **Gap B89 — Auto Label Timings.** Populate labels from the
   loaded lyric text. Follows from B78. **P1.**
 - **Gap B90 — Add / Remove "-shimmer" suffix.** Desktop
@@ -572,13 +594,13 @@ Most behaviour here works. The gaps:
   `ScrollView`; the Metal-backed grid needs a custom
   overlay. **P1.**
 - **Gap B95 — Horizontal scroll via scroll-wheel / trackpad
-  two-finger.** The pan recognizer on `EffectsMetalGridView.swift`
-  is a plain `UIPanGestureRecognizer` with no
-  `allowedScrollTypesMask` set (defaults to `.continuous`, which
-  excludes scroll-wheel / discrete trackpad events). Fix is a
-  one-liner: set `allowedScrollTypesMask = .all` on the pan
-  recognizers in the grid, timing, and top-chrome canvases.
-  **P1 — trivial.**
+  two-finger.** **[landed 2026-04-20].** Set
+  `allowedScrollTypesMask = .all` on the single-finger pan
+  recognizers in `EffectsMetalGridView`,
+  `TimingEffectsMetalGridView`, and `TopChromeMetalGridView`.
+  Trackpad two-finger scroll and external scroll-wheel events
+  now drive `hScrollOffsetPx` / `vScrollOffsetPx` the same as
+  finger drags.
 - **Gap B96 — Scroll momentum.** iPad scroll stops when
   finger lifts. Small UX gap vs SwiftUI's stock ScrollView.
   **P2.**
@@ -629,7 +651,7 @@ Severity key:
 | B2 | Select all in row / column (timing deferred) | Selection | ✓ landed |
 | B3 | Tab / Shift+Tab effect navigation | Selection | P2 |
 | B4 | Shift / Ctrl arrow stretch / nudge | Editing | P1 |
-| B5 | Snap-to-timing on resize + move | Editing | P1 |
+| B5 | Snap-to-timing on resize + move | Editing | ✓ landed |
 | B6 | Nudge by timing mark | Editing | P2 |
 | B7 | Edge-unlink indicator + command | Editing | P2 |
 | B8 | Align Start / End / Both / Centers / Match | Editing | ✓ landed |
@@ -640,7 +662,7 @@ Severity key:
 | B13 | Extend effect to next / previous | Editing | P2 |
 | B14 | Paste by cell | Editing | P1 |
 | B15 | Randomize / Reset / Lock / Disable on selection | Editing | P1 |
-| B16 | Drag-from-palette with preview ghost | Create | P0 |
+| B16 | Drag-from-palette with preview ghost | Create | Deferred |
 | B17 | Random-effect palette button | Create | P2 |
 | B18 | Double-click create in range | Create | P2 |
 | B19 | Effect presets menu entry | Ctx menu | P1 |
@@ -655,7 +677,7 @@ Severity key:
 | B28 | Reference / previous-selection indicator | Visual | P2 |
 | B29 | Text fade / size stepping | Visual | P2 |
 | B30 | Pointer hover states | Visual | P1 |
-| B31 | Status bar for selected effect | Visual | P1 |
+| B31 | Status bar for selected effect | Visual | ✓ landed |
 | B32 | Loop region (shift-click + drag) | Timeline | P0 |
 | B33 | Play-loop mode | Timeline | P1 |
 | B34 | Tags (0-9 numbered markers) | Timeline | P1 |
@@ -710,14 +732,14 @@ Severity key:
 | B85 | Breakdown Word / Words | Timing | P0 |
 | B86 | Breakdown Phoneme | Timing | P0 |
 | B87 | Remove Words / Phonemes | Timing | P1 |
-| B88 | Phoneme / word / phrase sub-layer **rendering** | Timing | P0 |
+| B88 | Phoneme / word / phrase sub-layer **rendering** | Timing | ✓ landed |
 | B89 | Auto Label Timings (from lyrics) | Timing | P1 |
 | B90 | Add / Remove "-shimmer" suffix | Timing | P2 |
 | B91 | Divide Timings (Halve) | Timing | P2 |
 | B92 | Double-tap timing mark → loop-play region | Timing | P2 |
 | B93 | Follow-playhead during playback | Scroll | ✓ landed |
 | B94 | Visible scrollbars | Scroll | P1 |
-| B95 | Trackpad two-finger / wheel scroll | Scroll | P1 |
+| B95 | Trackpad two-finger / wheel scroll | Scroll | ✓ landed |
 | B96 | Scroll momentum | Scroll | P2 |
 | B97 | Find / Replace | Find | P2 |
 | B98 | Multi-effect clipboard with relative timing | Clipboard | P1 |

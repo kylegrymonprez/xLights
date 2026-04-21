@@ -133,13 +133,71 @@ final class TimingEffectsMetalMTKView: MTKView, MTKViewDelegate {
         }
         bridge.flushFilledRectBatch()
 
-        // Brackets + labels.
-        bridge.beginLineBatch()
-        var labels: [(x: CGFloat, y: CGFloat, text: String)] = []
-        y = -c.scrollOffsetY
+        // B88: detect which timing elements expose multiple layers
+        // (Papagayo-style phrase/word/phoneme). The first-layer row
+        // of such an element uses the "Phrases" label color; plain
+        // single-layer timing tracks keep the default white label.
+        var elementIsMultiLayer: [String: Bool] = [:]
         for row in c.rows {
+            if let t = row.timing, !t.elementName.isEmpty {
+                if let cur = elementIsMultiLayer[t.elementName] {
+                    if !cur { elementIsMultiLayer[t.elementName] = true }
+                } else {
+                    // Seed with "single-layer" on the first sighting;
+                    // bump to true the moment any subsequent layer of
+                    // this element shows up.
+                    elementIsMultiLayer[t.elementName] = false
+                }
+            }
+        }
+        // Second pass: flip to true for any element that has >1 row.
+        var elementLayerRows: [String: Int] = [:]
+        for row in c.rows {
+            if let n = row.timing?.elementName, !n.isEmpty {
+                elementLayerRows[n, default: 0] += 1
+            }
+        }
+        for (n, count) in elementLayerRows where count > 1 {
+            elementIsMultiLayer[n] = true
+        }
+
+        // Brackets.
+        bridge.beginLineBatch()
+        struct Label {
+            let x: CGFloat
+            let y: CGFloat
+            let text: String
+            /// nil → draw as white-text no-background (plain timing
+            /// tracks). Non-nil → Papagayo layer color used as
+            /// label background; text renders black.
+            let bg: (CGFloat, CGFloat, CGFloat)?
+        }
+        var labels: [Label] = []
+        y = -c.scrollOffsetY
+        for (rIdx, row) in c.rows.enumerated() {
+            _ = rIdx
             if y + c.rowHeight < 0 { y += c.rowHeight; continue }
             if y > viewport.height { break }
+            // Pick label background per the effect's row type.
+            // Matches desktop EffectsGrid.cpp:7032-7039:
+            //   layer 0 + multi-layer element → COLOR_PHRASES
+            //   layer 1 → COLOR_WORDS
+            //   layer 2 → COLOR_PHONEMES
+            //   else → plain white label
+            let bg: (CGFloat, CGFloat, CGFloat)?
+            if let t = row.timing {
+                if t.layerName == "Phrases" || (row.layerIndex == 0 && (elementIsMultiLayer[t.elementName] ?? false)) {
+                    bg = (153.0/255, 255.0/255, 153.0/255) // COLOR_PHRASES
+                } else if t.layerName == "Words" || row.layerIndex == 1 {
+                    bg = (255.0/255, 218.0/255, 145.0/255) // COLOR_WORDS
+                } else if t.layerName == "Phonemes" || row.layerIndex == 2 {
+                    bg = (255.0/255, 181.0/255, 218.0/255) // COLOR_PHONEMES
+                } else {
+                    bg = nil
+                }
+            } else {
+                bg = nil
+            }
             for effect in row.effects {
                 let x1 = CGFloat(effect.startTimeMS) * c.pixelsPerMS - c.scrollOffsetX
                 let x2 = CGFloat(effect.endTimeMS) * c.pixelsPerMS - c.scrollOffsetX
@@ -152,18 +210,68 @@ final class TimingEffectsMetalMTKView: MTKView, MTKViewDelegate {
                                      r: 1, g: 1, b: 1, a: 0.75)
                 if !effect.name.isEmpty {
                     let cx = (x1 + x2) / 2
-                    labels.append((cx, y + (c.rowHeight - 11) / 2, effect.name))
+                    labels.append(Label(x: cx,
+                                         y: y + (c.rowHeight - 11) / 2,
+                                         text: effect.name,
+                                         bg: bg))
                 }
             }
             y += c.rowHeight
         }
         bridge.flushLineBatch()
 
+        // Label background rects first (so text renders on top).
+        let anyBg = labels.contains { $0.bg != nil }
+        if anyBg {
+            bridge.beginFilledRectBatch()
+            for l in labels {
+                guard let b = l.bg else { continue }
+                let s = bridge.size(ofText: l.text, fontSize: 9)
+                if s.width <= 0 { continue }
+                let pad: CGFloat = 3
+                bridge.appendFilledRectX(l.x - s.width / 2 - pad,
+                                          y: l.y - 2,
+                                          w: s.width + pad * 2,
+                                          h: s.height + 4,
+                                          r: b.0, g: b.1, b: b.2, a: 1.0)
+            }
+            bridge.flushFilledRectBatch()
+            // Thin outline around each colored label — matches
+            // desktop's COLOR_LABEL_OUTLINE at (103,103,103).
+            bridge.beginLineBatch()
+            for l in labels {
+                guard l.bg != nil else { continue }
+                let s = bridge.size(ofText: l.text, fontSize: 9)
+                if s.width <= 0 { continue }
+                let pad: CGFloat = 3
+                let x1 = l.x - s.width / 2 - pad
+                let x2 = x1 + s.width + pad * 2
+                let y1 = l.y - 2
+                let y2 = y1 + s.height + 4
+                let or_: CGFloat = 103.0/255
+                bridge.appendLineX1(x1, y1: y1, x2: x2, y2: y1,
+                                     r: or_, g: or_, b: or_, a: 1.0)
+                bridge.appendLineX1(x2, y1: y1, x2: x2, y2: y2,
+                                     r: or_, g: or_, b: or_, a: 1.0)
+                bridge.appendLineX1(x2, y1: y2, x2: x1, y2: y2,
+                                     r: or_, g: or_, b: or_, a: 1.0)
+                bridge.appendLineX1(x1, y1: y2, x2: x1, y2: y1,
+                                     r: or_, g: or_, b: or_, a: 1.0)
+            }
+            bridge.flushLineBatch()
+        }
+
         for l in labels {
             let s = bridge.size(ofText: l.text, fontSize: 9)
             if s.width <= 0 { continue }
-            bridge.drawText(l.text, atX: l.x - s.width / 2, y: l.y,
-                             fontSize: 9, r: 1, g: 1, b: 1, a: 0.75)
+            if l.bg != nil {
+                // Dark text on the pale Papagayo background.
+                bridge.drawText(l.text, atX: l.x - s.width / 2, y: l.y,
+                                 fontSize: 9, r: 0, g: 0, b: 0, a: 1.0)
+            } else {
+                bridge.drawText(l.text, atX: l.x - s.width / 2, y: l.y,
+                                 fontSize: 9, r: 1, g: 1, b: 1, a: 0.75)
+            }
         }
     }
 
@@ -171,6 +279,7 @@ final class TimingEffectsMetalMTKView: MTKView, MTKViewDelegate {
         let tap = UITapGestureRecognizer(target: self, action: #selector(onTap(_:)))
         addGestureRecognizer(tap)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(onPan(_:)))
+        pan.allowedScrollTypesMask = .all   // B95: trackpad + scroll-wheel scroll
         addGestureRecognizer(pan)
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(onPinch(_:)))
         addGestureRecognizer(pinch)

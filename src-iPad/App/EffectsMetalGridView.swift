@@ -700,9 +700,13 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
         let pan = UIPanGestureRecognizer(target: self, action: #selector(onPan(_:)))
         pan.delegate = del
         // Single-finger pan: scroll or effect-drag. Clamping prevents
-        // it from also grabbing the two-finger marquee pan.
+        // it from also grabbing the two-finger marquee pan. `allowed-
+        // ScrollTypesMask = .all` (B95) lets a trackpad two-finger
+        // scroll or scroll-wheel fire this recognizer even though
+        // Apple models those as discrete (non-continuous) pan events.
         pan.minimumNumberOfTouches = 1
         pan.maximumNumberOfTouches = 1
+        pan.allowedScrollTypesMask = .all
         addGestureRecognizer(pan)
         ownPan = pan
         // B1: two-finger drag → marquee multi-select (matches iPad
@@ -1014,6 +1018,23 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
         publishDrag(c: c)
     }
 
+    /// B5 snap-to-timing: return the active timing-mark time nearest
+    /// to `ms` if it's within `snapPx` pixels; else nil. `timingMark-
+    /// TimesMS` is already sorted and only contains active marks
+    /// (filtering happens up in `collectActiveTimingMarkTimes`).
+    private func snapMS(_ ms: Int, c: EffectsMetalGridView.Coordinator,
+                         snapPx: CGFloat = 10) -> Int? {
+        guard c.pixelsPerMS > 0, !c.timingMarkTimesMS.isEmpty else { return nil }
+        let thresh = Int(snapPx / c.pixelsPerMS)
+        var best: Int?
+        var bestD = thresh + 1
+        for m in c.timingMarkTimesMS {
+            let d = abs(m - ms)
+            if d < bestD { bestD = d; best = m }
+        }
+        return best
+    }
+
     private func updateEffectDrag(g: UIPanGestureRecognizer,
                                     c: EffectsMetalGridView.Coordinator) {
         guard let d = c.drag else { return }
@@ -1066,18 +1087,52 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
             let maxStart = maxEnd == Int.max ? Int.max : maxEnd - duration
             if maxStart < minStart { invalid = true }
             c.liveDropInvalid = invalid
-            let cs = invalid ? unclampedStart
+            var cs = invalid ? unclampedStart
                               : max(minStart, min(maxStart, unclampedStart))
+            var ce = cs + duration
+            // B5: snap whichever edge is nearer to a mark; preserves
+            // duration so the effect slides, not stretches. Skip when
+            // the drop is already invalid (snapping into an overlap
+            // would be worse than leaving the user-held position).
+            if !invalid,
+               let snapStart = snapMS(cs, c: c),
+               let snapEnd = snapMS(ce, c: c) {
+                let dStart = abs(snapStart - cs)
+                let dEnd = abs(snapEnd - ce)
+                if dStart <= dEnd {
+                    cs = max(minStart, min(maxStart, snapStart))
+                    ce = cs + duration
+                } else {
+                    let shifted = snapEnd - duration
+                    cs = max(minStart, min(maxStart, shifted))
+                    ce = cs + duration
+                }
+            } else if !invalid, let snapStart = snapMS(cs, c: c) {
+                cs = max(minStart, min(maxStart, snapStart))
+                ce = cs + duration
+            } else if !invalid, let snapEnd = snapMS(ce, c: c) {
+                let shifted = snapEnd - duration
+                cs = max(minStart, min(maxStart, shifted))
+                ce = cs + duration
+            }
             c.liveStartMS = cs
-            c.liveEndMS = cs + duration
+            c.liveEndMS = ce
         case .resizeLeft:
             let ns = max(d.minStartMS, d.origStartMS + dMS)
-            c.liveStartMS = min(ns, d.origEndMS - 1)
+            var liveStart = min(ns, d.origEndMS - 1)
+            if let snap = snapMS(liveStart, c: c) {
+                liveStart = max(d.minStartMS, min(d.origEndMS - 1, snap))
+            }
+            c.liveStartMS = liveStart
             c.liveEndMS = d.origEndMS
         case .resizeRight:
             let raw = d.origEndMS + dMS
             let capped = min(d.maxEndMS, raw)
-            c.liveEndMS = max(capped, d.origStartMS + 1)
+            var liveEnd = max(capped, d.origStartMS + 1)
+            if let snap = snapMS(liveEnd, c: c) {
+                liveEnd = min(d.maxEndMS, max(d.origStartMS + 1, snap))
+            }
+            c.liveEndMS = liveEnd
             c.liveStartMS = d.origStartMS
         case .fadeIn, .fadeOut:
             let durMS = max(1, d.origEndMS - d.origStartMS)

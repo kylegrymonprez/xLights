@@ -229,6 +229,7 @@ final class TopChromeMetalMTKView: MTKView, MTKViewDelegate {
         let tap = UITapGestureRecognizer(target: self, action: #selector(onTap(_:)))
         addGestureRecognizer(tap)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(onPan(_:)))
+        pan.allowedScrollTypesMask = .all   // B95: trackpad + scroll-wheel scroll
         addGestureRecognizer(pan)
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(onPinch(_:)))
         addGestureRecognizer(pinch)
