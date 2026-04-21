@@ -4524,20 +4524,8 @@ std::string xLightsFrame::PackageDebugFiles(bool showDialog)
 
 static void AddLogFile(const wxString& CurrentDir, const wxString& fileName, wxDebugReport& report)
 {
-#ifdef __WXMSW__
-    wxString dir;
-    wxGetEnv("APPDATA", &dir);
-    wxString filename = dir + "/xLights/" + fileName;
-#endif
-#ifdef __WXOSX__
-    wxFileName home;
-    home.AssignHomeDir();
-    wxString dir = home.GetFullPath();
-    wxString filename = dir + "/Library/Logs/" + fileName;
-#endif
-#ifdef __LINUX__
-    wxString filename = "/tmp/" + fileName;
-#endif
+    wxString const filename = GetLogFilePath().string();
+
     if (FileExists(filename)) {
         report.AddFile(filename, fileName);
     } else if (FileExists(wxFileName(CurrentDir, fileName).GetFullPath())) {
@@ -4989,31 +4977,12 @@ void xLightsFrame::OnmExportModelsMenuItemSelected(wxCommandEvent& event)
 
 void xLightsFrame::OnMenuItem_ViewLogSelected(wxCommandEvent& event)
 {
+    wxString filePath = GetLogFilePath().string();
+    wxString fileName = GetLogFileName();
 
-    wxString fileName = "xLights_spdlog.log";
-#ifdef __WXMSW__
-    wxString dir;
-    wxGetEnv("APPDATA", &dir);
-    if (dir.EndsWith("/") || dir.EndsWith("\\")) {
-        dir = dir.Left(dir.Length() - 1);
-    }
-    wxString filename = dir + "/" + fileName;
-#endif
-#ifdef __WXOSX__
-    wxFileName home;
-    home.AssignHomeDir();
-    wxString dir = home.GetFullPath();
-    if (dir.EndsWith("/")) {
-        dir = dir.Left(dir.Length() - 1);
-    }
-    wxString filename = dir + "/Library/Logs/" + fileName;
-#endif
-#ifdef __LINUX__
-    wxString filename = "/tmp/" + fileName;
-#endif
     wxString fn = "";
-    if (FileExists(filename)) {
-        fn = filename;
+    if (FileExists(filePath)) {
+        fn = filePath;
     } else if (FileExists(wxFileName(CurrentDir, fileName).GetFullPath())) {
         fn = wxFileName(CurrentDir, fileName).GetFullPath();
     } else if (FileExists(wxFileName(wxGetCwd(), fileName).GetFullPath())) {

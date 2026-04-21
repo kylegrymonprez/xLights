@@ -153,21 +153,8 @@ void InitialiseLogging(bool fromMain)
         SpecialOptions::StashExeDir(
             wxFileName(wxStandardPaths::Get().GetExecutablePath()).GetPath().ToStdString());
 
-        std::string const logFileName = "xLights_spdlog.log";
-#ifdef __WXMSW__
-        wxString dir;
-        wxGetEnv("APPDATA", &dir);
-        std::string const logFilePath = std::string(dir.c_str()) + "\\xLights\\" + logFileName;
-#endif
-#ifdef __WXOSX__
-        wxFileName home;
-        home.AssignHomeDir();
-        wxString const dir = home.GetFullPath();
-        std::string const logFilePath = std::string(dir.c_str()) + "/Library/Logs/" + logFileName;
-#endif
-#ifdef __LINUX__
-        std::string const logFilePath = "/tmp/" + logFileName;
-#endif
+        std::string const logFilePath = GetLogFilePath().string();
+
 
         // wxStandardPaths::Get().Get()
 
