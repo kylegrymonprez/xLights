@@ -630,4 +630,40 @@
                       desiredSize:(int)desiredSize
                         outputSize:(int*)outputSize;
 
+// MARK: - Moving Head fixture plumbing (G3 — C7)
+//
+// The Moving Head effect stores its actual renderable parameters
+// as packed command strings in `E_TEXTCTRL_MH1_Settings` …
+// `E_TEXTCTRL_MH8_Settings` (semicolon-separated `Key: value`
+// pairs, with '@' as an escaped ';' inside VC blobs). A fixture
+// is "active" iff its settings string is non-empty — desktop
+// derives checkbox state the same way at open time
+// (`MovingHeadPanel.cpp:1974-1985`).
+
+/// Mask of which fixture slots (1..8) are active for the selected
+/// Moving Head effect. Each bit: `1 << (fixture - 1)`. 0 when no
+/// effect is selected, not a Moving Head effect, or no fixtures
+/// are active.
+- (int)movingHeadActiveFixturesForRow:(int)rowIndex
+                               atIndex:(int)effectIndex;
+
+/// Toggle a fixture slot active / inactive. Writes a seed
+/// command string with the current slider values (Pan / Tilt /
+/// offsets / groupings / cycles) when activating; clears
+/// `E_TEXTCTRL_MH<fixture>_Settings` when deactivating. Also
+/// rewrites every active fixture's `Heads:` list so it reflects
+/// the new selection. Returns YES on change.
+- (BOOL)setMovingHeadFixture:(int)fixture
+                        active:(BOOL)active
+                        forRow:(int)rowIndex
+                       atIndex:(int)effectIndex;
+
+/// Rewrite every active fixture's Pan / Tilt / offsets / groupings
+/// / cycles commands from the current slider values, preserving
+/// colour / path / dimmer / shutter settings untouched. Called
+/// automatically by the view model whenever a slider the renderer
+/// actually reads changes. Returns the count of fixtures updated.
+- (int)syncMovingHeadPositionForRow:(int)rowIndex
+                              atIndex:(int)effectIndex;
+
 @end

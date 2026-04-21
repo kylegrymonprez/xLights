@@ -8,7 +8,7 @@ questions) and links here for the details.
 | File | Phase | Status |
 |---|---|---|
 | [phase-b-grid-parity.md](phase-b-grid-parity.md) | B — Effects grid parity with desktop | In progress — ~100 items pending; multi-select in flight on a separate thread |
-| [phase-c-inspector.md](phase-c-inspector.md) | C — Effect settings inspector | In progress — C4 (multi-effect) shipped; Sketch (G4) + Morph (G5) editors shipped 2026-04-21; G3 / G8 still open |
+| [phase-c-inspector.md](phase-c-inspector.md) | C — Effect settings inspector | In progress — C4 (multi-effect), Sketch (G4), Morph (G5), Moving Head fixture/position (G3) shipped 2026-04-21; G8 + Moving Head colour/path follow-up still open |
 | [phase-d-preview.md](phase-d-preview.md) | D — Model Preview + preview polish | ✓ complete |
 | [phase-e-sequence-management.md](phase-e-sequence-management.md) | E — Sequence management (open / save / new / settings) | Partial — save / dirty / close-with-prompt, missing-media detection, and per-row replace-from-disk relocation landed; New wizard, Sequence Settings dialog, recent documents, autosave outstanding |
 | [phase-f-window-system.md](phase-f-window-system.md) | F — Window system + Display Elements | Not started |

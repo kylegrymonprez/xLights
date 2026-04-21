@@ -203,6 +203,10 @@ struct EffectPropertyView: View {
             SketchDefRowView()
         case "Sketch_PathEditor":
             SketchPathEditorRowView()
+        case "MHFixtures":
+            MovingHeadFixtureRowView()
+        case "MHIpadInfo":
+            MovingHeadInfoRowView()
         case "Sketch_BackgroundRow":
             SketchBackgroundRowView()
         case "Video_DurationRow":

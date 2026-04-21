@@ -14,8 +14,9 @@ below is what's still missing.
 
 ## TL;DR
 
-1. **Specialised editors** (C7) — Moving Head (G3), DMX dialog
-   ports (G8). Each is its own session. Sketch (G4) and Morph (G5)
+1. **Specialised editors** (C7) — DMX dialog ports (G8) + Moving
+   Head colour / dimmer / path follow-up are the last open items.
+   Sketch (G4), Morph (G5), Moving Head fixture + position (G3)
    shipped 2026-04-21.
 2. **Polish items** — drag / drop in inspector, shader uniform
    grouping.
@@ -48,9 +49,16 @@ shortcuts). A handful of smaller pieces live in `future-*.md`.
 
 ### Specialised editors (desktop-authored data iPad can render but not edit)
 
-- **G3 — Moving Head fixture editor.** Desktop's one non-JSON
-  panel: hand-built in wxSmith for DMX fixture mapping, pan / tilt
-  / colour wheels, position curves. ~30+ controls. P1.
+- **G3 — Moving Head fixture editor.** ✓ partial — fixture
+  selection row + position-slider → `MH*_Settings` auto-sync
+  shipped 2026-04-21. Eight fixture toggle buttons, banner
+  explaining desktop-only scope for colour / dimmer / path. Pan /
+  Tilt / PanOffset / TiltOffset / Groupings / Cycles edits (with
+  VCs) re-fan into every active fixture via
+  `syncMovingHeadPosition` bridge method. `MH*_Settings`,
+  `MHPathDef` hidden on iPad via `"platform": "desktop"` gate.
+  Colour wheel, dimmer canvas, and path authoring still require
+  desktop — deferred to a future polish pass.
 - **G4 — Sketch path editor.** ✓ shipped 2026-04-21.
   `SketchPathEditorRowView` with per-endpoint + Bezier-control
   drag, Add-Line tap mode, New Path, Undo Point, Clear. Advanced
@@ -113,7 +121,7 @@ Small polish follow-ups still open:
 
 | # | Gap | Area | Severity |
 |---|---|---|---|
-| G3  | Moving Head fixture editor | Effect | P1 |
+| G3+ | Moving Head colour / dimmer / path authoring | Effect | P2 (follow-up) |
 | G8  | DMX Remap / Save State / Load State dialogs | Effect | P1 |
 | G40 | Drag / drop in inspector | Cross-cutting | P2 |
 | G1  | Tab tear-out / multi-window | Scaffolding | P2 (Phase F) |
@@ -125,12 +133,14 @@ Small polish follow-ups still open:
 ## 7. Suggested phasing
 
 **C7 — Specialised editors** *(bigger chunks — one per session)*
-- G3: Moving Head. (open)
+- G3: ✓ Moving Head fixture / position (2026-04-21). Colour /
+  dimmer / path authoring deferred.
 - G4: ✓ Sketch path editor (2026-04-21).
 - G5: ✓ Morph line editor (2026-04-21).
 - G8: DMX dialog ports. (open — blocked on model-state bridge)
 
-Remaining editors (G3, G8) are independent.
+Remaining C7 work: G8 (DMX dialogs) and the Moving Head
+colour/dimmer/path follow-up.
 
 ---
 

@@ -35,6 +35,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -2662,6 +2664,317 @@ const char* canonicalSubdirForType(MediaType t) {
 
     if (outputSize) *outputSize = dstW;
     return outData;
+}
+
+// MARK: - Moving Head fixture plumbing (G3 — C7)
+
+namespace {
+
+/// Name of the Moving Head effect as stored in the effect registry.
+static constexpr const char* kMovingHeadEffectName = "Moving Head";
+
+/// Keys the Moving Head renderer actually consumes live inside the
+/// per-fixture command strings. These are rebuilt by
+/// `syncMovingHeadPositionForRow:` from the iPad sliders. Other
+/// command keys (Color, Wheel, Dimmer, Path, AutoShutter,
+/// IgnorePan, IgnoreTilt) are preserved untouched so desktop-
+/// authored colour / path / dimmer settings round-trip intact.
+static constexpr std::array<const char*, 6> kMovingHeadPositionCmds = {
+    "Pan", "Tilt", "PanOffset", "TiltOffset", "Groupings", "Cycles"
+};
+
+/// Slider key per position command. The renderer reads either the
+/// raw scalar or a `<cmd> VC: <curve>` trailing entry; we mirror
+/// both when an active value curve is present.
+static NSString* mhSettingsKeyForFixture(int fixture) {
+    return [NSString stringWithFormat:@"E_TEXTCTRL_MH%d_Settings",
+            fixture];
+}
+
+/// Parse a packed MH command string into an ordered list of
+/// (cmd, value) pairs. Preserves the desktop grammar: commands
+/// separated by ';', each one is `<cmd>: <value>` with '@' used
+/// as an escaped ';' inside the value (desktop's
+/// `UpdateMHSettings` escapes the VC blob the same way).
+using MHCommandList = std::vector<std::pair<std::string, std::string>>;
+static MHCommandList parseMovingHeadSettings(const std::string& s) {
+    MHCommandList out;
+    if (s.empty()) return out;
+    size_t i = 0;
+    while (i < s.size()) {
+        size_t semi = s.find(';', i);
+        std::string part = s.substr(i, (semi == std::string::npos
+                                          ? s.size() - i : semi - i));
+        if (!part.empty()) {
+            size_t colon = part.find(':');
+            if (colon != std::string::npos) {
+                std::string cmd = part.substr(0, colon);
+                std::string val = part.substr(colon + 1);
+                // Strip the leading space desktop always adds
+                // after the colon.
+                if (!val.empty() && val.front() == ' ') val.erase(val.begin());
+                out.emplace_back(std::move(cmd), std::move(val));
+            }
+        }
+        if (semi == std::string::npos) break;
+        i = semi + 1;
+    }
+    return out;
+}
+
+static std::string serialiseMovingHeadSettings(const MHCommandList& cmds) {
+    std::string out;
+    for (size_t i = 0; i < cmds.size(); ++i) {
+        if (i > 0) out += ';';
+        out += cmds[i].first;
+        out += ": ";
+        out += cmds[i].second;
+    }
+    return out;
+}
+
+/// Resolve the `(Element*, EffectLayer*, Effect*)` trio for a row
+/// / effect index into the live sequence. Returns nullptr triple
+/// on any out-of-range hit.
+struct EffectLookup {
+    Element* element = nullptr;
+    EffectLayer* layer = nullptr;
+    Effect* effect = nullptr;
+    bool ok() const { return effect != nullptr; }
+};
+static EffectLookup lookupEffect(iPadRenderContext& ctx,
+                                  int rowIndex, int effectIndex) {
+    EffectLookup out;
+    auto& se = ctx.GetSequenceElements();
+    auto* rowInfo = se.GetRowInformation(rowIndex);
+    if (!rowInfo || !rowInfo->element) return out;
+    int layerIndex = rowInfo->layerIndex;
+    if (layerIndex < 0
+        || layerIndex >= rowInfo->element->GetEffectLayerCount()) {
+        return out;
+    }
+    auto* layer = rowInfo->element->GetEffectLayer(layerIndex);
+    if (!layer) return out;
+    if (effectIndex < 0
+        || effectIndex >= layer->GetEffectCount()) {
+        return out;
+    }
+    auto* eff = layer->GetEffect(effectIndex);
+    if (!eff) return out;
+    out.element = rowInfo->element;
+    out.layer = layer;
+    out.effect = eff;
+    return out;
+}
+
+/// Read the current slider value for a position command. Falls
+/// back to the SLIDER key when the TEXTCTRL sibling isn't set
+/// (desktop writes both; iPad's float sliders write TEXTCTRL).
+static std::string readMHSliderValue(Effect& eff, const std::string& cmd) {
+    auto& settings = eff.GetSettings();
+    std::string k1 = "E_TEXTCTRL_MH" + cmd;
+    if (settings.Contains(k1)) return settings.Get(k1, "");
+    std::string k2 = "E_SLIDER_MH" + cmd;
+    if (settings.Contains(k2)) return settings.Get(k2, "");
+    return "";
+}
+
+static std::string readMHValueCurve(Effect& eff, const std::string& cmd) {
+    auto& settings = eff.GetSettings();
+    std::string key = "E_VALUECURVE_MH" + cmd;
+    if (!settings.Contains(key)) return "";
+    std::string v = settings.Get(key, "");
+    // Desktop includes a VC entry only when it's active.
+    if (v.find("Active=TRUE") == std::string::npos) return "";
+    return v;
+}
+
+/// Default scalar the renderer should see when the slider has no
+/// stored value. Matches `MovingHead.json` defaults.
+static const char* defaultMHScalar(const std::string& cmd) {
+    if (cmd == "Pan")          return "0";
+    if (cmd == "Tilt")         return "0";
+    if (cmd == "PanOffset")    return "0";
+    if (cmd == "TiltOffset")   return "0";
+    if (cmd == "Groupings")    return "1";
+    if (cmd == "Cycles")       return "0.1";
+    return "0";
+}
+
+/// True iff the command is one of the six position commands (the
+/// slider-backed ones we rewrite from the panel). Used to strip
+/// stale position entries before re-appending fresh values, while
+/// leaving colour / dimmer / path entries in place.
+static bool isMHPositionCommand(const std::string& cmd) {
+    if (cmd == "Pan" || cmd == "Tilt"
+        || cmd == "PanOffset" || cmd == "TiltOffset"
+        || cmd == "Groupings" || cmd == "Cycles"
+        || cmd == "Pan VC" || cmd == "Tilt VC"
+        || cmd == "PanOffset VC" || cmd == "TiltOffset VC"
+        || cmd == "Groupings VC" || cmd == "PathScale VC"
+        || cmd == "TimeOffset VC") {
+        return true;
+    }
+    return false;
+}
+
+/// Escape a VC blob for embedding inside the command string:
+/// desktop uses '@' in place of ';' so the outer parser's
+/// split-on-';' still works. See `MovingHeadPanel::AddSetting`.
+static std::string escapeForCommand(const std::string& v) {
+    std::string out = v;
+    std::replace(out.begin(), out.end(), ';', '@');
+    return out;
+}
+
+/// Comma-separated list of currently-active fixture numbers. Used
+/// as the `Heads:` entry which the renderer consumes for
+/// fan-offset distribution (`MovingHeadEffect.cpp:179-181`).
+static std::string mhHeadsList(Effect& eff) {
+    std::string out;
+    auto& settings = eff.GetSettings();
+    for (int i = 1; i <= 8; ++i) {
+        std::string key = std::string("E_TEXTCTRL_MH") + std::to_string(i) + "_Settings";
+        if (!settings.Contains(key)) continue;
+        std::string v = settings.Get(key, "");
+        if (v.empty()) continue;
+        if (!out.empty()) out += ",";
+        out += std::to_string(i);
+    }
+    return out;
+}
+
+/// Rewrite one fixture's command string: keep every non-position
+/// entry as-is, then append fresh Pan / Tilt / offsets / groupings /
+/// cycles (+ VC entries when active) + current Heads list.
+static void rewriteMovingHeadFixture(Effect& eff, int fixture) {
+    auto key = std::string("E_TEXTCTRL_MH") + std::to_string(fixture) + "_Settings";
+    auto& settings = eff.GetSettings();
+    std::string existing = settings.Contains(key) ? settings.Get(key, "") : "";
+
+    MHCommandList parsed = parseMovingHeadSettings(existing);
+    MHCommandList rebuilt;
+    rebuilt.reserve(parsed.size());
+    // 1. Preserve every non-position command verbatim.
+    for (const auto& cmd : parsed) {
+        if (!isMHPositionCommand(cmd.first) && cmd.first != "Heads") {
+            rebuilt.push_back(cmd);
+        }
+    }
+    // 2. Append fresh position commands (+ VC entries).
+    for (const auto* cmd : kMovingHeadPositionCmds) {
+        std::string cmdStr(cmd);
+        std::string val = readMHSliderValue(eff, cmdStr);
+        if (val.empty()) val = defaultMHScalar(cmdStr);
+        rebuilt.emplace_back(cmdStr, val);
+
+        std::string vc = readMHValueCurve(eff, cmdStr);
+        if (!vc.empty()) {
+            rebuilt.emplace_back(cmdStr + " VC", escapeForCommand(vc));
+        }
+    }
+    // 3. Append the heads list (who else is active).
+    std::string heads = mhHeadsList(eff);
+    if (!heads.empty()) {
+        rebuilt.emplace_back("Heads", heads);
+    }
+
+    std::string serialised = serialiseMovingHeadSettings(rebuilt);
+    if (serialised != existing) {
+        settings[key] = SettingValue(serialised);
+    }
+}
+
+} // namespace
+
+- (int)movingHeadActiveFixturesForRow:(int)rowIndex
+                               atIndex:(int)effectIndex {
+    if (!_context) return 0;
+    auto look = lookupEffect(*_context, rowIndex, effectIndex);
+    if (!look.ok()) return 0;
+    if (look.effect->GetEffectName() != kMovingHeadEffectName) return 0;
+
+    int mask = 0;
+    auto& settings = look.effect->GetSettings();
+    for (int i = 1; i <= 8; ++i) {
+        std::string key = std::string("E_TEXTCTRL_MH") + std::to_string(i) + "_Settings";
+        if (!settings.Contains(key)) continue;
+        if (!settings.Get(key, "").empty()) {
+            mask |= (1 << (i - 1));
+        }
+    }
+    return mask;
+}
+
+- (BOOL)setMovingHeadFixture:(int)fixture
+                        active:(BOOL)active
+                        forRow:(int)rowIndex
+                       atIndex:(int)effectIndex {
+    if (!_context) return NO;
+    if (fixture < 1 || fixture > 8) return NO;
+    auto look = lookupEffect(*_context, rowIndex, effectIndex);
+    if (!look.ok()) return NO;
+    if (look.effect->GetEffectName() != kMovingHeadEffectName) return NO;
+
+    auto key = std::string("E_TEXTCTRL_MH") + std::to_string(fixture) + "_Settings";
+    auto& settings = look.effect->GetSettings();
+
+    bool changed = false;
+    if (active) {
+        bool alreadyActive = settings.Contains(key)
+            && !settings.Get(key, "").empty();
+        if (!alreadyActive) {
+            // Seed with a minimal placeholder so the next
+            // `rewriteMovingHeadFixture` pass populates it with
+            // the current slider values. Can't be fully empty —
+            // an empty string reads as "inactive".
+            settings[key] = SettingValue("Pan: 0");
+            changed = true;
+        }
+    } else {
+        if (settings.Contains(key) && !settings.Get(key, "").empty()) {
+            settings[key] = SettingValue("");
+            changed = true;
+        }
+    }
+
+    if (!changed) return NO;
+
+    // The fixture mask changed, so every other active fixture's
+    // `Heads:` entry is now stale — rewrite all of them (including
+    // the one we just toggled) with fresh position + heads data.
+    for (int i = 1; i <= 8; ++i) {
+        std::string k = std::string("E_TEXTCTRL_MH") + std::to_string(i) + "_Settings";
+        if (!settings.Contains(k)) continue;
+        if (settings.Get(k, "").empty()) continue;
+        rewriteMovingHeadFixture(*look.effect, i);
+    }
+
+    look.effect->IncrementChangeCount();
+    return YES;
+}
+
+- (int)syncMovingHeadPositionForRow:(int)rowIndex
+                              atIndex:(int)effectIndex {
+    if (!_context) return 0;
+    auto look = lookupEffect(*_context, rowIndex, effectIndex);
+    if (!look.ok()) return 0;
+    if (look.effect->GetEffectName() != kMovingHeadEffectName) return 0;
+
+    int touched = 0;
+    auto& settings = look.effect->GetSettings();
+    for (int i = 1; i <= 8; ++i) {
+        std::string k = std::string("E_TEXTCTRL_MH") + std::to_string(i) + "_Settings";
+        if (!settings.Contains(k)) continue;
+        if (settings.Get(k, "").empty()) continue;
+        rewriteMovingHeadFixture(*look.effect, i);
+        touched++;
+    }
+
+    if (touched > 0) {
+        look.effect->IncrementChangeCount();
+    }
+    return touched;
 }
 
 @end

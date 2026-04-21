@@ -978,6 +978,18 @@ class SequencerViewModel {
         }
 
         if changed {
+            // Moving Head post-write sync (G3 — C7). The renderer
+            // reads position commands out of `MH*_Settings`, not
+            // the JSON-backed sliders, so whenever the user edits
+            // a position slider we re-assemble every active
+            // fixture's command string.
+            if Self.isMovingHeadPositionKey(key),
+               sel.name == "Moving Head" {
+                _ = document.syncMovingHeadPosition(
+                    forRow: Int32(sel.rowIndex),
+                    at: Int32(sel.effectIndex))
+            }
+
             renderEffectAndTrack(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex)
             // Tell the effects canvas that something on this effect
             // changed so it redraws the selected slot (fade bars,
@@ -995,6 +1007,21 @@ class SequencerViewModel {
             }
             undoManager.setActionName("Edit \(key)")
         }
+    }
+
+    /// Keys the Moving Head bridge sync needs to re-fan into
+    /// `MH*_Settings`. Covers the float-slider TEXTCTRL storage,
+    /// the int-slider SLIDER storage, and the value-curve sibling
+    /// for each of the six position commands.
+    private static func isMovingHeadPositionKey(_ key: String) -> Bool {
+        let cmds = ["Pan", "Tilt", "PanOffset", "TiltOffset",
+                    "Groupings", "Cycles", "PathScale", "TimeOffset"]
+        for cmd in cmds {
+            if key == "E_TEXTCTRL_MH\(cmd)" { return true }
+            if key == "E_SLIDER_MH\(cmd)" { return true }
+            if key == "E_VALUECURVE_MH\(cmd)" { return true }
+        }
+        return false
     }
 
     // MARK: - Multi-effect bulk edit (G11 / G14)
