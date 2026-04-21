@@ -4,655 +4,307 @@ Scope: the sequencer canvas the user spends 90 % of their time in —
 the **effects grid**, **timeline ruler**, **waveform**, **row
 headings**, and the **timing tracks** strip between them. Phase B and
 B-Metal closed out the rebuild and the Metal render pipeline; this
-sub-plan is what *wasn't* included in either and still keeps the iPad
-app well short of desktop parity.
-
-Desktop surface (lines of code, for scale):
-
-| Component | File | LOC |
-|---|---|---:|
-| Grid canvas | `src-ui-wx/sequencer/EffectsGrid.cpp` | 7606 |
-| Row headings | `src-ui-wx/sequencer/RowHeading.cpp` | 2228 |
-| Sequencer shell | `src-ui-wx/sequencer/MainSequencer.cpp` | 2276 |
-| Timeline | `src-ui-wx/sequencer/TimeLine.cpp` | 1189 |
-| Waveform | `src-ui-wx/sequencer/Waveform.cpp` | 797 |
-| **Total** | | **~14 000** |
-
-iPad surface:
-
-| Component | File | LOC |
-|---|---|---:|
-| Effects grid (Metal) | `src-iPad/App/EffectsMetalGridView.swift` | 1045 |
-| Sequencer shell | `src-iPad/App/SequencerViewModel.swift` | 1413 |
-| Grid container | `src-iPad/App/SequencerGridV2View.swift` | 553 |
-| Row headers | `src-iPad/App/RowHeaderViews.swift` | 343 |
-| Top chrome (ruler + waveform) | `src-iPad/App/TopChromeMetalGridView.swift` | 268 |
-| Timing grid | `src-iPad/App/TimingEffectsMetalGridView.swift` | 226 |
-| Sequencer view | `src-iPad/App/SequencerView.swift` | 313 |
-| Timeline state | `src-iPad/App/TimelineState.swift` | 21 |
-| **Total** | | **~4 200** |
-
-The ~10 000-line gap is not all missing features (wxWidgets is
-verbose; Metal rendering is compact) but most of it is. What follows
-is organised by surface, then severity.
+sub-plan tracks the remaining authoring gaps vs desktop.
 
 ---
 
-## TL;DR
+## Status (2026-04-20)
 
-The iPad grid renders and handles the *basics*:
+All twelve original P0s are closed. The work now shifts into a long
+tail of P1 polish + P2 nice-to-haves, a few verify-only items, and
+one P1 item that's explicitly deferred pending user testing.
 
-- Effects draw, snap to time, show icons + labels + fade bars.
-- Single-effect tap / drag / resize / fade-edit / cross-row move all work.
-- Lock / disable / delete / copy / paste / duplicate via long-press menu.
-- Pinch zoom, pan scroll, play marker, tap-to-seek, ruler, waveform.
-- Row headers for model / submodel / strand / node / timing rows with
-  expand / collapse, and insert-layer / delete-layer on long-press.
-- Arrow-key navigation, undo / redo, Cmd+Z / Cmd+Shift+Z, Cmd+C /
-  Cmd+V / Cmd+D, ,/. frame-step, Home / End, Delete.
+**Landed since the 2026-04-20 gap audit:**
 
-What's **conspicuously missing** — and where the user is going to
-notice immediately:
+- **Multi-select + align + split + playhead follow.** B1 (two-finger
+  marquee select with `selectedEffects: Set<EffectSelection>`), B2
+  (Select All in Row / Column context-menu entries), B5 (snap-to-
+  active-timing-mark on drag move/resize), B8 (align Start / End /
+  Both / Centers / Match Duration on multi-select), B12 (Split at
+  Play Marker on single effect), B31 (persistent status-bar readout
+  for the current selection), B93 (auto-scroll the grid to follow
+  the play marker during playback).
+- **Timing-mark editing.** B67 (long-press empty timing band → Add
+  Mark Here, 500 ms default clamped to neighbors), B68 (pan a mark's
+  edges or center to resize / move, snap to other marks at 10 px),
+  B69 (Delete Mark), B70 (Rename Mark alert), B71 (Split Mark at
+  Play Marker), B72 (Merge with Next), B73 (Add Timing Track from
+  the View-picker menu + timing-row header).
+- **Lyric rendering + breakdown.** B88 (colour-coded label
+  backgrounds for Phrases / Words / Phonemes sub-layers — matches
+  desktop `COLOR_PHRASES` / `_WORDS` / `_PHONEMES`), B84 (row-level
+  "Breakdown Phrases" that splits every non-empty phrase label by
+  whitespace and populates a fresh word layer).
+- **Scroll polish.** B95 (`allowedScrollTypesMask = .all` on the
+  three Metal canvases' pan recognisers so trackpad / scroll-wheel
+  events drive pan).
 
-1. **No multi-effect selection.** Single selection only. No marquee,
-   no shift-click range, no select-all-in-row / column. Every
-   bulk-edit primitive downstream of this (G11, G41 in Phase C,
-   align, paste-range, bulk transform, bulk delete) has no reach.
-2. **No timing-mark editing in the grid.** Timing rows are
-   seek-only. Can't drag, can't create, can't split, can't breakdown
-   phrases / words / phonemes, can't import / export timing, can't
-   generate subdivisions. This is the whole lyrics / music
-   workflow.
-3. **Grid context menu is 6 items.** Desktop's is ~80 across the
-   grid + row-heading menus. Whole categories — align, split,
-   extend, presets, render / export, convert — have no iPad path.
-4. **No follow-playhead.** Playback runs off-screen with no
-   auto-scroll.
-5. **No loop region, no tags.** Desktop has shift-click loop
-   selection + Render-Selected-Region; 10 numbered tags
-   (Ctrl+0-9); iPad has neither.
-6. **Waveform is one fixed render.** No bass / alto / treble /
-   non-vocals filters, no double-height mode, no audio-track
-   switch.
-7. **Row headings are thin.** No rename, no reorder, no column
-   resize, no row-height resize, no model / row cut-copy-paste,
-   no timing-track management menu (rename is the only one present).
-8. **No drag-from-palette.** Palette effects are tap-to-arm /
-   tap-to-place; no drag preview, no drop indicator.
-9. **No Find / Replace, no effect presets, no duplicate-across-models,
-   no "update all like this."**
+**Still the biggest open item by far** is the loop-region / tags /
+render-selected-region family (B32, B33, B34, B35, B44) — it's the
+one remaining cohesive desktop workflow that has no iPad path. See
+§ 5 below.
 
-None of these block playback — the renderer is shared core. All of
-them block authorship on iPad as a first-class seat.
+**Out of Phase B:** B16 (drag-from-palette with ghost) deferred
+pending user feedback — tap-to-arm + tap-to-place is working well
+in practice. B85 (word → phoneme breakdown) deferred pending a
+wx-free port of `PhonemeDictionary`. B86 removed — not a real
+desktop feature.
 
 ---
 
 ## 1. Effects grid canvas
 
-Everything here is *inside* `EffectsMetalGridView.swift` /
-`SequencerGridV2View.swift`. The rendering substrate is fine; what
-follows is missing behaviour and missing chrome.
-
 ### 1.1 Selection
 
-Desktop: single click, shift-click toggle, ctrl-click add/remove,
-marquee / rubber-band rectangle, tab-to-next-effect,
-`Select Effects in Row`, `Select Effects in Column`,
-`Select Timing Marks`, range cursor for AC fill, auto-select
-adjacent layer when clicking.
-
-iPad: single tap.
-
-- **Gap B1 — Multi-select.** **[landed 2026-04-20].** Two-finger
-  drag on the effects grid opens a marquee rectangle; on release
-  every effect whose `[startMS, endMS]` range overlaps the rect
-  AND whose row is vertically inside the rect becomes selected.
-  `EffectSelection` is now `Hashable`; `SequencerViewModel`
-  exposes `selectedEffects: Set<EffectSelection>` which always
-  mirrors `selectedEffect` (single-select tap fills it with one;
-  marquee fills it with N; clear empties it). When `N > 1` the
-  inspector + scrub are suppressed and drag handles render only
-  for `N == 1`. Bulk ops landed: `deleteSelectedEffects()`
-  (groups by row + deletes descending-effectIndex for safe
-  index-shift handling, single undo group),
-  `toggleLockSelectedEffects()`, `toggleDisableSelectedEffects()`.
-  Long-press on a member of a multi-selection surfaces a bulk
-  context menu (Delete N Effects / Lock-Unlock N / Disable-Enable
-  N / Deselect All) instead of collapsing to single. The
-  existing single-finger pan gesture was clamped to
-  `maximumNumberOfTouches = 1` so a two-finger drag can't grab
-  its slot. Copy/paste on multi-select deferred to B98
-  (multi-effect clipboard with relative timing).
-- **Gap B2 — Select all effects in row / column / timing mark.**
-  **[landed 2026-04-20, row + column].** `ModelRowHeader`'s
-  long-press menu gains "Select All Effects in Row"; the
-  single-effect long-press menu gains "Select All in Row" and
-  "Select All in Column" (column span = the long-pressed
-  effect's own `[startMS, endMS]`). Both entries call into new
-  `SequencerViewModel.selectAllEffectsInRow(rowIndex:)` /
-  `selectAllEffectsInColumn(spanStartMS:spanEndMS:)` which
-  build a Set<EffectSelection> and dispatch through
-  `setMultiSelection`. Timing-mark-based "Select Overlapping
-  Effects" deferred along with the rest of timing-mark editing
-  (B67-B72).
-- **Gap B3 — Tab-to-next-effect.** Keyboard hardware only; iPad
-  arrow-keys already move selection row-ward and column-ward,
-  but Tab / Shift+Tab isn't bound. **P2.**
+- **Gap B3 — Tab-to-next-effect.** Hardware keyboard only. Arrow
+  keys already move selection row-ward and column-ward; Tab /
+  Shift+Tab aren't bound. **P2.**
 
 ### 1.2 Editing — positional
 
-Desktop move / resize primitives all map cleanly to iPad; the gap is
-the *range* and *snap* ops.
-
 - **Gap B4 — Shift+arrow stretch, Ctrl+arrow fine nudge.** Arrow
-  keys currently move selection *cursor*, not the effect's
-  time. Desktop's modified-arrow semantics (Shift stretches,
-  Ctrl fine-nudges by 1 ms, Alt by 1 frame) aren't implemented.
-  **P1.**
-- **Gap B5 — Snap-to-timing on resize / move.** **[landed
-  2026-04-20].** `snapMS(_:c:snapPx:)` helper in
-  `EffectsMetalGridView` looks up the nearest entry in
-  `c.timingMarkTimesMS` (the same sorted active-mark list that
-  drives the vertical guide lines) within 10 px. Applied in
-  `updateEffectDrag` to move (snaps whichever of start/end is
-  nearer, preserves duration), resize-left (snaps start), and
-  resize-right (snaps end). Fade-handle drags skip snapping.
-  Snap is bypassed when the drop position is already invalid
-  (overlap collision) so snapping doesn't push the effect
-  further into an unresolvable state.
-- **Gap B6 — Nudge by timing mark.** Desktop Ctrl+PageUp /
-  Ctrl+PageDown moves selection forward / back one timing mark.
-  **P2.**
+  keys currently move selection *cursor*, not time. Desktop's
+  modified-arrow semantics (Shift stretches, Ctrl nudges by 1 ms,
+  Alt by 1 frame) aren't implemented. **P1.**
+- **Gap B6 — Nudge by timing mark.** Ctrl+PageUp / Ctrl+PageDown
+  moves selection forward / back one active mark. **P2.**
 - **Gap B7 — Edge-unlink indicator + unlink command.** Desktop
-  shows a visual tag on an effect edge that's been "unlinked"
-  from the neighbour it used to touch (so paste / align won't
-  re-butt them). Not rendered on iPad. **P2.**
+  tags an effect edge that's been "unlinked" from its neighbour
+  so paste / align won't re-butt them. **P2.**
 
 ### 1.3 Editing — range / bulk
 
-All depend on B1.
+All depend on B1 (done).
 
-- **Gap B8 — Align Start / End / Both / Centerpoints / Match
-  Duration.** **[landed 2026-04-20].** Five entries on the
-  multi-select context menu (2+ effects required); single undo
-  group per op. Anchor rule: earliest-starting selected effect
-  for start/both/match/centers, latest-ending for end (desktop
-  uses the "last-clicked primary" but iPad marquee has no
-  primary, so we pick deterministically by position).
-  `SequencerViewModel.alignSelectedEffects(_:)` snapshots target
-  moves first, then re-finds each effect by its original
-  `startMS` on each iteration so index-shifts from earlier moves
-  in the same loop don't miss-target. Same-row aligns that would
-  overlap are rejected by the bridge's validation per-effect;
-  cross-row aligns (the common case) go through cleanly.
-- **Gap B9 — Shift-Align Start / End.** Slide selection to
-  align without overlapping. **P1.**
+- **Gap B9 — Shift-Align Start / End.** Slide selection to align
+  without overlapping. **P1.**
 - **Gap B10 — Align to Closest Timing Mark.** Snap selected
   effects' start / end to the nearest mark on the active timing
   track. **P1.**
 - **Gap B11 — Close Gap.** Remove space between two selected
   effects. **P1.**
-- **Gap B12 — Split.** **[landed 2026-04-20].** Single-effect
-  context menu entry "Split at Play Marker"; only shown when
-  `playPositionMS` lies strictly inside the selected effect's
-  range (via `canSplitSelectedAtPlayMarker`).
-  `splitSelectedEffectAtPlayMarker()` captures the original
-  name/settings/palette, deletes the original, then adds two
-  halves (`[origStart, marker]` + `[marker, origEnd]`) carrying
-  the same settings+palette. All three ops run inside one
-  `UndoManager` group so ⌘Z reverses the whole split.
 - **Gap B13 — Extend effect to next / previous.** Keyboard-only
   on desktop; handy. **P2.**
 - **Gap B14 — Paste by cell.** Desktop paste respects the
   currently-selected grid cell (row + time range) and drops the
   clipboard effect into it. iPad paste targets the selected
-  effect's row at play position. Different semantics — the grid
-  has no "selected range" concept yet. **P1.**
+  effect's row at play position. **P1.**
 - **Gap B15 — Randomize selected / Reset to default / Lock-all /
-  Disable-all on selection.** All bulk-edit flavours that depend
-  on B1. **P1.**
+  Disable-all on selection.** Lock-all / Disable-all landed with
+  B1's bulk ops; Randomize + Reset-to-default still open. **P1.**
 
 ### 1.4 Create / drop
 
-- **Gap B16 — Drag from palette with live preview.**
-  **Deferred 2026-04-20 pending user feedback.** The current
-  tap-to-arm + tap-to-place model is working well in practice
-  and may actually suit touch better than desktop's drag-and-
-  drop — one arm-tap enables multiple placements without
-  returning to the palette between each. Revisit if real
-  users report discoverability issues or ask for drop
-  cancellation mid-gesture.
-- **Gap B17 — Random effect.** Desktop has a "random effect"
-  button in the `EffectIconPanel` that places a random type at
-  the cursor. iPad palette is explicit-choose only. **P2.**
-- **Gap B18 — Double-click-to-create in selected range.** Desktop
-  double-clicks create an effect spanning the selected time
-  range. iPad single-tap creates a 1 s (or active-timing-cell)
-  effect. **P2** (power-user shortcut).
+- **Gap B17 — Random effect palette button.** Palette is explicit-
+  choose only. **P2.**
+- **Gap B18 — Double-click-to-create in selected range.** Power-
+  user shortcut. **P2.**
 
-### 1.5 Context menu items
+### 1.5 Context menu entries
 
-iPad long-press menu, full list: Copy · Paste Here · Lock/Unlock ·
-Disable/Enable · Delete · Cancel. (6 items.)
-
-Desktop's equivalent (effect right-click), missing on iPad:
-
-- **Gap B19 — Effect Presets submenu** (save / load / apply
-  named effect preset bundles). Full feature is Phase C / G12
-  territory, but the grid entry-point menu item goes here. **P1.**
+- **Gap B19 — Effect Presets submenu.** Save / load / apply named
+  effect preset bundles. Full feature is Phase C / G12 territory;
+  the grid entry-point menu item lands here. **P1.**
 - **Gap B20 — Description field.** Free-text note stored on the
-  effect. Rendered as tooltip. No iPad path. **P2.**
+  effect, rendered as tooltip. **P2.**
 - **Gap B21 — Timing dialog.** Edit exact start / end ms.
-  Essential for users who know the timecode they want. Useful
-  even without B1. **P1.**
+  Essential for users who know the timecode they want. **P1.**
 - **Gap B22 — Reset effect.** Revert the effect's settings to
   type defaults. **P2.**
-- **Gap B23 — Duplicate across models.** Copy this effect onto
-  every selected model. Desktop's `Copy Settings To N Models`.
-  **P2.**
+- **Gap B23 — Duplicate across models.** Desktop's `Copy Settings
+  To N Models`. **P2.**
 - **Gap B24 — Find Possible Source Effects.** Node-level search
-  for effects that *could* have produced the data in the selected
+  for effects that could have produced the data in the selected
   effect. Rare. **P2.**
-
-Drag-up-row was verified to work but isn't in the long-press menu.
-Surface a "Move to row…" action for discoverability? Noted, not
-filed as a gap.
 
 ### 1.6 Visual polish
 
-Things the iPad grid draws correctly: effect rectangles, brackets,
-centerline, zebra rows, icons, labels (width-gated), lock glyph,
-fade bars, yellow overlap, selection brackets, diamond fade handles,
-timing guide lines, cross-row drag ghost, invalid-drop red tint,
-drag pill label.
-
-What desktop renders that iPad doesn't:
-
-- **Gap B25 — Bracket colours sourced from `ColorManager`.** The
-  iPad grid hardcodes bracket RGB (`EffectsMetalGridView.swift:292–295`
-  uses literal `(0.85,0.85,0.85)` for unselected, `(1.00,0.85,0.25)`
-  for selected, `(0.65,0.80,1.00)` for locked, `(0.45,0.45,0.45)` for
-  disabled). Desktop sources the same visual states from
-  `ColorManager::COLOR_EFFECT_DEFAULT` / `_SELECTED` / `_LOCKED` /
-  `_DISABLED` (`EffectsGrid.cpp:6877–6888`) so user-customised
-  palettes round-trip. Route iPad bracket colours through the
-  existing `ColorManager` bridge. **Note:** desktop is *not*
-  per-effect-type coloured at the bracket level — the "per-type
-  visual" comes from effect-specific `DrawEffectBackground`
-  overrides (Spirals, Fire, Color Wash, etc.), which BM-6 already
-  wired in; see B26. **P2** (down from P1 — effect backgrounds
-  already carry the per-type visual).
+- **Gap B25 — Bracket colours sourced from `ColorManager`.** iPad
+  hardcodes bracket RGB (`EffectsMetalGridView.swift:292–295`);
+  desktop sources from `ColorManager::COLOR_EFFECT_DEFAULT /
+  _SELECTED / _LOCKED / _DISABLED` so user-customised palettes
+  round-trip. Route iPad through the existing bridge. **P2.**
 - **Gap B26 — Colour-curve / gradient preview inside effect bar.**
-  **Likely already works via BM-6** — 14 effects override
-  `DrawEffectBackground` (Color Wash, On, Morph, Galaxy,
-  Shockwave, Fan, Twinkle, Pictures, Fireworks, Ripple, etc.) to
-  paint palette gradients, and BM-6 runs a dedicated background
-  pass calling `appendEffectBackgroundForRow:...` →
-  `RenderableEffect::DrawEffectBackground`
-  (`EffectsMetalGridView.swift:335–375`). **Needs device-side
-  verify** on a sequence with a Color Wash or On effect using a
-  ColorCurve palette. If the gradient renders, B26 is closed.
-  **Verify-only.**
-- **Gap B27 — Node-level colour-channel stripes.** For node-level
-  effects on multi-channel models (RGBW etc.), desktop paints
-  thin stripes for each channel. **P2.**
-- **Gap B28 — Reference effect / previous-selection indicator.**
-  Desktop shows the previously-selected effect in a lighter shade
-  so "this" vs "last" is visible. Useful during
-  compare-and-adjust cycles. **P2.**
+  **Verify only** — 14 effects override `DrawEffectBackground`
+  (Color Wash, On, Morph, Galaxy, Shockwave, Fan, Twinkle,
+  Pictures, Fireworks, Ripple, etc.) and BM-6 already runs that
+  pass. Needs a device-side check with a known ColorCurve
+  sequence to close.
+- **Gap B27 — Node-level colour-channel stripes.** Desktop paints
+  thin per-channel stripes on node-level effects for multi-channel
+  models (RGBW etc.). **P2.**
+- **Gap B28 — Reference / previous-selection indicator.** Desktop
+  dims the previously-selected effect so "this vs last" is
+  visible during compare-and-adjust cycles. **P2.**
 - **Gap B29 — Text fade / size-stepping at small widths.** iPad
   hides the label below a hard 70 px threshold; desktop
-  progressively shrinks and fades. Cosmetic. **P2.**
+  progressively shrinks + fades. **P2.**
 - **Gap B30 — Hover / pointer-over states.** iPadOS 26 supports
-  pointer (trackpad / Magic Keyboard) hover states via
-  `.hoverEffect`. No hover rendering on the grid — no resize
-  cursor, no edge-highlight before the drag begins. **P1.**
-- **Gap B31 — Status bar.** **[landed 2026-04-20].** New
-  `SelectionReadout` subview in the top-left corner (under the
-  time display) shows the currently-selected effect's
-  `name · start–end · duration · row` while idle; shows
-  `N effects selected` for multi-select; blank otherwise.
-  Isolated as its own view so selection-change invalidations
-  stay scoped to the small label instead of re-rendering the
-  grid.
+  pointer hover via `.hoverEffect`. No hover rendering on the
+  grid — no resize cursor, no edge-highlight pre-drag. **P1**
+  for Magic Keyboard users.
 
 ---
 
 ## 2. Timeline (ruler)
 
-`TopChromeMetalGridView.swift` — covers both ruler and waveform in
-one Metal strip.
+`TopChromeMetalGridView.swift` — ruler + waveform in one strip.
 
-- **Gap B32 — Loop region (shift-click start + end, drag to
-  adjust).** Desktop draws a loop highlight and
-  `Render Selected Region` runs against it. No iPad equivalent.
-  **P0.**
+- **Gap B32 — Loop region (shift-click start + end, drag).** Draws
+  a highlight; `Render Selected Region` runs against it. No iPad
+  equivalent. **P0** (the last remaining P0 bundle — see §10).
 - **Gap B33 — Play region from loop.** `Play Loop` / loop-repeat
   mode that plays between two markers indefinitely. **P1.**
 - **Gap B34 — Tags (0-9 numbered markers).** Right-click-add,
-  Ctrl+N-go-to, persisted with the sequence. Ten-tag budget
-  matches the desktop. **P1.**
+  Ctrl+N-go-to, persisted with the sequence. **P1.**
 - **Gap B35 — Tag context menu** (rename, delete, delete-all).
   Rolls in with B34. **P1.**
 - **Gap B36 — Zoom to selection.** Fits the selected range into
-  the viewport. Depends on B1 for range. **P1.**
+  the viewport. **P1.**
 - **Gap B37 — Zoom to fit (sequence).** `fitIfNeeded` runs once
   on load; no button / shortcut to re-fit. **P1.**
-- **Gap B38 — Zoom-level presets.** Desktop has 19 preset zoom
-  levels (1 ms-per-tick through 40 s-per-tick). iPad smooth
-  pinch only; no stepped zoom, no ⌘+/⌘- at-a-preset. Current
-  toolbar `+` / `−` buttons apply a ×1.5 factor, which is fine
-  as a cheap substitute but doesn't match desktop landmarks.
-  **P2.**
-- **Gap B39 — Drag-to-scrub playback.** iPad: tap-to-seek only.
-  Desktop drags the play marker for continuous scrubbing
-  (visual + optionally audio). **P1.**
+- **Gap B38 — Zoom-level presets.** Desktop has 19 preset steps.
+  iPad smooth pinch only. **P2.**
+- **Gap B39 — Drag-to-scrub playback.** Desktop drags the play
+  marker for continuous scrubbing. **P1.**
 - **Gap B40 — Audio scrub** (play a short window of audio as the
   marker is dragged). **P2.**
-
-### Ruler visual
-
-The ruler is functional. No tick-density complaints.
 
 ---
 
 ## 3. Waveform
 
-Same file (`TopChromeMetalGridView.swift`).
-
 - **Gap B41 — Filter-variant rendering** (bass / alto / treble /
-  non-vocals / custom). Desktop's right-click waveform menu.
-  Useful for timing-mark placement on vocal vs bass hits.
-  `AudioManager` already produces these; the iPad waveform reads
-  raw only. **P1.**
-- **Gap B42 — Double-height mode.** Desktop toggle to stretch
-  the waveform to 2× height for finer visual resolution.
-  Straightforward given the waveform strip is already
-  resizable in principle. **P2.**
-- **Gap B43 — Audio track switching.** Desktop supports alt
-  audio tracks (e.g. clean vocal stem vs full mix). iPad plays
-  `main` only. **P2.**
-- **Gap B44 — Render-selected-region.** Depends on B32
-  (loop region). Right-click → Render Selected; kicks the
-  renderer to re-run only the highlighted range. iPad has no
-  equivalent because no loop. **P1.**
-- **Gap B45 — Waveform click-to-seek / drag-for-range.** Tap
-  works; drag-to-set-loop-region follows from B32.
+  non-vocals / custom). `AudioManager` already produces these; the
+  iPad waveform reads raw only. **P1.**
+- **Gap B42 — Double-height mode.** **P2.**
+- **Gap B43 — Audio track switching** (alt audio tracks, e.g.
+  clean vocal stem). **P2.**
+- **Gap B44 — Render-selected-region.** Depends on B32. Kicks the
+  renderer to re-run only the highlighted range. **P1.**
+- **Gap B45 — Waveform drag-for-range.** Follows from B32. **P1.**
 
 ---
 
 ## 4. Row headings
 
-`RowHeaderViews.swift` (343 LOC). This is one of the biggest surface
-gaps relative to desktop's `RowHeading.cpp` (2228 LOC).
+`RowHeaderViews.swift`. Largest surface gap relative to desktop's
+`RowHeading.cpp` (2228 LOC) after timing-mark editing.
 
 ### 4.1 Layer management
 
-iPad long-press on a model row: Insert Layer Above · Insert Layer
-Below · Delete Layer (if >1) · Show / Hide Strands/Submodels ·
-Show / Hide Nodes.
-
-Desktop context menu on a layer:
-
-- **Gap B46 — Rename layer / Set layer name.** No iPad path.
-  Layer names exist in the XML and are displayed but aren't
-  editable from the iPad. **P1.**
+- **Gap B46 — Rename layer / Set layer name.** Layer names exist
+  in the XML and are displayed but aren't editable from iPad.
+  **P1.**
 - **Gap B47 — Insert Multiple Layers Below.** Batch create N
-  layers; trivial. **P2.**
-- **Gap B48 — Delete Unused Layers.** Scan the model's layers
-  for ones with zero effects and drop them. **P2.**
+  layers. **P2.**
+- **Gap B48 — Delete Unused Layers.** Scan for layers with zero
+  effects and drop them. **P2.**
 
 ### 4.2 Model / row operations
 
-Desktop's nested `Model →` submenu. Missing on iPad:
-
-- **Gap B49 — Export model sequence / Render-and-Export.** Save
-  this model's effects as a standalone file. Desktop has 2 ×
-  2 = 4 variants (whole model vs selected effects × with or
-  without render). **P1.**
+- **Gap B49 — Export model sequence / Render-and-Export.** 2 × 2
+  variants (whole model vs selected effects × with / without
+  render). **P1.**
 - **Gap B50 — Delete all effects / SubModel effects / Strand
-  effects / Node effects.** Bulk clear scoped to the
-  selected row type. **P1.**
-- **Gap B51 — Enable / Disable Render on model.** Row-level
-  render toggle. **P1.**
-- **Gap B52 — "Select all effects in this model" /
-  "Select all effects in row."** Multi-select + selection by
-  row. Depends on B1. **P1.**
-- **Gap B53 — Cut / Copy / Paste Row (whole layer + all
-  effects).** Move a layer's worth of effects to another
-  element. No iPad equivalent. **P1.**
-- **Gap B54 — Cut / Copy / Paste Model (all layers + all
-  effects).** Same at the model granularity. Desktop also has
-  `Copy Model incl SubModels`. **P1.**
+  effects / Node effects.** Bulk clear scoped to the selected row
+  type. **P1.**
+- **Gap B51 — Enable / Disable Render on model.** Row-level render
+  toggle. **P1.**
+- **Gap B52 — Select all effects in this model.** Covers the
+  Model-wide variant that B2 didn't cover (row + column only).
+  **P1.**
+- **Gap B53 — Cut / Copy / Paste Row** (whole layer + all
+  effects). **P1.**
+- **Gap B54 — Cut / Copy / Paste Model** (all layers + all
+  effects). Desktop also has `Copy Model incl SubModels`. **P1.**
 - **Gap B55 — Convert Effects to 'Per Model'.** Scope-change
-  operation that collapses per-strand effects to a single
-  model-level layer. **P2.**
-- **Gap B56 — Promote Node Effects / Convert To Effect.** Move
-  node-level effects up the hierarchy or convert a timing mark
-  to an effect. **P2.**
+  operation collapsing per-strand effects to a single model-level
+  layer. **P2.**
+- **Gap B56 — Promote Node Effects / Convert To Effect.** **P2.**
 
 ### 4.3 Global row operations
 
-- **Gap B57 — Show All Effects, Collapse All Models, Collapse
-  All Layers.** Bulk visibility toggles. **P1.**
+- **Gap B57 — Show All Effects, Collapse All Models, Collapse All
+  Layers.** Bulk visibility toggles. **P1.**
 - **Gap B58 — Toggle Strands / Toggle Nodes / Toggle Models.**
-  Row view-mode switch. iPad has per-row toggles only. **P2.**
-- **Gap B59 — Edit Display Elements.** Opens the dialog that
-  picks which elements are visible in the current sequence view.
-  Phase F territory (Display Elements window). **Phase F** —
-  not tracked here.
+  Global view-mode switches. **P2.**
+- **Gap B59 — Edit Display Elements.** Phase F scope.
 
 ### 4.4 Drag / resize
 
-- **Gap B60 — Drag row to reorder.** Reorder display of rows.
-  Desktop supports, iPad does not. **P2.**
+- **Gap B60 — Drag row to reorder.** **P2.**
 - **Gap B61 — Drag right edge of row-heading column to resize
   column width.** Row-heading column is fixed-width on iPad.
   **P1.**
-- **Gap B62 — Per-row height adjustment.** Desktop grid has
-  fixed 22 px row height, so this is parity — not a gap. iPad
-  does have a "selected row is 36 px" behaviour which desktop
-  doesn't. Parity-plus, not a gap.
 
 ### 4.5 Icons / visual
 
-- **Gap B63 — Papagayo / FPP / model-group icon glyphs.**
-  Desktop decorates row names with small icons when the element
-  is a Papagayo lyric track, an FPP command / effect track, etc.
-  iPad shows a folder for ModelGroup only. **P2.**
-- **Gap B64 — Layer-count "[N]" indicator.** Desktop shows
-  `Model Name [3]` when the element has 3 layers. iPad shows
-  the layer toggle button but no count. Discoverability. **P2.**
-- **Gap B65 — Tooltips on truncated row names.** iPad Row names
-  truncate silently. Hover tooltip on Magic-Keyboard pointer
-  would solve the discoverability problem with zero UI cost.
-  **P1** for Magic Keyboard users; **P2** overall.
-- **Gap B66 — Muted / hidden visual states.** Desktop has
-  distinct rendering for a muted or hidden element; iPad shows
-  collapse-only. Hidden-state rendering probably doesn't apply
-  (hidden = not rendered at all), but muted (rendered darker /
-  lower opacity) has no analog. **P2.**
+- **Gap B63 — Papagayo / FPP / model-group icon glyphs.** Desktop
+  decorates row names with small icons when the element is a
+  Papagayo lyric track, FPP command / effect track, etc. iPad
+  shows a folder for ModelGroup only. **P2.**
+- **Gap B64 — Layer-count "[N]" indicator.** Desktop shows `Model
+  Name [3]` when the element has 3 layers; iPad shows the layer
+  toggle button but no count. **P2.**
+- **Gap B65 — Tooltips on truncated row names.** Hover tooltip on
+  Magic-Keyboard pointer would solve the discoverability problem
+  with zero UI cost. **P1** for Magic Keyboard users.
+- **Gap B66 — Muted visual state.** Desktop has distinct rendering
+  for a muted element. Hidden-state probably doesn't apply
+  (hidden = not rendered at all), but muted has no iPad analog.
+  **P2.**
 
 ---
 
-## 5. Timing tracks
+## 5. Timing tracks (remaining)
 
-`TimingEffectsMetalGridView.swift` (226 LOC) — the big surface
-gap. Timing tracks are **read-only** on iPad.
+Most mark-editing + breakdown work landed. What's left:
 
-### 5.1 Mark creation and editing
+### 5.1 Track management
 
-All **P0** for a lyrics / music workflow.
-
-- **Gap B67 — Tap to create timing mark** at play-position on
-  the active track. **[landed 2026-04-20].** Long-press on
-  empty space in any timing row surfaces an "Add Mark Here"
-  menu entry; default duration 500 ms, clamped against the
-  next existing mark on that row and the sequence end (min
-  100 ms window). Routed through the new
-  `SequencerViewModel.addTimingMark(rowIndex:startMS:endMS:label:)`
-  → `XLSequenceDocument.addTimingMarkAtRow:startMS:endMS:label:`
-  bridge wrapper, which in turn calls `EffectLayer::AddEffect`
-  on the timing layer (marks are Effects with the label as
-  the effect name). Overlap with existing marks is rejected.
-  Undo-able.
-- **Gap B68 — Drag timing mark** edges to adjust start / end,
-  with snap to adjacent marks. **[landed 2026-04-20].** The
-  timing canvas's single-finger pan now hit-tests marks on
-  `.began`: within ~10 px of a start/end edge →
-  `resizeLeft` / `resizeRight`; inside the mark's range →
-  `move`; else → scroll (existing behavior). Live drag state
-  on the coordinator (`markDrag`, `liveMarkStartMS`,
-  `liveMarkEndMS`) re-paints the mark at its in-flight
-  position in yellow-tinted brackets while held. On `.ended`,
-  the move routes through
-  `SequencerViewModel.moveTimingMark(rowIndex:...)` → the
-  existing `moveEffect` bridge (marks are `Effect`s on a
-  timing layer). Snap-to-other-mark-edge at 10 px threshold
-  using every other mark's start+end across all timing rows;
-  move snaps whichever of start/end is nearer + preserves
-  duration, resizes snap only the dragged edge. Neighbor
-  overlap clamped via `minStartMS`/`maxEndMS` captured at
-  `.began`.
-- **Gap B69 — Delete timing mark** (long-press menu).
-  **[landed 2026-04-20].** Long-press on an existing mark
-  surfaces a "Delete Mark" destructive button in the same
-  timing long-press menu. Undo restores the original
-  start/end/label.
-- **Gap B70 — Rename timing mark label.** **[landed
-  2026-04-20].** "Rename Mark" entry on the existing timing
-  long-press menu (alongside Delete) opens a text-field alert;
-  commit calls
-  `SequencerViewModel.renameTimingMark(rowIndex:markIndex:label:)`
-  which wraps new bridge
-  `-setTimingMarkLabelAtRow:atIndex:label:` →
-  `Effect::SetEffectName`. Empty string clears the label.
-  Undo-able. (Desktop's in-place double-tap editor is a
-  follow-up polish.)
-- **Gap B71 — Split timing mark at play position.**
-  **[landed 2026-04-20].** "Split at Play Marker" entry on the
-  mark long-press menu (gated by `canSplitMarkAtPlayMarker`).
-  `splitTimingMark(rowIndex:markIndex:atMS:)` deletes original,
-  adds left half with original label + right half with empty
-  label, as one undo group.
-- **Gap B72 — Combine / merge adjacent timing marks.**
-  **[landed 2026-04-20].** "Merge with Next" entry on the mark
-  long-press menu (gated by `canMergeMarkWithNext`, which
-  requires a right-neighbor on the same row). The merged mark
-  spans `[left.start, right.end]`; labels join with a space
-  (or the non-empty one wins if only one side has a label).
-  Merges across a gap stitch the two ranges together —
-  desktop parity. One undo group rolls up the two deletes +
-  one add.
-
-### 5.2 Track management
-
-Long-press on a timing-row header on iPad today: Rename Timing Track,
-Delete Timing Track. That's it. Missing:
-
-- **Gap B73 — Add Timing Track** (new variable timing track).
-  **[landed 2026-04-20].** View-picker menu (top-left corner)
-  now has "Add Timing Track…" below the view list; opens a
-  name-prompt alert that calls
-  `SequencerViewModel.addTimingTrack(name:)`. The new track is
-  a plain variable timing track (fixed / lyric type choice
-  deferred; revisit if beat-detection import or Papagayo
-  import lands). `iPadRenderContext::AddTimingElement` is now
-  a real implementation (was a stub) that mirrors
-  `xLightsFrame::AddTimingElement`: uniquifies the name,
-  deactivates other timing elements, adds a default effect
-  layer, and registers the new track with the current view.
-  Undo-able.
 - **Gap B74 — Import Timing Track** from `.xtiming`. **P1.**
 - **Gap B75 — Export Timing Track** to `.xtiming`. **P1.**
 - **Gap B76 — Make Timing Track Variable** (convert fixed →
-  editable). **P1** — fixed tracks are common from
-  beat-detection imports, so this is "unlock for editing."
+  editable). Fixed tracks are common from beat-detection imports.
+  **P1.**
 - **Gap B77 — Import Notes** (MIDI / note file). **P2.**
 - **Gap B78 — Import Lyrics** (text file). **P1.**
-- **Gap B79 — AI Speech 2 Lyrics.** Desktop calls an AI service
-  to turn audio into timed lyrics. Bigger piece — needs an iOS
-  bridge for the AI call path. **P2.**
-- **Gap B80 — Generate Subdivided Timing Tracks** (1/2, 1/3,
-  1/4, 1/6, 1/8, ×2, ×4, ×8). Multi-select dialog on desktop.
-  **P1** — common music-timing setup step.
+- **Gap B79 — AI Speech 2 Lyrics.** Needs an iOS bridge for the
+  AI call path. **P2.**
+- **Gap B80 — Generate Subdivided Timing Tracks** (1/2, 1/3, 1/4,
+  1/6, 1/8, ×2, ×4, ×8). Common music-timing setup. **P1.**
 - **Gap B81 — Hide All Timing / Show All Timing** bulk toggle.
   **P2.**
-- **Gap B82 — Add Timing Tracks to All Views.** Replicate a
-  timing track across every sequence view. Phase F adjacency.
+- **Gap B82 — Add Timing Tracks to All Views.** Phase F adjacent.
   **P2.**
 - **Gap B83 — Create Timing From Effects.** Generate timing
   marks from existing effects on a model. **P2.**
 
-### 5.3 Phoneme / word / phrase breakdowns
+### 5.2 Breakdown (remaining)
 
-These are how lyric videos get built. All **P0** for that workflow.
-
-- **Gap B84 — Breakdown Phrase / Phrases.** **[landed
-  2026-04-20 — row-level variant].** "Breakdown Phrases" entry
-  on a phrase (layer-0) timing row's header long-press menu
-  splits every non-empty phrase label into words on a fresh
-  layer-1 word track. Delimiter set matches desktop
-  (`LyricBreakdown.cpp:28`: `" \t:;,.-_!?{}[]()<>+=|"`); word
-  durations spaced equally across the phrase range and snapped
-  to the sequence frame period via `RoundToMultipleOfPeriod`.
-  Existing word + phoneme layers are discarded first (desktop
-  parity). Lock-guard: rejected if any existing word/phoneme
-  mark is locked. Not undo-able for now (mutates layer
-  structure; layer-level undo is follow-up work). Gated via
-  `canBreakdownPhrases(rowIndex:)` so the entry only appears
-  when the row has at least one mark with a non-empty label.
-  Per-mark variant ("Breakdown Phrase" on a single mark) and
-  the "Breakdown Selected Phrases" (multi-select) variants
-  are deferred.
-- **Gap B85 — Breakdown Word / Words.** **Deferred —
-  requires the phoneme dictionary port.** Desktop's
-  `BreakdownWord` depends on `PhonemeDictionary` (CMU-dict-
-  style loader + lookup) in `src-ui-wx/sequencer/PhonemeDictionary.{h,cpp}`.
-  That class is wx-based (wxString, wxArrayString,
-  wxFontEncoding) so shipping on iPad requires a wx-free
-  port, plus bundling the dictionary file(s). Track as
-  follow-up work after the phase-B sweep — existing
-  Papagayo-authored sequences still render correctly (B88),
-  so this only blocks iPad-authored lyric tracks.
-- **Gap B86 — Breakdown Phoneme.** Not a real desktop
-  feature — plan-writer artifact from scanning plan-scoped
-  gaps rather than the desktop menu. Desktop has exactly two
-  breakdown ops (phrases, words); phoneme marks are a product
-  of the Word breakdown, not a separate op. **Removed from
-  scope.**
+- **Gap B85 — Breakdown Word / Words.** **Deferred — requires
+  phoneme dictionary port.** Desktop's `BreakdownWord` depends on
+  `PhonemeDictionary` (CMU-dict-style loader + lookup) in
+  `src-ui-wx/sequencer/PhonemeDictionary.{h,cpp}`. That class is
+  wx-based (wxString, wxArrayString, wxFontEncoding) so shipping
+  on iPad requires a wx-free port plus bundling the dictionary
+  file(s). Existing Papagayo-authored sequences still render
+  correctly (B88), so this only blocks iPad-authored lyric
+  tracks.
 - **Gap B87 — Remove Words / Phonemes / Words-and-Phonemes.**
-  Bulk clear of sub-layer labels.
-- **Gap B88 — Phoneme / word / phrase sub-layer rendering.**
-  **[landed 2026-04-20 — rendering only; editing still in B67-B72].**
-  The row builder (`reloadRows()`) already produces one row per
-  expanded timing element layer via `visibleRowCount` →
-  `GetRowInformationSize()`, so multi-layer Papagayo elements
-  were coming across as separate rows; the iPad just rendered
-  them with plain white labels. `TimingEffectsMetalGridView`
-  now picks a per-layer label background:
-  `Phrases`/layer-0-of-multi → `(153,255,153)`,
-  `Words`/layer-1 → `(255,218,145)`,
-  `Phonemes`/layer-2 → `(255,181,218)`
-  (desktop's `COLOR_PHRASES` / `COLOR_WORDS` / `COLOR_PHONEMES`
-  from `ColorManager.h`). Each colored label gets a
-  `(103,103,103)` outline and renders its text black for
-  legibility on the pale fill. Plain (single-layer) timing
-  tracks keep the existing white-on-stripe label style.
-- **Gap B89 — Auto Label Timings.** Populate labels from the
-  loaded lyric text. Follows from B78. **P1.**
-- **Gap B90 — Add / Remove "-shimmer" suffix.** Desktop
-  convenience operation on timing labels. **P2.**
+  Bulk clear of sub-layer labels. **P1.**
+- **Gap B89 — Auto Label Timings** (populate labels from loaded
+  lyric text). Follows from B78. **P1.**
+- **Gap B90 — Add / Remove "-shimmer" suffix.** Convenience op on
+  timing labels. **P2.**
 - **Gap B91 — Divide Timings (Halve).** Subdivide each mark.
   **P2.**
 
-### 5.4 Double-click to play looped effect
+### 5.3 Per-mark variants
 
-Desktop's "double-click a timing mark plays the effect on that
-timing mark in a loop" — iPad single-taps seeks to the mark's start.
-Partially present: the selection-scoped preview loop runs when an
-*effect* is tapped. Timing-mark double-tap doesn't do this.
-
+- **Gap B84 (per-mark variant).** Single-mark "Breakdown Phrase"
+  context-menu entry (row-level landed). **P2.**
 - **Gap B92 — Double-tap timing mark → loop-play that region.**
   **P2.**
 
@@ -660,51 +312,19 @@ Partially present: the selection-scoped preview loop runs when an
 
 ## 6. Scrolling, zoom, playback follow
 
-Most behaviour here works. The gaps:
-
-- **Gap B93 — Follow-playhead during playback.** **[landed
-  2026-04-20].** `AutoFollowPlayhead` (invisible `Color.clear`
-  subview in `SequencerGridV2View`) observes
-  `viewModel.playPositionMS` via `.onChange`. When the marker
-  crosses the right edge (or wanders left of the viewport,
-  e.g. from a reverse seek), it jump-scrolls so the marker sits
-  ~10% from the left — one-viewport desktop parity.
-  Suppressed for 1.2 s after any pan/pinch on any of the three
-  Metal canvases (tracked via
-  `TimelineState.lastUserInteractionAt`, updated by a new
-  `onUserInteraction` closure threaded through
-  `EffectsMetalGridView` / `TimingEffectsMetalGridView` /
-  `TopChromeMetalGridView`) so a user who scrolls during
-  playback has time to inspect the new region before the
-  playhead pulls the viewport back. Also suppressed outright
-  during effect-scrub (`isScrubbing`).
-- **Gap B94 — Visible scrollbars.** No scrollbars on iPad. Pan
-  gesture is the only scroll. Fine on touch, rough with a
-  trackpad. iPadOS 26 supports compact scrollbars via
-  `ScrollView`; the Metal-backed grid needs a custom
-  overlay. **P1.**
-- **Gap B95 — Horizontal scroll via scroll-wheel / trackpad
-  two-finger.** **[landed 2026-04-20].** Set
-  `allowedScrollTypesMask = .all` on the single-finger pan
-  recognizers in `EffectsMetalGridView`,
-  `TimingEffectsMetalGridView`, and `TopChromeMetalGridView`.
-  Trackpad two-finger scroll and external scroll-wheel events
-  now drive `hScrollOffsetPx` / `vScrollOffsetPx` the same as
-  finger drags.
-- **Gap B96 — Scroll momentum.** iPad scroll stops when
-  finger lifts. Small UX gap vs SwiftUI's stock ScrollView.
-  **P2.**
+- **Gap B94 — Visible scrollbars.** No scrollbars on iPad. Fine on
+  touch, rough with a trackpad. iPadOS 26 supports compact
+  scrollbars; the Metal-backed grid needs a custom overlay.
+  **P1.**
+- **Gap B96 — Scroll momentum.** iPad scroll stops when finger
+  lifts. **P2.**
 
 ---
 
 ## 7. Find / Replace
 
-Desktop has Find / Find Next / Find Previous / Replace All across
-effect names (case-insensitive).
-
-- **Gap B97 — Find / Replace panel.** Bottom sheet or
-  inspector-style overlay; cmd+F shortcut. Drives selection to
-  matching effects, one at a time. **P2.**
+- **Gap B97 — Find / Replace panel.** Bottom sheet or inspector-
+  style overlay; cmd+F shortcut. **P2.**
 
 ---
 
@@ -713,45 +333,126 @@ effect names (case-insensitive).
 iPad clipboard holds one effect's name + settings + palette +
 duration. It's app-internal, not the system pasteboard.
 
-- **Gap B98 — Multi-effect clipboard** (array of effects
-  preserving relative timing). Copy two effects 2 s apart,
-  paste → two effects land 2 s apart at the target time.
-  **P1.**
-- **Gap B99 — System pasteboard integration.** Use
-  `UIPasteboard` with a custom UTI so copy / paste can cross
-  app restarts (and eventually cross-device via Universal
+- **Gap B98 — Multi-effect clipboard** (array of effects preserving
+  relative timing). **P1.**
+- **Gap B99 — System pasteboard integration** (`UIPasteboard` with
+  a custom UTI so copy / paste crosses app restarts + Universal
   Clipboard). **P2.**
-- **Gap B100 — Paste replacing an existing effect at the
-  same cell** (with confirmation). **P2.**
+- **Gap B100 — Paste replacing an existing effect at the same
+  cell** (with confirmation). **P2.**
 
 ---
 
-## 9. Summary gap table
+## 9. Deferred / explicitly out of Phase B
 
-Severity key:
+- **Gap B16 — Drag from palette with live preview.** Deferred
+  pending user feedback. Tap-to-arm + tap-to-place is working
+  well on touch; revisit only if users ask for drag-cancel
+  mid-gesture.
+- **Gap B85 — Breakdown Word / Words.** See § 5.2 — needs
+  `PhonemeDictionary` port.
+- **Gap B86 — Breakdown Phoneme.** Removed from scope. Not a
+  real desktop feature (desktop has exactly Phrases + Words
+  breakdowns; phonemes fall out of the Word breakdown).
+- **Gap B59 — Edit Display Elements.** Phase F scope.
+- **Gap B19 — Effect Presets (full storage impl).** Phase C / G12
+  shares `EffectPresetManager`-backed storage; the menu-entry
+  stub lands separately.
 
-- **P0** — blocks a common user workflow; the reason this
-  plan exists.
-- **P1** — blocks a specialised workflow; regular users hit this.
-- **P2** — nice-to-have / parity items / expert shortcuts.
+---
+
+## 10. Suggested phasing for remaining work
+
+Only one P0 bundle left. Everything else is polish.
+
+**B-IV — Loop region, tags, waveform variants, render-selected
+(1-2 weeks)** — the last P0.
+
+- B32 / B33 / B44 / B45 loop region + play-loop + render-
+  selected-region + waveform drag-range.
+- B34 / B35 numbered tags + tag menu.
+- B36 / B37 zoom-to-selection / zoom-to-fit.
+- B39 drag-to-scrub.
+- B41 waveform filter variants.
+
+**B-V — Row-heading expansion (1-2 weeks)** — biggest P1 cluster.
+
+- B46 rename layer.
+- B49 / B50 / B51 / B52 model-level export / bulk-delete /
+  render-toggle / select-in-model.
+- B53 / B54 cut-copy-paste row + model.
+- B57 show-all / collapse-all.
+- B61 drag-resize row-heading column.
+
+**B-VI — Editing polish (1 week)**
+
+- B4 shift-arrow stretch / fine nudge.
+- B9 / B10 / B11 shift-align / align-to-mark / close-gap on
+  selection.
+- B14 paste-by-cell semantics.
+- B15 randomize / reset-to-default on selection.
+- B21 exact-time dialog on long-press.
+
+**B-VII — Timing track polish (2-3 weeks)**
+
+- B74 / B75 import / export `.xtiming`.
+- B76 fixed-to-variable conversion.
+- B78 import lyrics + B89 auto-label.
+- B80 generate subdivided timing.
+- B85 phoneme-dictionary port → word breakdown.
+- B87 bulk remove words / phonemes.
+
+**B-VIII — Visual + trackpad polish**
+
+- B25 bracket-colours via ColorManager.
+- B26 verify (ColorCurve already works via BM-6).
+- B30 pointer hover states.
+- B94 visible scrollbars.
+
+**Deferred to Phase C**
+
+- B19 effect presets (full impl).
+
+**Deferred to Phase F**
+
+- B59 Edit Display Elements.
+- Menu-bar keyboard-shortcut exposure.
+- Tear-out / dock behaviour.
+
+---
+
+## 11. Out of scope
+
+- Core rendering (complete, verified on-device).
+- Model / layout editing — stays desktop-only.
+- Controller output — deferred to post-MVP in the top-level plan.
+- Sequence-lifecycle plumbing (save / save-as / new / sequence
+  settings / dirty prompt) — Phase E.
+- App Store submission — Phase H.
+- Document / iCloud handling — Phase G.
+
+---
+
+## 12. Summary gap table (open items only)
+
+Severity key: **P0** = blocks a common user workflow; **P1** =
+blocks a specialised workflow / regular users hit this; **P2** =
+nice-to-have / expert shortcut; **Verify** = likely already works,
+needs device check; **Deferred** = pending upstream work or user
+feedback.
 
 | # | Gap | Area | Severity |
 |---|---|---|---|
-| B1 | Multi-effect selection (marquee / range) | Selection | ✓ landed |
-| B2 | Select all in row / column (timing deferred) | Selection | ✓ landed |
-| B3 | Tab / Shift+Tab effect navigation | Selection | P2 |
+| B3 | Tab / Shift+Tab navigation | Selection | P2 |
 | B4 | Shift / Ctrl arrow stretch / nudge | Editing | P1 |
-| B5 | Snap-to-timing on resize + move | Editing | ✓ landed |
 | B6 | Nudge by timing mark | Editing | P2 |
 | B7 | Edge-unlink indicator + command | Editing | P2 |
-| B8 | Align Start / End / Both / Centers / Match | Editing | ✓ landed |
 | B9 | Shift-Align Start / End | Editing | P1 |
 | B10 | Align to closest timing mark | Editing | P1 |
 | B11 | Close Gap | Editing | P1 |
-| B12 | Split at play marker | Editing | ✓ landed |
 | B13 | Extend effect to next / previous | Editing | P2 |
 | B14 | Paste by cell | Editing | P1 |
-| B15 | Randomize / Reset / Lock / Disable on selection | Editing | P1 |
+| B15 | Randomize / Reset-to-default on selection | Editing | P1 |
 | B16 | Drag-from-palette with preview ghost | Create | Deferred |
 | B17 | Random-effect palette button | Create | P2 |
 | B18 | Double-click create in range | Create | P2 |
@@ -767,7 +468,6 @@ Severity key:
 | B28 | Reference / previous-selection indicator | Visual | P2 |
 | B29 | Text fade / size stepping | Visual | P2 |
 | B30 | Pointer hover states | Visual | P1 |
-| B31 | Status bar for selected effect | Visual | ✓ landed |
 | B32 | Loop region (shift-click + drag) | Timeline | P0 |
 | B33 | Play-loop mode | Timeline | P1 |
 | B34 | Tags (0-9 numbered markers) | Timeline | P1 |
@@ -788,7 +488,7 @@ Severity key:
 | B49 | Export model / Render-and-Export | Row heading | P1 |
 | B50 | Delete all effects / submodel / strand / node | Row heading | P1 |
 | B51 | Enable / Disable render on model | Row heading | P1 |
-| B52 | Select effects in model / row | Row heading | P1 |
+| B52 | Select all effects in model | Row heading | P1 |
 | B53 | Cut / Copy / Paste Row | Row heading | P1 |
 | B54 | Cut / Copy / Paste Model (+ submodels) | Row heading | P1 |
 | B55 | Convert Effects to 'Per Model' | Row heading | P2 |
@@ -799,15 +499,8 @@ Severity key:
 | B61 | Drag-resize row-heading column width | Row heading | P1 |
 | B63 | Papagayo / FPP / group icon glyphs | Row heading | P2 |
 | B64 | Layer-count [N] indicator | Row heading | P2 |
-| B65 | Tooltip on truncated row name | Row heading | P2 |
-| B66 | Muted / hidden row visual state | Row heading | P2 |
-| B67 | Long-press create timing mark | Timing | ✓ landed |
-| B68 | Drag timing mark edges | Timing | ✓ landed |
-| B69 | Delete timing mark | Timing | ✓ landed |
-| B70 | Rename timing mark label | Timing | ✓ landed |
-| B71 | Split timing mark at play marker | Timing | ✓ landed |
-| B72 | Combine / merge timing marks | Timing | ✓ landed |
-| B73 | Add Timing Track | Timing | ✓ landed |
+| B65 | Tooltip on truncated row name | Row heading | P1 (MK) |
+| B66 | Muted row visual state | Row heading | P2 |
 | B74 | Import Timing Track (.xtiming) | Timing | P1 |
 | B75 | Export Timing Track (.xtiming) | Timing | P1 |
 | B76 | Make fixed timing track variable | Timing | P1 |
@@ -818,169 +511,19 @@ Severity key:
 | B81 | Hide All / Show All Timing | Timing | P2 |
 | B82 | Add Timing Tracks to All Views | Timing | P2 |
 | B83 | Create Timing From Effects | Timing | P2 |
-| B84 | Breakdown Phrase / Phrases | Timing | ✓ landed (row-level) |
-| B85 | Breakdown Word / Words | Timing | Deferred (needs phoneme dict) |
-| B86 | Breakdown Phoneme | Timing | Removed (not a real desktop feature) |
+| B84 (per-mark) | Single-mark phrase breakdown | Timing | P2 |
+| B85 | Breakdown Word / Words | Timing | Deferred |
 | B87 | Remove Words / Phonemes | Timing | P1 |
-| B88 | Phoneme / word / phrase sub-layer **rendering** | Timing | ✓ landed |
 | B89 | Auto Label Timings (from lyrics) | Timing | P1 |
 | B90 | Add / Remove "-shimmer" suffix | Timing | P2 |
 | B91 | Divide Timings (Halve) | Timing | P2 |
 | B92 | Double-tap timing mark → loop-play region | Timing | P2 |
-| B93 | Follow-playhead during playback | Scroll | ✓ landed |
 | B94 | Visible scrollbars | Scroll | P1 |
-| B95 | Trackpad two-finger / wheel scroll | Scroll | ✓ landed |
 | B96 | Scroll momentum | Scroll | P2 |
 | B97 | Find / Replace | Find | P2 |
 | B98 | Multi-effect clipboard with relative timing | Clipboard | P1 |
 | B99 | System pasteboard (UIPasteboard) integration | Clipboard | P2 |
 | B100 | Paste-replacing-existing with confirmation | Clipboard | P2 |
 
-Counts: 12 × P0, 33 × P1, 52 × P2, 1 × Verify.
-(Post-2026-04-20 verification pass: B25 dropped P1 → P2 after
-confirming desktop also uses a single bracket colour; B26 dropped
-P1 → Verify after confirming BM-6 already wires the same
-`DrawEffectBackground` path desktop uses for gradients.)
-
----
-
-## 10. Suggested phasing
-
-The P0 list is long but clusters into four work items.
-
-**B-I — Multi-select + align + split + playhead follow (2-3 weeks)**
-
-The selection + align + split bundle (B1, B2, B8, B12, B14) + the
-one behavioural miss that's visible every session (B93, follow-
-playhead). One cohesive change to the grid's gesture model
-(long-press-and-drag as marquee? two-finger-drag? selection mode
-toggle?) unlocks eight P0/P1 items at once.
-
-- B1 multi-select primitive.
-- B2 select-in-row / -column / -timing via the row-heading and
-  grid context menus (adds entries that are trivial once B1 lands).
-- B8 + B9 + B10 + B11 align-family long-press menu.
-- B12 split-at-marker single-effect long-press entry.
-- B14 paste-by-cell semantics.
-- B93 follow-playhead during play.
-
-**B-II — Drag-from-palette + visual polish (1-2 weeks)**
-
-- B16 drag-from-palette with ghost + drop-or-cancel.
-- B25 effect-type background palette colour.
-- B26 ColorCurve gradient preview inside effect bar.
-- B30 pointer hover states (trackpad users).
-- B31 status bar for selected effect.
-
-**B-III — Timing tracks: editing + breakdowns (3-4 weeks)**
-
-This is the biggest single block and the one that unblocks the
-lyric-video workflow.
-
-- B67 / B68 / B69 / B70 / B71 / B72 mark create / drag / delete
-  / rename / split / merge.
-- B73 add timing track.
-- B76 fixed-to-variable conversion.
-- B88 phoneme / word / phrase sub-layer rendering. **This is
-  purely a rendering gap and can ship ahead of the editing
-  work** — users whose sequences already have phoneme data
-  would see it immediately.
-- B84 / B85 / B86 breakdown phrase / word / phoneme.
-- B78 import lyrics.
-- B80 generate subdivided timing tracks.
-- B74 / B75 import / export `.xtiming`.
-- B87 / B89 bulk remove / auto-label.
-
-**B-IV — Loop region, tags, waveform variants, render-selected
-(1-2 weeks)**
-
-- B32 / B33 / B44 / B45 loop region + play-loop + render-
-  selected-region + waveform drag-range.
-- B34 / B35 numbered tags + tag menu.
-- B36 / B37 zoom-to-selection / zoom-to-fit.
-- B39 drag-to-scrub.
-- B41 waveform filter variants.
-
-**B-V — Row-heading expansion (1-2 weeks)**
-
-- B46 rename layer.
-- B49 / B50 / B51 / B52 model-level export / bulk-delete /
-  render-toggle / select-in-model.
-- B53 / B54 cut-copy-paste row + model.
-- B57 show-all / collapse-all.
-- B61 drag-resize row-heading column.
-
-**B-VI — Polish and parity sweep (1 week)**
-
-The remaining P1s and any P2s that fell out of the above work.
-Non-urgent. Examples: B4 shift-arrow stretch, B5 snap-to-timing,
-B15 randomize-on-selection, B19 presets-menu-entry, B21 timing-
-dialog, B94 visible scrollbars.
-
-**Deferred to Phase F**
-
-- B59 Edit Display Elements — Phase F already owns the
-  Display Elements window.
-- Menu-bar keyboard shortcut exposure.
-- Tear-out / dock behaviour.
-
-**Deferred to Phase C**
-
-- B19 effect presets — share `EffectPresetManager`-backed
-  storage with Phase C's G12.
-- Long-press context-menu entries that also apply to the
-  inspector tabs fold in with Phase C's G9.
-
----
-
-## 11. Out of scope
-
-- Core rendering (complete, verified on-device).
-- Model / layout editing — stays desktop-only.
-- Controller output — deferred to post-MVP in the top-level
-  plan.
-- Sequence-lifecycle plumbing (save / save-as / new / sequence
-  settings / dirty prompt) — Phase E.
-- App Store submission — Phase H.
-- Document / iCloud handling — Phase G.
-
----
-
-## 12. What this plan does **not** claim
-
-This is a static analysis of source — `EffectsGrid.cpp` vs
-`EffectsMetalGridView.swift` and friends. A few categories were
-flagged as needing a **device-side pass** to confirm or rule out.
-2026-04-20 source-side verification pass results:
-
-- **B25 — "flat grey" framing.** *Resolved via source.* The iPad
-  *does* hardcode bracket RGB in `EffectsMetalGridView.swift:292–
-  295`, but desktop also uses a single colour family
-  (`COLOR_EFFECT_DEFAULT` / `_SELECTED` / `_LOCKED` / `_DISABLED`
-  in `EffectsGrid.cpp:6877–6888`), *not* per-effect-type. The
-  per-type visual comes from `DrawEffectBackground` overrides,
-  which BM-6 already wired. B25 rescoped to "source bracket
-  colours from `ColorManager`"; severity dropped to P2.
-- **B26 — ColorCurve gradient.** *Likely already works.* 14
-  effects override `DrawEffectBackground` (Color Wash, On, Morph,
-  Galaxy, Shockwave, Fan, Twinkle, Pictures, Fireworks, Ripple,
-  etc.); BM-6 runs the background pass calling that override.
-  Reclassed to **Verify** — needs a device-side check with a
-  known ColorCurve sequence. If the gradient renders, close B26.
-- **B95 — trackpad scroll.** *Resolved via source.* The pan
-  recognizer has no `allowedScrollTypesMask` set → defaults to
-  `.continuous` → excludes scroll-wheel / discrete trackpad
-  events. One-line fix (set to `.all`).
-- **B88 — phoneme / word / phrase sub-layer rendering.** *Static
-  check only.* `TimingEffectsMetalGridView.swift:105–165` draws
-  a single row per timing element; `XLSequenceDocument.mm` has
-  `lyricTimingTrackNames` but no phoneme/word bridge surface.
-  Desktop renders phrase / word / phoneme as distinct sub-layer
-  rows with `COLOR_PHRASES` / `COLOR_WORDS` / `COLOR_PHONEMES`
-  (`EffectsGrid.cpp:7034–7038`). Gap confirmed; device-side
-  check still worthwhile to see whether legacy sub-layers at
-  least appear as collapsed/single-row before editing lands.
-
-Confirming / refuting these tightens the plan but doesn't change
-the overall shape: the grid renders; the *authoring* surface
-around it is where the work is.
+Counts: **1 × P0**, **29 × P1**, **48 × P2**, **1 × Verify**, **2 ×
+Deferred**.
