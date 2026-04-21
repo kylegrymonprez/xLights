@@ -3071,21 +3071,34 @@ void Model::DisplayModelOnWindow(IModelPreview* preview, xlGraphicsContext* ctx,
         std::vector<int> nodeOrder;
         nodeOrder.reserve(NodeCount);
         if (depthSort) {
+            // Precompute a finite sort key per node. Doing the comparator-time work
+            // up front keeps std::sort's comparator a trivial float compare, so no
+            // NaN or pointer-chasing inside the comparator can violate strict-weak
+            // ordering (which would make libc++ read past the range and crash).
+            // Nodes with empty Coords contribute no geometry; skip them entirely.
+            const glm::vec3 axis = currentSortAxis;
+            std::vector<std::pair<float, int>> keys;
+            keys.reserve(NodeCount);
             for (int n = 0; n < (int)NodeCount; ++n) {
-                nodeOrder.push_back(n);
+                if (Nodes[n]->Coords.empty()) {
+                    continue;
+                }
+                const auto& c = Nodes[n]->Coords[0];
+                float z = axis.x * c.screenX + axis.y * c.screenY + axis.z * c.screenZ;
+                if (!std::isfinite(z)) {
+                    z = 0.0f;
+                }
+                keys.emplace_back(z, n);
             }
             // Sort ascending by camera-space Z so the farthest node (most negative Z in the
             // OpenGL convention) renders first — i.e. back-to-front.
-            const glm::vec3 axis = currentSortAxis;
-            std::sort(nodeOrder.begin(), nodeOrder.end(), [this, axis](int a, int b) {
-                float za = axis.x * Nodes[a]->Coords[0].screenX +
-                           axis.y * Nodes[a]->Coords[0].screenY +
-                           axis.z * Nodes[a]->Coords[0].screenZ;
-                float zb = axis.x * Nodes[b]->Coords[0].screenX +
-                           axis.y * Nodes[b]->Coords[0].screenY +
-                           axis.z * Nodes[b]->Coords[0].screenZ;
-                return za < zb;
-            });
+            std::sort(keys.begin(), keys.end(),
+                      [](const std::pair<float, int>& a, const std::pair<float, int>& b) {
+                          return a.first < b.first;
+                      });
+            for (const auto& kv : keys) {
+                nodeOrder.push_back(kv.second);
+            }
             cache->viewSortAxis = currentSortAxis;
         } else {
             int first = 0;
