@@ -14,10 +14,11 @@
 
 class EffectLayer;
 class UndoManager;
-class xLightsFrame;
+class PhonemeDictionary;
 
 void BreakdownPhrase(EffectLayer* word_layer, int start_time, int end_time,
                      const std::string& phrase, double frequency, UndoManager& undo_mgr);
 
 void BreakdownWord(EffectLayer* phoneme_layer, int start_time, int end_time,
-                   const std::string& word, double frequency, xLightsFrame* xframe, UndoManager& undo_mgr);
+                   const std::string& word, double frequency,
+                   PhonemeDictionary& dictionary, UndoManager& undo_mgr);

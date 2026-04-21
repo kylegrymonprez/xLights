@@ -87,7 +87,7 @@
 #include "color/ColorManager.h"
 #include "effects/EffectPresetManager.h"
 #include "render/ViewpointMgr.h"
-#include "sequencer/PhonemeDictionary.h"
+#include "lyrics/PhonemeDictionary.h"
 #include "render/SequenceFile.h"
 #include "sequencer/EffectsGrid.h"
 #include "render/RenderCache.h"
@@ -365,6 +365,7 @@ public:
     #endif
 
     PhonemeDictionary dictionary;
+    void LoadPhonemeDictionaries();
 
     bool IsExiting() const { return _exiting; }
     void SetEffectControls(const std::string &modelName, const std::string &name,

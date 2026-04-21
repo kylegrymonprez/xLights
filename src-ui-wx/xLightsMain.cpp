@@ -149,6 +149,8 @@
 
 // Linux needs this
 #include <wx/stdpaths.h>
+#include <wx/progdlg.h>
+#include <wx/filename.h>
 
 // image files
 #include "../include/control-pause-blue-icon.xpm"
@@ -9504,11 +9506,23 @@ void xLightsFrame::SetXFadePort(int i)
     }
 }
 
+void xLightsFrame::LoadPhonemeDictionaries()
+{
+    std::vector<std::string> searchDirs = {
+        CurrentDir.ToStdString(),
+        (wxStandardPaths::Get().GetResourcesDir() + "/dictionaries").ToStdString(),
+        wxFileName::FileName(wxStandardPaths::Get().GetExecutablePath()).GetPath().ToStdString()
+    };
+
+    wxProgressDialog dlg("Loading", "Loading phoneme dictionaries", 100, this, wxPD_APP_MODAL | wxPD_AUTO_HIDE);
+    dictionary.LoadDictionaries(searchDirs, [&dlg](int pct) { dlg.Update(pct); });
+}
+
 void xLightsFrame::OnMenuItemUserDictSelected(wxCommandEvent& event)
 {
     SetCursor(wxCURSOR_WAIT);
     SetStatusText(_("Loading dictionaries ..."));
-    dictionary.LoadDictionaries(CurrentDir, this);
+    LoadPhonemeDictionaries();
     SetStatusText(_(""));
 
     LyricUserDictDialog dlg(&dictionary, showDirectory, this);

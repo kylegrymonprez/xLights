@@ -25,7 +25,7 @@
 #include "render/EffectLayer.h"
 #include "sequencer/EffectTimingDialog.h"
 #include "EffectsGrid.h"
-#include "LyricBreakdown.h"
+#include "lyrics/LyricBreakdown.h"
 #include "MainSequencer.h"
 #include "render/PixelBuffer.h"
 #include "RowHeading.h"
@@ -1280,7 +1280,9 @@ void EffectsGrid::OnGridPopup(wxCommandEvent& event) {
             phoneme_layer->UnSelectAllEffects();
             phoneme_layer->SelectEffectsInTimeRange(word_effect->GetStartTimeMS(), word_effect->GetEndTimeMS());
             phoneme_layer->DeleteSelectedEffects(mSequenceElements->get_undo_mgr());
-            BreakdownWord(phoneme_layer, word_effect->GetStartTimeMS(), word_effect->GetEndTimeMS(), word_effect->GetEffectName(), mSequenceElements->GetFrequency(), xLightsApp::GetFrame(), mSequenceElements->get_undo_mgr());
+            xLightsFrame* xframe = xLightsApp::GetFrame();
+            xframe->LoadPhonemeDictionaries();
+            BreakdownWord(phoneme_layer, word_effect->GetStartTimeMS(), word_effect->GetEndTimeMS(), word_effect->GetEffectName(), mSequenceElements->GetFrequency(), xframe->dictionary, mSequenceElements->get_undo_mgr());
             element->SetCollapsed(false);
             wxCommandEvent eventRowHeaderChanged(EVT_ROW_HEADINGS_CHANGED);
             wxPostEvent(mParent, eventRowHeaderChanged);
@@ -1322,10 +1324,12 @@ void EffectsGrid::OnGridPopup(wxCommandEvent& event) {
             phoneme_layer->UnSelectAllEffects();
         } else {
             phoneme_layer->DeleteSelectedEffects(mSequenceElements->get_undo_mgr());
+            xLightsFrame* xframe = xLightsApp::GetFrame();
+            xframe->LoadPhonemeDictionaries();
             for (int x = 0; x < layer->GetEffectCount(); x++) {
                 word_effect = layer->GetEffect(x);
                 if (word_effect->GetSelected() != EFFECT_NOT_SELECTED) {
-                    BreakdownWord(phoneme_layer, word_effect->GetStartTimeMS(), word_effect->GetEndTimeMS(), word_effect->GetEffectName(), mSequenceElements->GetFrequency(), xLightsApp::GetFrame(), mSequenceElements->get_undo_mgr());
+                    BreakdownWord(phoneme_layer, word_effect->GetStartTimeMS(), word_effect->GetEndTimeMS(), word_effect->GetEffectName(), mSequenceElements->GetFrequency(), xframe->dictionary, mSequenceElements->get_undo_mgr());
                 }
             }
             element->SetCollapsed(false);

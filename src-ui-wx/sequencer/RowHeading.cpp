@@ -36,7 +36,7 @@
 #include <log.h>
 #include "shared/utils/wxUtilities.h"
 #include "sequencer/LyricsDialog.h"
-#include "LyricBreakdown.h"
+#include "lyrics/LyricBreakdown.h"
 #include "TimeLine.h"
 
 #define ICON_SPACE FromDIP(25)
@@ -718,9 +718,7 @@ static void ImportLyrics(SequenceElements* seqElements, TimingElement* element, 
                 line = asciiLine.ToStdString();
             }
             if (!line.empty()) {
-                wxString wxLineForDict(line);
-                xframe->dictionary.InsertSpacesAfterPunctuation(wxLineForDict);
-                line = wxLineForDict.ToStdString();
+                PhonemeDictionary::InsertSpacesAfterPunctuation(line);
                 end_time = TimeLine::RoundToMultipleOfPeriod(start_time+interval_ms, seqElements->GetFrequency());
                 Effect* ef = phrase_layer->AddEffect(0,line,"","",start_time,end_time,EFFECT_NOT_SELECTED,false);
                 seqElements->get_undo_mgr().CaptureAddedEffect(element->GetName(), phrase_layer->GetIndex(), ef->GetID());
@@ -1853,10 +1851,12 @@ void RowHeading::BreakdownTimingWords(TimingElement* element)
     mSequenceElements->get_undo_mgr().CreateUndoStep();
     EffectLayer* word_layer = element->GetEffectLayer(1);
     EffectLayer* phoneme_layer = element->AddEffectLayer();
+    xLightsFrame* xframe = xLightsApp::GetFrame();
+    xframe->LoadPhonemeDictionaries();
     for (int i = 0; i < word_layer->GetEffectCount(); i++) {
         Effect* effect = word_layer->GetEffect(i);
         std::string word = effect->GetEffectName();
-        BreakdownWord(phoneme_layer, effect->GetStartTimeMS(), effect->GetEndTimeMS(), word, mSequenceElements->GetFrequency(), xLightsApp::GetFrame(), mSequenceElements->get_undo_mgr());
+        BreakdownWord(phoneme_layer, effect->GetStartTimeMS(), effect->GetEndTimeMS(), word, mSequenceElements->GetFrequency(), xframe->dictionary, mSequenceElements->get_undo_mgr());
     }
     wxCommandEvent eventRowHeaderChanged(EVT_ROW_HEADINGS_CHANGED);
     wxPostEvent(GetParent(), eventRowHeaderChanged);

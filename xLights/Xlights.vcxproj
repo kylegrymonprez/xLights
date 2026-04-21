@@ -860,7 +860,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="..\src-core\utils\Parallel.cpp" />
     <ClCompile Include="..\src-ui-wx\model\PathGenerationDialog.cpp" />
     <ClCompile Include="..\src-ui-wx\sequencer\PerspectivesPanel.cpp" />
-    <ClCompile Include="..\src-ui-wx\sequencer\PhonemeDictionary.cpp" />
+    <ClCompile Include="..\src-core\lyrics\PhonemeDictionary.cpp" />
     <ClCompile Include="..\src-core\render\PixelBuffer.cpp" />
     <ClCompile Include="..\src-core\models\Pixels.cpp" />
     <ClCompile Include="..\src-ui-wx\setup\PixelTestDialog.cpp" />
@@ -905,7 +905,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="..\src-ui-wx\sequencer\EffectsGrid.cpp" />
     <ClCompile Include="..\src-core\render\Element.cpp" />
     <ClCompile Include="..\src-ui-wx\sequencer\MainSequencer.cpp" />
-    <ClCompile Include="..\src-ui-wx\sequencer\LyricBreakdown.cpp" />
+    <ClCompile Include="..\src-core\lyrics\LyricBreakdown.cpp" />
     <ClCompile Include="..\src-ui-wx\sequencer\RowHeading.cpp" />
     <ClCompile Include="..\src-core\render\SequenceElements.cpp" />
     <ClCompile Include="..\src-core\render\SequenceMedia.cpp" />
@@ -1419,7 +1419,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClInclude Include="..\src-core\utils\Parallel.h" />
     <ClInclude Include="..\src-ui-wx\model\PathGenerationDialog.h" />
     <ClInclude Include="..\src-ui-wx\sequencer\PerspectivesPanel.h" />
-    <ClInclude Include="..\src-ui-wx\sequencer\PhonemeDictionary.h" />
+    <ClInclude Include="..\src-core\lyrics\PhonemeDictionary.h" />
     <ClInclude Include="..\src-core\render\PixelBuffer.h" />
     <ClInclude Include="..\src-core\models\Pixels.h" />
     <ClInclude Include="..\src-ui-wx\setup\PixelTestDialog.h" />
@@ -1462,7 +1462,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClInclude Include="..\src-core\render\Element.h" />
     <ClInclude Include="..\src-ui-wx\sequencer\ElementLayers.h" />
     <ClInclude Include="..\src-ui-wx\sequencer\MainSequencer.h" />
-    <ClInclude Include="..\src-ui-wx\sequencer\LyricBreakdown.h" />
+    <ClInclude Include="..\src-core\lyrics\LyricBreakdown.h" />
     <ClInclude Include="..\src-ui-wx\sequencer\RowHeading.h" />
     <ClInclude Include="..\src-core\render\SequenceElements.h" />
     <ClInclude Include="..\src-core\render\SequenceMedia.h" />

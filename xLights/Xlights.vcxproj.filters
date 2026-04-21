@@ -64,7 +64,7 @@
     <ClCompile Include="..\src-ui-wx\shared\dialogs\OptionChooser.cpp" />
     <ClCompile Include="..\src-core\outputs\TestPreset.cpp" />
     <ClCompile Include="..\src-ui-wx\sequencer\PerspectivesPanel.cpp" />
-    <ClCompile Include="..\src-ui-wx\sequencer\PhonemeDictionary.cpp" />
+    <ClCompile Include="..\src-core\lyrics\PhonemeDictionary.cpp" />
     <ClCompile Include="..\src-core\render\PixelBuffer.cpp">
       <Filter>render</Filter>
     </ClCompile>
@@ -681,9 +681,7 @@
     <ClCompile Include="..\src-ui-wx\sequencer\MainSequencer.cpp">
       <Filter>sequencer</Filter>
     </ClCompile>
-    <ClCompile Include="..\src-ui-wx\sequencer\LyricBreakdown.cpp">
-      <Filter>sequencer</Filter>
-    </ClCompile>
+    <ClCompile Include="..\src-core\lyrics\LyricBreakdown.cpp" />
     <ClCompile Include="..\src-ui-wx\sequencer\RowHeading.cpp">
       <Filter>sequencer</Filter>
     </ClCompile>
@@ -1391,7 +1389,7 @@
     <ClInclude Include="..\src-core\utils\ExternalHooks.h" />
     <ClInclude Include="..\src-core\outputs\TestPreset.h" />
     <ClInclude Include="..\src-ui-wx\sequencer\PerspectivesPanel.h" />
-    <ClInclude Include="..\src-ui-wx\sequencer\PhonemeDictionary.h" />
+    <ClInclude Include="..\src-core\lyrics\PhonemeDictionary.h" />
     <ClInclude Include="..\src-core\render\PixelBuffer.h">
       <Filter>render</Filter>
     </ClInclude>
@@ -2014,9 +2012,7 @@
     <ClInclude Include="..\src-ui-wx\sequencer\MainSequencer.h">
       <Filter>sequencer</Filter>
     </ClInclude>
-    <ClInclude Include="..\src-ui-wx\sequencer\LyricBreakdown.h">
-      <Filter>sequencer</Filter>
-    </ClInclude>
+    <ClInclude Include="..\src-core\lyrics\LyricBreakdown.h" />
     <ClInclude Include="..\src-ui-wx\sequencer\RowHeading.h">
       <Filter>sequencer</Filter>
     </ClInclude>

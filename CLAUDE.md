@@ -157,7 +157,7 @@ xcodebuild -project macOS/xLights.xcodeproj -scheme xLights-iPadLib \
 
 The codebase physically separates wx-free core logic from wxWidgets UI code. Core code lives in `src-core/`, UI code in `src-ui-wx/`. The goal is a platform-neutral core usable without wx (e.g., for an iPad app). Build system files remain in `xLights/`.
 
-**Core packages** (enforced by `ci_scripts/check_core_include_boundaries.sh`): `discovery/`, `graphics/`, `media/`, `render/`, `effects/`, `models/`, `outputs/`, `controllers/`, `utils/`, `XmlSerializer/`. These directories **must not** include `ui/` headers, `xLightsMain.h`, or `xLightsApp.h` in their public headers or implementation files. New violations are blocked in strict mode; approved exceptions live in `ci_scripts/include_policy_allowlist.txt`.
+**Core rule:** anything under `src-core/` **must not** include anything from `src-ui-wx/` / `src-ui*/` or any `wx/…` header. This applies to every file in every core package — public headers and implementation files alike. The goal is that `src-core/` compiles and links without wxWidgets so the iPad app (and any future non-wx host) can reuse it unchanged. Core packages enforced by `ci_scripts/check_core_include_boundaries.sh`: `discovery/`, `graphics/`, `lyrics/`, `media/`, `render/`, `effects/`, `models/`, `outputs/`, `controllers/`, `utils/`, `XmlSerializer/`. New violations are blocked in strict mode; approved exceptions live in `ci_scripts/include_policy_allowlist.txt`.
 
 **`src-core/graphics/`** — wx-free core graphics abstraction layer:
 - `xlGraphicsContext.h` — abstract GPU context interface (no wx types; no window pointer; use `setContextualValue`/`getContextualValue` for passing context like `IModelPreview*`)

@@ -46,9 +46,10 @@ one remaining cohesive desktop workflow that has no iPad path. See
 
 **Out of Phase B:** B16 (drag-from-palette with ghost) deferred
 pending user feedback — tap-to-arm + tap-to-place is working well
-in practice. B85 (word → phoneme breakdown) deferred pending a
-wx-free port of `PhonemeDictionary`. B86 removed — not a real
-desktop feature.
+in practice. B85 (word → phoneme breakdown) unblocked 2026-04-21 —
+`PhonemeDictionary` ported to `src-core/lyrics/`; iPad bridge +
+bundled-dictionary wiring is the remaining work. B86 removed — not
+a real desktop feature.
 
 ---
 
@@ -421,15 +422,15 @@ Most mark-editing + breakdown work landed. What's left:
 
 ### 5.2 Breakdown (remaining)
 
-- **Gap B85 — Breakdown Word / Words.** **Deferred — requires
-  phoneme dictionary port.** Desktop's `BreakdownWord` depends on
-  `PhonemeDictionary` (CMU-dict-style loader + lookup) in
-  `src-ui-wx/sequencer/PhonemeDictionary.{h,cpp}`. That class is
-  wx-based (wxString, wxArrayString, wxFontEncoding) so shipping
-  on iPad requires a wx-free port plus bundling the dictionary
-  file(s). Existing Papagayo-authored sequences still render
-  correctly (B88), so this only blocks iPad-authored lyric
-  tracks.
+- **Gap B85 — Breakdown Word / Words.** **Unblocked
+  2026-04-21 — wx-free port landed.** `PhonemeDictionary` and the
+  `BreakdownPhrase` / `BreakdownWord` helpers now live in
+  `src-core/lyrics/` and use only std::string / std::vector.
+  Desktop still drives them via `xLightsFrame::dictionary` +
+  `LoadPhonemeDictionaries()`; iPad wiring (bridge entry, bundled
+  dictionary files, progress UI) is the remaining work for this
+  gap. Existing Papagayo-authored sequences still render
+  correctly (B88).
 - **Gap B87 — Remove Words / Phonemes / Words-and-Phonemes.**
   **[landed 2026-04-20].** "Remove Words / Phonemes" destructive
   entry on the timing-row header long-press menu (layer 0 only,
@@ -513,8 +514,8 @@ duration. It's app-internal, not the system pasteboard.
   pending user feedback. Tap-to-arm + tap-to-place is working
   well on touch; revisit only if users ask for drag-cancel
   mid-gesture.
-- **Gap B85 — Breakdown Word / Words.** See § 5.2 — needs
-  `PhonemeDictionary` port.
+- **Gap B85 — Breakdown Word / Words.** See § 5.2 — port landed
+  2026-04-21; iPad bridge + bundled dictionary still TODO.
 - **Gap B86 — Breakdown Phoneme.** Removed from scope. Not a
   real desktop feature (desktop has exactly Phrases + Words
   breakdowns; phonemes fall out of the Word breakdown).

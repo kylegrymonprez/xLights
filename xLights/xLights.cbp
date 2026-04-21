@@ -411,8 +411,8 @@
 		<Unit filename="../src-ui-wx/model/PathGenerationDialog.h" />
 		<Unit filename="../src-ui-wx/sequencer/PerspectivesPanel.cpp" />
 		<Unit filename="../src-ui-wx/sequencer/PerspectivesPanel.h" />
-		<Unit filename="../src-ui-wx/sequencer/PhonemeDictionary.cpp" />
-		<Unit filename="../src-ui-wx/sequencer/PhonemeDictionary.h" />
+		<Unit filename="../src-core/lyrics/PhonemeDictionary.cpp" />
+		<Unit filename="../src-core/lyrics/PhonemeDictionary.h" />
 		<Unit filename="../src-core/render/IRenderJobStatus.h" />
 		<Unit filename="../src-core/render/IRenderProgressSink.h" />
 		<Unit filename="../src-core/render/JukeboxButtonData.h" />
@@ -1184,8 +1184,8 @@
 		<Unit filename="../src-core/render/Element.h" />
 		<Unit filename="../src-ui-wx/sequencer/MainSequencer.cpp" />
 		<Unit filename="../src-ui-wx/sequencer/MainSequencer.h" />
-		<Unit filename="../src-ui-wx/sequencer/LyricBreakdown.cpp" />
-		<Unit filename="../src-ui-wx/sequencer/LyricBreakdown.h" />
+		<Unit filename="../src-core/lyrics/LyricBreakdown.cpp" />
+		<Unit filename="../src-core/lyrics/LyricBreakdown.h" />
 		<Unit filename="../src-ui-wx/sequencer/RowHeading.cpp" />
 		<Unit filename="../src-ui-wx/sequencer/RowHeading.h" />
 		<Unit filename="../src-core/render/SequenceElements.cpp" />
