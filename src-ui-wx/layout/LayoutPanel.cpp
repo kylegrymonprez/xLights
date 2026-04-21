@@ -960,7 +960,7 @@ LayoutPanel::LayoutPanel(wxWindow* parent, xLightsFrame *xl, wxPanel* sequencer)
         layoutControlsBar->SetSizer(lcbSizer);
         layoutControlsBar->SetMinSize(wxSize(-1, 68));
     }
-    PreviewGLPanel->GetSizer()->Add(layoutControlsBar, 0, wxEXPAND|wxBOTTOM, 3);
+    PreviewGLPanel->GetSizer()->Add(layoutControlsBar, 0, wxEXPAND | wxALIGN_BOTTOM, 3);
     PreviewGLPanel->Layout();
 
     TreeListViewModels->SetColumnWidth(0, wxCOL_WIDTH_AUTOSIZE);
