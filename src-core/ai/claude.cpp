@@ -1,18 +1,16 @@
-#include "claude.h"
-#include <nlohmann/json.hpp>
-#include "ServiceManager.h"
+#include "ai/claude.h"
+#include "ai/ServiceManager.h"
+
 #include "utils/CurlManager.h"
-#include "UtilFunctions.h"
-#include "shared/utils/wxUtilities.h"
+#include "utils/UtilFunctions.h"
 
-#include <wx/propgrid/propgrid.h>
-#include <wx/msgdlg.h>
-
-#include <set>
-#include <vector>
-#include <string>
+#include <nlohmann/json.hpp>
 
 #include <log.h>
+
+#include <set>
+#include <string>
+#include <vector>
 
 bool claude::IsAvailable() const {
     return !api_key.empty() && !_enabledTypes.empty();
@@ -37,38 +35,47 @@ void claude::LoadSettings() {
     }
 }
 
-void claude::PopulateLLMSettings(wxPropertyGrid* page) {
-    page->Append(new wxPropertyCategory("Claude"));
+std::vector<ServiceProperty> claude::GetProperties() const {
+    std::vector<ServiceProperty> props;
+    props.push_back({ ServiceProperty::Kind::Category, {}, "Claude", "Claude", {}, {}, {} });
     for (auto t : GetTypes()) {
-        auto p = page->Append(new wxBoolProperty(wxString("Enable ") + aiType::TypeName(t),
-                                                  wxString("Claude.Enable_") + aiType::TypeSettingsSuffix(t),
-                                                  IsEnabledForType(t)));
-        p->SetEditor("CheckBox");
+        props.push_back({
+            ServiceProperty::Kind::Bool,
+            std::string("Claude.Enable_") + aiType::TypeSettingsSuffix(t),
+            std::string("Enable ") + aiType::TypeName(t),
+            "Claude",
+            {},
+            {},
+            IsEnabledForType(t)
+        });
     }
-    auto* apiKeyProp = page->Append(new wxStringProperty("API Key", "Claude.Key", api_key));
-    apiKeyProp->SetAttribute(wxPG_STRING_PASSWORD, true);
-    apiKeyProp->SetHelpString("Your Anthropic API key (masked for security)");
-    page->Append(new wxStringProperty("Model", "Claude.Model", claudeModel));
+    props.push_back({ ServiceProperty::Kind::Secret, "Claude.Key", "API Key", "Claude",
+                     "Your Anthropic API key (masked for security)", {}, api_key });
+    props.push_back({ ServiceProperty::Kind::String, "Claude.Model", "Model", "Claude", {}, {}, claudeModel });
+    return props;
 }
 
-void claude::SetSetting(const std::string& key, const wxVariant& value) {
+void claude::SetProperty(const std::string& id, bool value) {
     for (auto t : GetTypes()) {
-        if (key == std::string("Claude.Enable_") + aiType::TypeSettingsSuffix(t)) {
-            SetEnabledForType(t, value.GetBool());
+        if (id == std::string("Claude.Enable_") + aiType::TypeSettingsSuffix(t)) {
+            SetEnabledForType(t, value);
             return;
         }
     }
-    if (key == "Claude.Key") {
-        api_key = value.GetString().ToStdString();
-    } else if (key == "Claude.Model") {
-        claudeModel = value.GetString().ToStdString();
+}
+
+void claude::SetProperty(const std::string& id, const std::string& value) {
+    if (id == "Claude.Key") {
+        api_key = value;
+    } else if (id == "Claude.Model") {
+        claudeModel = value;
     }
 }
 
 static std::pair<std::string, bool> CallAnthropicAPI(const std::string& base_url, const std::string& api_key, const std::string& model,
                                     const nlohmann::json& messages, int max_tokens, const std::string& serviceName,
                                     const std::string& system_prompt = "") {
-    
+
     nlohmann::json requestJson;
     requestJson["model"] = model;
     requestJson["max_tokens"] = max_tokens;
@@ -163,7 +170,6 @@ static std::string ExtractTextContent(const std::string& response, const std::st
 std::pair<std::string, bool> claude::CallLLM(const std::string& prompt) const {
 
     if (api_key.empty()) {
-        wxMessageBox("You must set a Claude API Key in the Preferences on the Services Panel", "Error", wxICON_ERROR);
         return { "Claude: API Key is empty", false };
     }
 
@@ -188,7 +194,7 @@ std::pair<std::string, bool> claude::CallLLM(const std::string& prompt) const {
 }
 
 aiBase::AIColorPalette claude::GenerateColorPalette(const std::string& prompt) const {
-    
+
     aiBase::AIColorPalette ret;
 
     if (api_key.empty()) {

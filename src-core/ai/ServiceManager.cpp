@@ -1,25 +1,14 @@
-#include "ServiceManager.h"
-#include "settings/XLightsConfigAdapter.h"
-#include "aiBase.h"
-#include "aiPlugin.h"
-#include "chatGPT.h"
-#include "claude.h"
-#include "gemini.h"
-#include "ollama.h"
-#include "GenericClient.h"
+#include "ai/ServiceManager.h"
+#include "ai/IServiceSettingsStore.h"
+#include "ai/aiBase.h"
+#include "ai/aiPlugin.h"
+#include "ai/chatGPT.h"
+#include "ai/claude.h"
+#include "ai/gemini.h"
+#include "ai/ollama.h"
+#include "ai/GenericClient.h"
 
-#ifdef __WXOSX__
-#include "AppleIntelligence.h"
-#endif
-
-#include "xLightsMain.h"
-#include "utils/CurlManager.h"
-#include "UtilFunctions.h"
-#include "shared/utils/wxUtilities.h"
-
-#include <wx/secretstore.h>
-#include <wx/filename.h>
-#include <wx/stdpaths.h>
+#include "utils/string_utils.h"
 
 #include <filesystem>
 #include <memory>
@@ -34,33 +23,33 @@
 
 #include <log.h>
 
-// Helper: wrap a built-in service (deleted via operator delete)
-static ServiceManager::ServicePtr makeBuiltin(aiBase* p) {
-    return ServiceManager::ServicePtr(p, [](aiBase* s) { delete s; });
+// Settings keys are prefixed so services can pick short keys ("ClaudeModel")
+// without worrying about collisions with the wider app config.
+constexpr const char* kSettingsPrefix = "xLightsServiceSettings";
+
+static std::string prefixKey(std::string_view key) {
+    std::string s(kSettingsPrefix);
+    s.append(key);
+    return s;
 }
 
-ServiceManager::ServiceManager(xLightsFrame* xl)
+// Helper: wrap a built-in service (deleted via operator delete)
+static ServiceManager::ServicePtr makeBuiltin(aiBase* p) {
+    return { p, [](aiBase* s) { delete s; } };
+}
+
+ServiceManager::ServiceManager(IServiceSettingsStore* store, const std::string& pluginDir)
+    : m_store(store)
 {
-#if defined(__WXOSX__) && defined(__arm64__)
-    {
-        auto appleIntel = new AppleIntelligence(this);
-        if (!appleIntel->GetTypes().empty()) {
-            m_services.push_back(makeBuiltin(appleIntel));
-        } else {
-            delete appleIntel;
-        }
-    }
-#endif
     m_services.push_back(makeBuiltin(new chatGPT(this)));
     m_services.push_back(makeBuiltin(new claude(this)));
     m_services.push_back(makeBuiltin(new ollama(this)));
     m_services.push_back(makeBuiltin(new gemini(this)));
     m_services.push_back(makeBuiltin(new GenericClient(this)));
 
-    // Load plugin DLLs from <exe dir>/ai_plugins/
-    wxFileName exePath(wxStandardPaths::Get().GetExecutablePath());
-    std::string pluginDir = (exePath.GetPath() + wxFILE_SEP_PATH + "ai_plugins").ToStdString();
-    loadPlugins(pluginDir);
+    if (!pluginDir.empty()) {
+        loadPlugins(pluginDir);
+    }
 
     for (auto& service : m_services) {
         service->LoadSettings();
@@ -206,11 +195,15 @@ aiBase* ServiceManager::getService(std::string const& serviceName) {
 }
 
 void ServiceManager::addService(std::unique_ptr<aiBase> service) {
-    m_services.emplace_back(service.release(), [](aiBase* s) { delete s; });
+    auto* raw = service.release();
+    m_services.emplace_back(raw, [](aiBase* s) { delete s; });
+    raw->LoadSettings();
 }
 
 void ServiceManager::addService(ServicePtr service) {
+    auto* raw = service.get();
     m_services.push_back(std::move(service));
+    raw->LoadSettings();
 }
 
 aiBase* ServiceManager::findService(aiType::TYPE serviceType) {
@@ -236,86 +229,34 @@ std::vector<aiBase*> ServiceManager::findServices(aiType::TYPE serviceType) {
     return ret;
 }
 
-void ServiceManager::setServiceSetting(std::string const& key, int value) {
-    auto* config = GetXLightsConfig();
-    config->Write(std::string("xLightsServiceSettings" + key), value);
-    config->Flush();
+void ServiceManager::setServiceSetting(std::string_view key, int value) {
+    if (m_store) m_store->setInt(prefixKey(key), value);
 }
 
-void ServiceManager::setServiceSetting(std::string const& key, bool value) {
-    auto* config = GetXLightsConfig();
-    config->Write(std::string("xLightsServiceSettings" + key), value);
-    config->Flush();
+void ServiceManager::setServiceSetting(std::string_view key, bool value) {
+    if (m_store) m_store->setBool(prefixKey(key), value);
 }
 
-void ServiceManager::setServiceSetting(std::string const& key, std::string const& value) {
-    // It would be nice if we had a secret we  could encrypt these with
-    auto* config = GetXLightsConfig();
-    config->Write(std::string("xLightsServiceSettings" + key), std::string(value));
-    config->Flush();
+void ServiceManager::setServiceSetting(std::string_view key, std::string const& value) {
+    if (m_store) m_store->setString(prefixKey(key), value);
 }
 
-int ServiceManager::getServiceSetting(std::string const& key, int defaultValue) const {
-    auto* config = GetXLightsConfig();
-    return config->Read(std::string("xLightsServiceSettings" + key), defaultValue);
+int ServiceManager::getServiceSetting(std::string_view key, int defaultValue) const {
+    return m_store ? m_store->getInt(prefixKey(key), defaultValue) : defaultValue;
 }
 
-bool ServiceManager::getServiceSetting(std::string const& key, bool defaultValue) const {
-    auto* config = GetXLightsConfig();
-    return config->Read(std::string("xLightsServiceSettings" + key), defaultValue);
+bool ServiceManager::getServiceSetting(std::string_view key, bool defaultValue) const {
+    return m_store ? m_store->getBool(prefixKey(key), defaultValue) : defaultValue;
 }
 
-std::string ServiceManager::getServiceSetting(std::string const& key, std::string const& defaultValue) const {
-    // It would be nice if we had a secret we  could encrypt these with
-    auto* config = GetXLightsConfig();
-    std::string const value = config->Read(std::string("xLightsServiceSettings" + key), (defaultValue));
-    return value;
+std::string ServiceManager::getServiceSetting(std::string_view key, std::string const& defaultValue) const {
+    return m_store ? m_store->getString(prefixKey(key), defaultValue) : defaultValue;
 }
 
-#if wxUSE_SECRETSTORE
-static wxSecretStore pwdStore = wxSecretStore::GetDefault();
-std::string ServiceManager::getSecretServiceToken(std::string const& service) const {
-    if (pwdStore.IsOk()) {
-        wxSecretValue password;
-        wxString usr;
-        if (pwdStore.Load("xLightsServiceSettings" + service, usr, password)) {
-            //user = usr;
-            return password.GetAsString();
-        }
-    }
-    return std::string();
+std::string ServiceManager::getSecretServiceToken(std::string_view serviceName) const {
+    return m_store ? m_store->getSecret(prefixKey(serviceName)) : std::string();
 }
 
-void ServiceManager::setSecretServiceToken(std::string const& service, std::string const& token) {
-    if (!pwdStore.IsOk()) {
-       return;
-    }
-
-    wxSecretValue tt(token);
-    if (!pwdStore.Save("xLightsServiceSettings" + service, "token", tt)) {
-        printf("Failed to save %s\n", (const char *)service.c_str());
-    }
+void ServiceManager::setSecretServiceToken(std::string_view serviceName, std::string const& token) {
+    if (m_store) m_store->setSecret(prefixKey(serviceName), token);
 }
-#else
-std::string ServiceManager::getSecretServiceToken(std::string const& service) const {
-    return getServiceSetting(service + "_token", std::string());
-}
-
-void ServiceManager::setSecretServiceToken(std::string const& service, std::string const& token) {
-    setServiceSetting(service + "_token", token);
-}
-#endif
-
-/*
-std::unique_ptr<aiBase> ServiceManager::GetLLM() {
-    // we arrange these in priority order ... although in reality users are likely to only have one
-    // maybe we need to give the user control over the order of use (although i am not sure when it would use anything other than the top one)
-
-    auto gpt = std::make_unique<chatGPT>(chatGPT(this));
-    if (gpt->IsAvailable()) {
-        return gpt;
-    }
-
-    return nullptr;
-}
-*/

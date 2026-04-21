@@ -12,7 +12,10 @@
 
 #include "OpenAIAPI.h"
 #include "aiType.h"
+
+#include <list>
 #include <string>
+#include <vector>
 
 // https://platform.openai.com/docs/api-reference/introduction
 // to get a list of models curl https://api.openai.com/v1/models -H "Authorization: Bearer YOUR_API_KEY"
@@ -25,13 +28,14 @@ class chatGPT : public OpenAIAPI {
 	explicit chatGPT(ServiceManager* sm) :
             OpenAIAPI(sm) {
         }
-	virtual ~chatGPT() {}
+    ~chatGPT() override = default;
 
     void SaveSettings() const override;
     void LoadSettings() override;
 
-    void PopulateLLMSettings(wxPropertyGrid* page) override;
-    void SetSetting(const std::string& key, const wxVariant& value) override;
+    [[nodiscard]] std::vector<ServiceProperty> GetProperties() const override;
+    void SetProperty(const std::string& id, bool value) override;
+    void SetProperty(const std::string& id, const std::string& value) override;
 
     [[nodiscard]] bool IsAvailable() const override;
     [[nodiscard]] std::string GetLLMName() const override {

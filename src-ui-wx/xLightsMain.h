@@ -1903,6 +1903,7 @@ private:
     SequenceVideoPanel* sequenceVideoPanel = nullptr;
     SearchPanel* _searchPanel = nullptr;
     std::unique_ptr<ScriptsDialog> _scriptsDialog{ nullptr };
+    std::unique_ptr<class WxServiceSettingsStore> _serviceSettingsStore;
     std::unique_ptr<ServiceManager> _serviceManager{ nullptr };
     int mMediaLengthMS;
     bool _usedRuler = false;

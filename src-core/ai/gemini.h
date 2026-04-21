@@ -12,7 +12,11 @@
 
 #include "aiBase.h"
 #include "aiType.h"
+
+#include <list>
 #include <string>
+#include <utility>
+#include <vector>
 
 // Google Gemini API documentation:
 // https://ai.google.dev/gemini-api/docs
@@ -29,13 +33,14 @@ public:
     explicit gemini(ServiceManager* sm) :
         aiBase(sm) {
     }
-    virtual ~gemini() {}
+    ~gemini() override = default;
 
     void SaveSettings() const override;
     void LoadSettings() override;
 
-    void PopulateLLMSettings(wxPropertyGrid* page) override;
-    void SetSetting(const std::string& key, const wxVariant& value) override;
+    [[nodiscard]] std::vector<ServiceProperty> GetProperties() const override;
+    void SetProperty(const std::string& id, bool value) override;
+    void SetProperty(const std::string& id, const std::string& value) override;
 
     [[nodiscard]] std::pair<std::string, bool> CallLLM(const std::string& prompt) const override;
     [[nodiscard]] bool IsAvailable() const override;
@@ -46,5 +51,5 @@ public:
         return std::list({ aiType::TYPE::IMAGES}); // aiType::TYPE::PROMPT });
     }
 
-    virtual AIImageGenerator *createAIImageGenerator() const override;
+    [[nodiscard]] AIImageGenerator* createAIImageGenerator() const override;
 };

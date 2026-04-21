@@ -12,8 +12,11 @@
 
 #include "OpenAIAPI.h"
 #include "aiType.h"
-#include <string>
 #include "aiBase.h"
+
+#include <list>
+#include <string>
+#include <vector>
 
 /*
  Generic OpenAI API V1 compatible client, set base URL to http://localhost:8000/api/v1.
@@ -31,13 +34,14 @@ class GenericClient : public OpenAIAPI {
 	explicit GenericClient(ServiceManager* frame) :
             OpenAIAPI("http://localhost:8000/api/v1", "Llama-3.2-1B-Instruct-GGUF", "SD-Turbo", "Whisper-Large-v3-Turbo", "fake", frame) {
         }
-    virtual ~GenericClient() = default; 
+    ~GenericClient() override = default;
 
     void SaveSettings() const override;
     void LoadSettings() override;
 
-    void PopulateLLMSettings(wxPropertyGrid* page) override;
-    void SetSetting(const std::string& key, const wxVariant& value) override;
+    [[nodiscard]] std::vector<ServiceProperty> GetProperties() const override;
+    void SetProperty(const std::string& id, bool value) override;
+    void SetProperty(const std::string& id, const std::string& value) override;
 
     [[nodiscard]] bool IsAvailable() const override;
     [[nodiscard]] std::string GetLLMName() const override {

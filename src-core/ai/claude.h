@@ -12,8 +12,12 @@
 
 #include "aiBase.h"
 #include "aiType.h"
+
 #include <list>
+#include <map>
 #include <string>
+#include <utility>
+#include <vector>
 
 // https://docs.anthropic.com/en/docs/about-claude/models
 // https://docs.anthropic.com/en/api/messages
@@ -28,13 +32,14 @@ public:
     explicit claude(ServiceManager* sm) :
         aiBase(sm) {
     }
-    virtual ~claude() {}
+    ~claude() override = default;
 
     void SaveSettings() const override;
     void LoadSettings() override;
 
-    void PopulateLLMSettings(wxPropertyGrid* page) override;
-    void SetSetting(const std::string& key, const wxVariant& value) override;
+    [[nodiscard]] std::vector<ServiceProperty> GetProperties() const override;
+    void SetProperty(const std::string& id, bool value) override;
+    void SetProperty(const std::string& id, const std::string& value) override;
 
     [[nodiscard]] std::pair<std::string, bool> CallLLM(const std::string& prompt) const override;
     [[nodiscard]] bool IsAvailable() const override;

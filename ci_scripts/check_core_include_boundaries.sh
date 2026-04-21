@@ -33,6 +33,7 @@ if ! command -v rg >/dev/null 2>&1; then
 fi
 
 CORE_DIRS=(
+    "src-core/ai"
     "src-core/common"
     "src-core/discovery"
     "src-core/graphics"

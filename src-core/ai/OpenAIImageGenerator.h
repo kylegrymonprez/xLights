@@ -11,11 +11,8 @@
  **************************************************************/
 
 #include "aiBase.h"
-#include "aiType.h"
 
-#include <wx/bitmap.h>
-#include <wx/dialog.h>
-#include <wx/sizer.h>
+#include <functional>
 #include <string>
 
 class OpenAIImageGenerator : public aiBase::AIImageGenerator {
@@ -25,13 +22,12 @@ private:
     std::string image_model;
 
 public:
-    OpenAIImageGenerator(const std::string& base_url_, const std::string& token_, const std::string& modelName) :
-        base_url(base_url_), token(token_), image_model(modelName) {
+    OpenAIImageGenerator(std::string base_url_, std::string token_, std::string modelName) :
+        base_url(std::move(base_url_)), token(std::move(token_)), image_model(std::move(modelName)) {
     }
 
-    virtual ~OpenAIImageGenerator() {
-    }
+    ~OpenAIImageGenerator() override = default;
 
     void generateImage(const std::string& prompt,
-                               const std::function<void(const wxBitmap&, const std::string&)>& cb) override;
+                       std::function<void(aiBase::AIImageResult)> callback) override;
 };

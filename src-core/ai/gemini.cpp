@@ -1,30 +1,27 @@
-#include "gemini.h"
-#include "AIImageDialog.h"
-#include <nlohmann/json.hpp>
-#include "ServiceManager.h"
+#include "ai/gemini.h"
+#include "ai/ServiceManager.h"
+
+#include "utils/Base64.h"
 #include "utils/CurlManager.h"
-#include "UtilFunctions.h"
-#include "shared/utils/wxUtilities.h"
+#include "utils/UtilFunctions.h"
+#include "utils/string_utils.h"
 
-#include <wx/propgrid/propgrid.h>
-#include <wx/mstream.h>
-#include <wx/base64.h>
-#include <wx/msgdlg.h>
-#include <wx/choice.h>
-
-#include <vector>
-#include <string>
+#include <nlohmann/json.hpp>
 
 #include <log.h>
 
-//#define TEST_WITH_LOCAL_IMAGE
+#include <algorithm>
+#include <cctype>
+#include <functional>
+#include <string>
+#include <vector>
 
 bool gemini::IsAvailable() const {
     return !api_key.empty() && !_enabledTypes.empty();
 }
 
 void gemini::SaveSettings() const {
-    
+
     _sm->setServiceSetting("GeminiModel", model);
     _sm->setSecretServiceToken("GeminiApiKey", api_key);
     for (auto t : GetTypes()) {
@@ -43,36 +40,44 @@ void gemini::LoadSettings() {
     }
 }
 
-void gemini::PopulateLLMSettings(wxPropertyGrid* page) {
-    page->Append(new wxPropertyCategory("Gemini"));
+std::vector<ServiceProperty> gemini::GetProperties() const {
+    std::vector<ServiceProperty> props;
+    props.push_back({ ServiceProperty::Kind::Category, {}, "Gemini", "Gemini", {}, {}, {} });
     for (auto t : GetTypes()) {
-        auto p = page->Append(new wxBoolProperty(wxString("Enable ") + aiType::TypeName(t),
-                                                  wxString("Gemini.Enable_") + aiType::TypeSettingsSuffix(t),
-                                                  IsEnabledForType(t)));
-        p->SetEditor("CheckBox");
+        props.push_back({
+            ServiceProperty::Kind::Bool,
+            std::string("Gemini.Enable_") + aiType::TypeSettingsSuffix(t),
+            std::string("Enable ") + aiType::TypeName(t),
+            "Gemini",
+            {},
+            {},
+            IsEnabledForType(t)
+        });
     }
-    auto* apiKeyProp = page->Append(new wxStringProperty("API Key", "Gemini.Key", api_key));
-    apiKeyProp->SetAttribute(wxPG_STRING_PASSWORD, true);
-    apiKeyProp->SetHelpString("Your Google Gemini API key (masked for security)");
-    page->Append(new wxStringProperty("Model", "Gemini.Model", model));
+    props.push_back({ ServiceProperty::Kind::Secret, "Gemini.Key", "API Key", "Gemini",
+                     "Your Google Gemini API key (masked for security)", {}, api_key });
+    props.push_back({ ServiceProperty::Kind::String, "Gemini.Model", "Model", "Gemini", {}, {}, model });
+    return props;
 }
 
-void gemini::SetSetting(const std::string& key, const wxVariant& value) {
+void gemini::SetProperty(const std::string& id, bool value) {
     for (auto t : GetTypes()) {
-        if (key == std::string("Gemini.Enable_") + aiType::TypeSettingsSuffix(t)) {
-            SetEnabledForType(t, value.GetBool());
+        if (id == std::string("Gemini.Enable_") + aiType::TypeSettingsSuffix(t)) {
+            SetEnabledForType(t, value);
             return;
         }
     }
-    if (key == "Gemini.Key") {
-        api_key = value.GetString();
-    } else if (key == "Gemini.Model") {
-        model = value.GetString();
+}
+
+void gemini::SetProperty(const std::string& id, const std::string& value) {
+    if (id == "Gemini.Key") {
+        api_key = value;
+    } else if (id == "Gemini.Model") {
+        model = value;
     }
 }
 
 std::pair<std::string, bool> gemini::CallLLM(const std::string& prompt) const {
-    
 
     std::string apiKey = api_key;
 
@@ -81,7 +86,6 @@ std::pair<std::string, bool> gemini::CallLLM(const std::string& prompt) const {
     }
 
     if (api_key.empty() && apiKey.empty()) {
-        //wxMessageBox("You must set a Gemini API Key in the Preferences on the Services Panel", "Error", wxICON_ERROR);
         return { "Gemini: API Key is empty", false };
     }
 
@@ -95,12 +99,12 @@ std::pair<std::string, bool> gemini::CallLLM(const std::string& prompt) const {
         { "Authorization", "Bearer " + apiKey }
     };
 
-    spdlog::debug("Gemini: {}", request.c_str());
+    spdlog::debug("Gemini: {}", request);
 
-    int responseCode = 0;	
+    int responseCode = 0;
     std::string response = CurlManager::HTTPSPost(url, request, "", "", "JSON", 60, customHeaders, &responseCode);
 
-    spdlog::debug("Gemini Response {}: {}", responseCode, response.c_str());
+    spdlog::debug("Gemini Response {}: {}", responseCode, response);
 
     if (responseCode != 200) {
         return { response, false };
@@ -110,7 +114,7 @@ std::pair<std::string, bool> gemini::CallLLM(const std::string& prompt) const {
     try {
         root = nlohmann::json::parse(response);
     } catch (const std::exception&) {
-        spdlog::error("Gemini: Invalid JSON response: {}", response.c_str());
+        spdlog::error("Gemini: Invalid JSON response: {}", response);
         return { "Gemini: Invalid JSON response", false };
     }
 
@@ -128,10 +132,15 @@ std::pair<std::string, bool> gemini::CallLLM(const std::string& prompt) const {
     }
 
     response = text.get<std::string>();
-    spdlog::debug("Gemini: {}", response.c_str());
+    spdlog::debug("Gemini: {}", response);
 
     return { response, true };
 }
+
+namespace {
+
+constexpr const char* kGeminiStyleId = "Gemini.Style";
+constexpr const char* kGeminiStyleCategory = "Gemini Image";
 
 class GeminiImageGenerator : public aiBase::AIImageGenerator {
 private:
@@ -140,21 +149,42 @@ private:
     std::string style = "cartoon";
 
 public:
-    GeminiImageGenerator(const std::string& apiKey, const std::string& modelName)
-        : api_key(apiKey), model(modelName) {}
+    GeminiImageGenerator(std::string apiKey, std::string modelName)
+        : api_key(std::move(apiKey)), model(std::move(modelName)) {}
 
-    virtual ~GeminiImageGenerator() {}
+    ~GeminiImageGenerator() override = default;
 
-    virtual void generateImage(const std::string &prompt,
-        const std::function<void(const wxBitmap &, const std::string &)> &cb) override {
+    std::vector<ServiceProperty> GetProperties() const override {
+        ServiceProperty p;
+        p.kind = ServiceProperty::Kind::Choice;
+        p.id = kGeminiStyleId;
+        p.label = "Style";
+        p.category = kGeminiStyleCategory;
+        p.choices = { "cartoon", "sticker", "outline", "line art / neon glow" };
+        p.value = style;
+        return { p };
+    }
+
+    void SetProperty(const std::string& id, const std::string& value) override {
+        if (id == kGeminiStyleId) {
+            style = Lower(value);
+        }
+    }
+
+    void generateImage(const std::string& prompt,
+                       std::function<void(aiBase::AIImageResult)> cb) override {
+
+        aiBase::AIImageResult result;
 
         if (prompt.empty()) {
-            cb(wxBitmap(), "Prompt cannot be empty");
+            result.error = "Prompt cannot be empty";
+            cb(std::move(result));
             return;
         }
 
         if (api_key.empty()) {
-            cb(wxBitmap(), "Gemini API key not configured");
+            result.error = "Gemini API key not configured";
+            cb(std::move(result));
             return;
         }
 
@@ -171,20 +201,20 @@ public:
             styleDesc = "in detailed illustrative style";
         }
 
-        std::string fullPrompt = 
+        std::string fullPrompt =
             "Background: Pure Black background (#000000) with no watermarks or border. Design: 2D Vector Style. "
             "No black outlines; use soft, colored outlines that match the object's palette. "
             "Style: A minimalist, flat 2D pixel art illustration using a 8-bit look and minimalist facial features. "
             "Non-anthropomorphic (no faces or eyes). "
             "Details: Simple cel-shading, limited vibrant color palette, clean edges, and no gradients. "
-            "Ensure the lines are perfectly horizontal and vertical. Center the subject. " + styleDesc + 
+            "Ensure the lines are perfectly horizontal and vertical. Center the subject. " + styleDesc +
             " Subject: " + prompt;
 
         Replace(fullPrompt, std::string("\t"), std::string(" "));
         Replace(fullPrompt, std::string("\r"), std::string(""));
 
-        std::string model = "gemini-2.5-flash-image";  // Correct model name
-        std::string endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent";
+        std::string imgModel = "gemini-2.5-flash-image";  // Correct model name
+        std::string endpoint = "https://generativelanguage.googleapis.com/v1beta/models/" + imgModel + ":generateContent";
 
         nlohmann::json req;
         req["contents"][0]["parts"][0]["text"] = fullPrompt;
@@ -197,27 +227,16 @@ public:
             {"Content-Type", "application/json"}
         };
 
-       spdlog::debug("Gemini image request: {}", jsonBody.c_str());
+        spdlog::debug("Gemini image request: {}", jsonBody);
 
-#ifdef TEST_WITH_LOCAL_IMAGE
-        // Load test image from file
-        wxImage wxImg("F:\\ShowFolderQA\\Gemini_Generated_Image.png", wxBITMAP_TYPE_PNG);
-        if (!wxImg.IsOk()) {
-            spdlog::error("Failed to load test image");
-            cb(wxBitmap(), "Failed to load test image.");
-            return;
-        }
-
-        spdlog::debug("Test image loaded with image size: {}x{}", wxImg.GetWidth(), wxImg.GetHeight());
-        cb(wxImg, jsonBody.c_str());
-#else
         int httpCode = 0;
         std::string response = CurlManager::HTTPSPost(endpoint, jsonBody, "", "", "JSON", 120, headers, &httpCode);
 
         spdlog::debug("Gemini image response code: {}, body length: {}", httpCode, response.size());
 
         if (httpCode != 200) {
-            cb(wxBitmap(), "Gemini API error " + std::to_string(httpCode) + ": " + response.substr(0, 300));
+            result.error = "Gemini API error " + std::to_string(httpCode) + ": " + response.substr(0, 300);
+            cb(std::move(result));
             return;
         }
 
@@ -226,13 +245,13 @@ public:
             root = nlohmann::json::parse(response);
         } catch (const std::exception& e) {
             spdlog::error("Gemini image JSON parse failed: {}", e.what());
-            cb(wxBitmap(), "Invalid response from Gemini");
+            result.error = "Invalid response from Gemini";
+            cb(std::move(result));
             return;
         }
 
         std::string base64Data;
         try {
-            // Iterate through parts to find the image data
             if (root.contains("candidates") && root["candidates"].is_array() && !root["candidates"].empty()) {
                 auto parts = root["candidates"][0]["content"]["parts"];
                 for (const auto& part : parts) {
@@ -244,56 +263,33 @@ public:
             }
         } catch (...) {
             std::string errMsg = root.contains("error") ? root["error"]["message"].get<std::string>() : "No image data found";
-            spdlog::error("Gemini image: {}", errMsg.c_str());
-            cb(wxBitmap(), "Gemini: " + errMsg);
+            spdlog::error("Gemini image: {}", errMsg);
+            result.error = "Gemini: " + errMsg;
+            cb(std::move(result));
             return;
         }
 
         if (base64Data.empty()) {
-            cb(wxBitmap(), "No image data found in response");
+            result.error = "No image data found in response";
+            cb(std::move(result));
             return;
         }
 
         // Remove whitespace from base64 data
-        base64Data.erase(std::remove_if(base64Data.begin(), base64Data.end(), ::isspace), base64Data.end());
+        base64Data.erase(std::remove_if(base64Data.begin(), base64Data.end(),
+                                        [](unsigned char c) { return std::isspace(c); }),
+                         base64Data.end());
 
-        wxMemoryBuffer decoded = wxBase64Decode(base64Data.c_str(), base64Data.length());
-        if (decoded.GetDataLen() == 0) {
-            cb(wxBitmap(), "Base64 decode failed");
-            return;
+        result.pngBytes = Base64::Decode(base64Data);
+        if (result.pngBytes.empty()) {
+            result.error = "Base64 decode failed";
         }
-
-        wxMemoryInputStream memStream(decoded.GetData(), decoded.GetDataLen());
-        wxImage wxImg(memStream, wxBITMAP_TYPE_PNG);
-
-        if (!wxImg.IsOk()) {
-            cb(wxBitmap(), "Failed to load generated image");
-            return;
-        }
-
-        spdlog::debug("Generated image size: {}x{}", wxImg.GetWidth(), wxImg.GetHeight());
-        wxBitmap bmp(wxImg);
-        cb(bmp, "");
-#endif
+        cb(std::move(result));
     }
-    virtual void addControls(wxDialog *parent, wxSizer *sizer) override {
-        wxStaticText *StaticText2 = new wxStaticText(parent, wxNewId(), _T("Style"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT3"));
-        sizer->Add(StaticText2, 1, wxALL|wxALIGN_CENTER_HORIZONTAL|wxALIGN_CENTER_VERTICAL, 5);
-        wxChoice *Choice1 = new wxChoice(parent, wxNewId(), wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, _T("ID_CHOICE1"));
-        Choice1->Append(_T("Cartoon"));
-        Choice1->Append(_T("Sticker"));
-        Choice1->Append(_T("Outline"));
-        Choice1->Append(_T("Line art / Neon glow"));
-        Choice1->SetSelection(0);
-        sizer->Add(Choice1, 1, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
-
-        Choice1->Bind(wxEVT_COMMAND_CHOICE_SELECTED, [this](wxCommandEvent& event) {
-            style = Lower(event.GetString().ToStdString());
-            });
-    }
-
 };
 
-aiBase::AIImageGenerator *gemini::createAIImageGenerator() const {
+} // namespace
+
+aiBase::AIImageGenerator* gemini::createAIImageGenerator() const {
     return new GeminiImageGenerator(api_key, model);
 }

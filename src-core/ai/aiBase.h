@@ -11,21 +11,18 @@
  **************************************************************/
 
 #include "aiType.h"
+#include "ServiceProperty.h"
 
+#include <cstdint>
 #include <functional>
-#include <utility>
-#include <string>
 #include <list>
 #include <map>
 #include <set>
+#include <string>
+#include <utility>
 #include <vector>
 
 class ServiceManager;
-class wxPropertyGrid;
-class wxVariant;
-class wxSizer;
-class wxDialog;
-class wxBitmap;
 
 class aiBase {
 protected:
@@ -34,7 +31,12 @@ protected:
 public:
     // Inline so plugin DLLs need no import linkage back to xLights.exe
     explicit aiBase(ServiceManager* sm) : _sm(sm) {}
-    virtual ~aiBase() {}
+    virtual ~aiBase() = default;
+
+    aiBase(const aiBase&) = delete;
+    aiBase& operator=(const aiBase&) = delete;
+    aiBase(aiBase&&) = delete;
+    aiBase& operator=(aiBase&&) = delete;
 
     virtual void SaveSettings() const = 0;
     virtual void LoadSettings() = 0;
@@ -55,41 +57,71 @@ public:
 
     [[nodiscard]] virtual std::pair<std::string, bool> CallLLM(const std::string& prompt) const = 0;
     [[nodiscard]] virtual std::pair<std::string, bool> TestLLM() const { return CallLLM("Hello"); }
-    
-    virtual void PopulateLLMSettings(wxPropertyGrid* page) = 0;  
-    virtual void SetSetting(const std::string& key, const wxVariant& value) = 0;
-    
-    
+
+    // Declarative list of editable settings for this service. The UI
+    // (wxPropertyGrid on desktop, SwiftUI Form on iPad) builds its controls
+    // from this vector. See ServiceProperty.h.
+    [[nodiscard]] virtual std::vector<ServiceProperty> GetProperties() const = 0;
+
+    // Property setters. Overloads cover the three value types that properties
+    // can carry — the UI calls the overload matching the property's Kind.
+    virtual void SetProperty(const std::string& id, bool value) {}
+    virtual void SetProperty(const std::string& id, int value) {}
+    virtual void SetProperty(const std::string& id, const std::string& value) {}
+
+
     // For ColorPalette generation:
-    class AIColor {
-    public:
+    struct AIColor {
         std::string hexValue;
         std::string name;
-        std::string description;        
+        std::string description;
     };
-    class AIColorPalette {
-    public:
+    struct AIColorPalette {
         std::string description;
         std::vector<AIColor> colors;
 
         std::string error;
     };
 
-    
-    virtual AIColorPalette GenerateColorPalette(const std::string &prompt) const {
-        return AIColorPalette();
+
+    [[nodiscard]] virtual AIColorPalette GenerateColorPalette(const std::string& prompt) const {
+        return {};
     }
+
+    // Result of an image generation call. On success pngBytes holds encoded
+    // PNG data (host decodes into wxBitmap / UIImage / NSImage as needed).
+    // On failure pngBytes is empty and error is non-empty.
+    struct AIImageResult {
+        std::vector<uint8_t> pngBytes;
+        std::string error;
+    };
 
     class AIImageGenerator {
     public:
-        virtual ~AIImageGenerator() {}
-        
-        virtual void generateImage(const std::string &prompt,
-                                   const std::function<void(const wxBitmap &, const std::string &err)> &callback) = 0;
-        virtual void addControls(wxDialog *parent, wxSizer *sizer) {}
+        AIImageGenerator() = default;
+        virtual ~AIImageGenerator() = default;
+
+        AIImageGenerator(const AIImageGenerator&) = delete;
+        AIImageGenerator& operator=(const AIImageGenerator&) = delete;
+        AIImageGenerator(AIImageGenerator&&) = delete;
+        AIImageGenerator& operator=(AIImageGenerator&&) = delete;
+
+        // Generate an image from a prompt. The callback is invoked once with
+        // the result; on success `pngBytes` is non-empty, on failure `error`
+        // is non-empty. Hosts must marshal back to the UI thread themselves
+        // if the callback fires off-thread.
+        virtual void generateImage(const std::string& prompt,
+                                   std::function<void(AIImageResult)> callback) = 0;
+
+        // Per-generator editable properties (e.g. an image-style picker).
+        // Same pattern as aiBase::GetProperties — rendered by the host UI.
+        [[nodiscard]] virtual std::vector<ServiceProperty> GetProperties() const { return {}; }
+        virtual void SetProperty(const std::string& id, bool value) {}
+        virtual void SetProperty(const std::string& id, int value) {}
+        virtual void SetProperty(const std::string& id, const std::string& value) {}
     };
-    
-    virtual AIImageGenerator *createAIImageGenerator() const {
+
+    [[nodiscard]] virtual AIImageGenerator* createAIImageGenerator() const {
         return nullptr;
     }
 
@@ -116,15 +148,14 @@ public:
         std::vector<std::string> subModelNames;
     };
 
-    virtual AIModelMappingResult GenerateModelMapping(
+    [[nodiscard]] virtual AIModelMappingResult GenerateModelMapping(
         const std::vector<MappingModelInfo>& sourceModels,
         const std::vector<MappingModelInfo>& targetModels,
         const std::map<std::string, std::string>& existingMappings) const {
-        return AIModelMappingResult();
+        return {};
     }
 
-    struct AILyric 
-    {
+    struct AILyric {
         std::string word;
         int startMS{ 0 };
         int endMS{ 0 };
@@ -136,7 +167,7 @@ public:
     };
 
 
-    virtual AILyricTrack GenerateLyricTrack(const std::string& audioPath) const {
-        return AILyricTrack();
+    [[nodiscard]] virtual AILyricTrack GenerateLyricTrack(const std::string& audioPath) const {
+        return {};
     }
 };

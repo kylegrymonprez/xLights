@@ -12,7 +12,11 @@
 
 #include "aiBase.h"
 #include "aiType.h"
+
+#include <list>
 #include <string>
+#include <utility>
+#include <vector>
 
 /*
 curl http://localhost:11434/api/generate -d '{
@@ -26,9 +30,7 @@ class ollama : public aiBase {
     const std::string api = "/api/generate";
 	std::string model = "deepseek-r1";
     std::string host = "localhost";
-    //std::string host = "http://localhost:11434";
     int port_num{ 11434 };
-	//float temperature = 0.0;
     bool https{ false };
 
 	public:
@@ -36,13 +38,15 @@ class ollama : public aiBase {
 	explicit ollama(ServiceManager* frame) :
             aiBase(frame) {
         }
-	virtual ~ollama() {}
+	~ollama() override = default;
 
     void SaveSettings() const override;
     void LoadSettings() override;
 
-    void PopulateLLMSettings(wxPropertyGrid* page) override;
-    void SetSetting(const std::string& key, const wxVariant& value) override;
+    [[nodiscard]] std::vector<ServiceProperty> GetProperties() const override;
+    void SetProperty(const std::string& id, bool value) override;
+    void SetProperty(const std::string& id, int value) override;
+    void SetProperty(const std::string& id, const std::string& value) override;
 
 	[[nodiscard]] std::pair<std::string,bool> CallLLM(const std::string& prompt) const override;
     [[nodiscard]] bool IsAvailable() const override;
@@ -54,5 +58,5 @@ class ollama : public aiBase {
         return std::list({ aiType::TYPE::PROMPT, aiType::TYPE::COLORPALETTES });
     }
 
-    virtual AIColorPalette GenerateColorPalette(const std::string& prompt) const override;
+    [[nodiscard]] AIColorPalette GenerateColorPalette(const std::string& prompt) const override;
 };

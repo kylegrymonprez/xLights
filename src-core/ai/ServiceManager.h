@@ -14,12 +14,12 @@
 
 #include <functional>
 #include <memory>
-#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
-class xLightsFrame;
 class aiBase;
+class IServiceSettingsStore;
 
 class ServiceManager
 {
@@ -29,12 +29,22 @@ public:
     using ServiceDeleter = std::function<void(aiBase*)>;
     using ServicePtr = std::unique_ptr<aiBase, ServiceDeleter>;
 
-	explicit ServiceManager(xLightsFrame* xl);
-	~ServiceManager();
+    // `store` is non-owning; caller must outlive the ServiceManager.
+    // `pluginDir` is the directory scanned for DLL-based AI plugins — pass "" to skip.
+    explicit ServiceManager(IServiceSettingsStore* store, const std::string& pluginDir = "");
+    ~ServiceManager();
 
-	[[nodiscard]] aiBase* getService(std::string const& serviceName);
+    ServiceManager(const ServiceManager&) = delete;
+    ServiceManager& operator=(const ServiceManager&) = delete;
+    ServiceManager(ServiceManager&&) = delete;
+    ServiceManager& operator=(ServiceManager&&) = delete;
+
+    [[nodiscard]] aiBase* getService(std::string const& serviceName);
 
     // Add a built-in service (ownership transferred, deleted via operator delete).
+    // The service's LoadSettings() is invoked once it is registered so late
+    // additions (e.g. platform-specific AppleIntelligence added from UI code)
+    // still pick up persisted settings.
     void addService(std::unique_ptr<aiBase> service);
     // Add a plugin service with an explicit destroy function (e.g. from a DLL).
     void addService(ServicePtr service);
@@ -47,16 +57,16 @@ public:
     [[nodiscard]] aiBase* findService(aiType::TYPE serviceType);
     [[nodiscard]] std::vector<aiBase*> findServices(aiType::TYPE serviceType);
 
-    void setServiceSetting(std::string const& key, int value);
-    void setServiceSetting(std::string const& key, bool value);
-	void setServiceSetting(std::string const& key, std::string const& value);
+    void setServiceSetting(std::string_view key, int value);
+    void setServiceSetting(std::string_view key, bool value);
+    void setServiceSetting(std::string_view key, std::string const& value);
 
-    [[nodiscard]] int getServiceSetting(std::string const& key, int defaultValue ) const;
-    [[nodiscard]] bool getServiceSetting(std::string const& key, bool defaultValue) const;
-    [[nodiscard]] std::string getServiceSetting(std::string const& key, std::string const& defaultValue) const;
+    [[nodiscard]] int         getServiceSetting(std::string_view key, int defaultValue) const;
+    [[nodiscard]] bool        getServiceSetting(std::string_view key, bool defaultValue) const;
+    [[nodiscard]] std::string getServiceSetting(std::string_view key, std::string const& defaultValue) const;
 
-    [[nodiscard]] std::string getSecretServiceToken(std::string const& service) const;
-    void setSecretServiceToken(std::string const& service, std::string const& token);
+    [[nodiscard]] std::string getSecretServiceToken(std::string_view serviceName) const;
+    void                      setSecretServiceToken(std::string_view serviceName, std::string const& token);
 
     // Returns raw pointers to all registered services (built-in and plugin).
     [[nodiscard]] std::vector<aiBase*> getServices() const;
@@ -81,6 +91,7 @@ private:
         }
     };
 
+    IServiceSettingsStore* m_store = nullptr;
     std::vector<PluginLibrary> m_pluginLibraries; // must be declared before m_services
     std::vector<ServicePtr> m_services;
 };

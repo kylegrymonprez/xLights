@@ -1,16 +1,19 @@
-#include "ServiceManager.h"
-#include "UtilFunctions.h"
-#include "OpenAIAPI.h"
+#include "ai/OpenAIAPI.h"
+#include "ai/OpenAIImageGenerator.h"
+#include "ai/ServiceManager.h"
+
 #include "utils/CurlManager.h"
+#include "utils/UtilFunctions.h"
+#include "utils/string_utils.h"
+
 #include <nlohmann/json.hpp>
 
-#include "OpenAIImageGenerator.h"
+#include <log.h>
+
+#include <curl/curl.h>
 
 #include <string>
 #include <vector>
-
-#include <log.h>
-#include <wx/msgdlg.h>
 
 constexpr const char* completion_url = "/chat/completions";
 
@@ -20,7 +23,6 @@ std::pair<std::string, bool> OpenAIAPI::CallLLM(const std::string& prompt) const
     std::string bearerToken = token;
 
     if (bearerToken.empty()) {
-        wxMessageBox("You must set a " + GetLLMName() + " Bearer Token in the Preferences on the Services Panel", "Error", wxICON_ERROR);
         return { GetLLMName() + ": Bearer Token is empty", false };
     }
 
@@ -142,27 +144,26 @@ aiBase::AIColorPalette OpenAIAPI::GenerateColorPalette(const std::string& prompt
     try {
         nlohmann::json root = nlohmann::json::parse(response);
 
-        if (root.contains("choices") && root["choices"].is_array() && root["choices"].size() > 0 && root["choices"][0].contains("message")) {
+        if (root.contains("choices") && root["choices"].is_array() && !root["choices"].empty() && root["choices"][0].contains("message")) {
             auto const color_responce = root["choices"][0]["message"]["content"].get<std::string>();
 
             spdlog::debug("{} Content {}", GetLLMName(), color_responce);
             try {
-                // Check if the response is valid JSON
                 nlohmann::json const color_root = nlohmann::json::parse(color_responce);
                 if (color_root.contains("colors") && color_root["colors"].is_array()) {
-                    aiBase::AIColorPalette ret;
-                    ret.description = prompt;
+                    aiBase::AIColorPalette out;
+                    out.description = prompt;
                     if (color_root.contains("description")) {
-                        ret.description = color_root["description"].get<std::string>();
+                        out.description = color_root["description"].get<std::string>();
                     }
                     for (size_t x = 0; x < color_root["colors"].size(); x++) {
                         auto& color = color_root["colors"][x];
-                        ret.colors.push_back(aiBase::AIColor());
-                        ret.colors.back().hexValue = color["hex_code"].get<std::string>();
-                        ret.colors.back().description = color["usage_notes"].get<std::string>();
-                        ret.colors.back().name = color["name"].get<std::string>();
+                        out.colors.push_back(aiBase::AIColor());
+                        out.colors.back().hexValue = color["hex_code"].get<std::string>();
+                        out.colors.back().description = color["usage_notes"].get<std::string>();
+                        out.colors.back().name = color["name"].get<std::string>();
                     }
-                    return ret;
+                    return out;
                 }
             } catch (const std::exception& ex) {
                 spdlog::error("{}", ex.what());
@@ -184,7 +185,7 @@ aiBase::AIImageGenerator* OpenAIAPI::createAIImageGenerator() const {
     return new OpenAIImageGenerator(base_url, token, image_model);
 }
 
-size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* userp) {
+static size_t WriteCallback(void* contents, size_t size, size_t nmemb, std::string* userp) {
     userp->append((char*)contents, size * nmemb);
     return size * nmemb;
 }
@@ -227,7 +228,7 @@ aiBase::AILyricTrack OpenAIAPI::GenerateLyricTrack(const std::string& audioPath)
         curl_mime_name(field, "timestamp_granularities[]");
         curl_mime_data(field, "word", CURL_ZERO_TERMINATED);
 
-        struct curl_slist* headerlist = NULL;
+        struct curl_slist* headerlist = nullptr;
         std::string authHeader = "Authorization: Bearer " + token;
         headerlist = curl_slist_append(headerlist, authHeader.c_str());
 

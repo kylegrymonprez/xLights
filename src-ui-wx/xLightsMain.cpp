@@ -142,6 +142,10 @@
 #include "utils/FileUtils.h"
 #include "ai/chatGPT.h"
 #include "ai/AIImageDialog.h"
+#include "ai/WxServiceSettingsStore.h"
+#ifdef __WXOSX__
+#include "ai/AppleIntelligence.h"
+#endif
 #include "models/DMX/DmxMovingHeadComm.h"
 #include "color/ColorPanel.h"
 
@@ -1989,7 +1993,20 @@ xLightsFrame::xLightsFrame(wxWindow* parent, int ab, wxWindowID id, bool renderO
     InitEffectsPanel(EffectsPanel1);
     spdlog::debug("Effects panel initialised.");
 
-    _serviceManager = std::make_unique<ServiceManager>(this);
+    _serviceSettingsStore = std::make_unique<WxServiceSettingsStore>();
+    {
+        wxFileName exePath(wxStandardPaths::Get().GetExecutablePath());
+        std::string pluginDir = (exePath.GetPath() + wxFILE_SEP_PATH + "ai_plugins").ToStdString();
+        _serviceManager = std::make_unique<ServiceManager>(_serviceSettingsStore.get(), pluginDir);
+    }
+#if defined(__WXOSX__) && defined(__arm64__)
+    {
+        auto appleIntel = std::make_unique<AppleIntelligence>(_serviceManager.get());
+        if (!appleIntel->GetTypes().empty()) {
+            _serviceManager->addService(std::move(appleIntel));
+        }
+    }
+#endif
 
     starttime = wxDateTime::UNow();
     ResetEffectsXml();
