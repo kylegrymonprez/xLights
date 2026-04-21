@@ -173,6 +173,8 @@ struct EffectPropertyView: View {
             FacesMouthMovementsRowView()
         case "Morph_QuickSet":
             MorphQuickSetRowView()
+        case "Morph_LineEditor":
+            MorphLineEditorRowView()
         case "Servo_StartEndRow":
             ServoStartEndRowView()
         case "Servo_ButtonRow":
@@ -199,6 +201,8 @@ struct EffectPropertyView: View {
             SketchInfoRowView()
         case "Sketch_DefRow":
             SketchDefRowView()
+        case "Sketch_PathEditor":
+            SketchPathEditorRowView()
         case "Sketch_BackgroundRow":
             SketchBackgroundRowView()
         case "Video_DurationRow":

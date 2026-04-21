@@ -429,6 +429,10 @@ struct EffectMetadataPanel: View {
     /// property when its condition is met. Absent / unmatched rules leave
     /// the property visible.
     private func isPropertyVisible(_ prop: PropertyMetadata) -> Bool {
+        // Platform gate — `"platform": "desktop"` entries are never
+        // surfaced on iPad. Mirrors the desktop gate in
+        // `JsonEffectPanel::BuildPropertyRow` for `"platform": "ipad"`.
+        if !prop.isForIPad { return false }
         guard let rules = metadata.visibilityRules else { return true }
         for rule in rules {
             let hides = rule.hide?.contains(prop.id) ?? false

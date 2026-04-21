@@ -14,9 +14,9 @@ below is what's still missing.
 
 ## TL;DR
 
-1. **Specialised editors** (C7) — Moving Head, Sketch path, Morph
-   line, DMX Remap / Save State / Load State. Each is its own
-   session.
+1. **Specialised editors** (C7) — Moving Head (G3), DMX dialog
+   ports (G8). Each is its own session. Sketch (G4) and Morph (G5)
+   shipped 2026-04-21.
 2. **Polish items** — drag / drop in inspector, shader uniform
    grouping.
 
@@ -51,12 +51,16 @@ shortcuts). A handful of smaller pieces live in `future-*.md`.
 - **G3 — Moving Head fixture editor.** Desktop's one non-JSON
   panel: hand-built in wxSmith for DMX fixture mapping, pan / tilt
   / colour wheels, position curves. ~30+ controls. P1.
-- **G4 — Sketch path editor.** `SketchInfoRowView` /
-  `SketchDefRowView` / `SketchBackgroundRowView` read the encoded
-  sketch definition but don't offer a polyline editor. P1.
-- **G5 — Morph line editor.** Desktop's `xlGridCanvasMorph` — drag
-  start / end line endpoints on a 100×100 grid. iPad has QuickSet
-  presets + Swap but no direct line editing. P1.
+- **G4 — Sketch path editor.** ✓ shipped 2026-04-21.
+  `SketchPathEditorRowView` with per-endpoint + Bezier-control
+  drag, Add-Line tap mode, New Path, Undo Point, Clear. Advanced
+  authoring (cubic/quadratic creation, closing paths, SVG import)
+  stays desktop-only; the round-trip through `SketchDefinition`
+  preserves Q/C/c segments untouched.
+- **G5 — Morph line editor.** ✓ shipped 2026-04-21.
+  `MorphLineEditorRowView` renders the start + end lines on a
+  100×100 grid; drag any endpoint to reposition, linked pairs pin
+  their slave to the master.
 - **G8 — DMX Remap / Save State / Load State buttons.** Rendered
   disabled today. Depends on model-state read / write bridge paths
   not yet on iPad. P1.
@@ -110,8 +114,6 @@ Small polish follow-ups still open:
 | # | Gap | Area | Severity |
 |---|---|---|---|
 | G3  | Moving Head fixture editor | Effect | P1 |
-| G4  | Sketch path editor | Effect | P1 |
-| G5  | Morph line editor | Effect | P1 |
 | G8  | DMX Remap / Save State / Load State dialogs | Effect | P1 |
 | G40 | Drag / drop in inspector | Cross-cutting | P2 |
 | G1  | Tab tear-out / multi-window | Scaffolding | P2 (Phase F) |
@@ -123,14 +125,12 @@ Small polish follow-ups still open:
 ## 7. Suggested phasing
 
 **C7 — Specialised editors** *(bigger chunks — one per session)*
-- G3: Moving Head.
-- G4: Sketch path editor.
-- G5: Morph line editor.
-- G8: DMX dialog ports.
+- G3: Moving Head. (open)
+- G4: ✓ Sketch path editor (2026-04-21).
+- G5: ✓ Morph line editor (2026-04-21).
+- G8: DMX dialog ports. (open — blocked on model-state bridge)
 
-Ship order is flexible — the four specialised editors have no
-interdependencies. Moving Head (G3) is the largest surface so
-taking it first amortises the scaffolding for the others.
+Remaining editors (G3, G8) are independent.
 
 ---
 

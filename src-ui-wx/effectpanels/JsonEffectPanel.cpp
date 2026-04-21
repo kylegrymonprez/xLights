@@ -891,6 +891,20 @@ void JsonEffectPanel::RemovePropertiesWithPrefix(const std::string& prefix) {
 
 void JsonEffectPanel::BuildPropertyRow(wxWindow* parentWin, wxSizer* sizer, const nlohmann::json& prop, int cols) {
     std::string id = prop.value("id", "");
+
+    // Platform gate: entries flagged `"platform": "ipad"` are iPad-only
+    // custom controls (e.g. touch-canvas editors like `Morph_LineEditor`,
+    // `Sketch_PathEditor`). Skipping them here keeps the desktop load
+    // path quiet — the generic `controlType: "custom"` dispatch below
+    // would otherwise log a `CreateCustomControl returned null` warning
+    // for every ipad-only entry. No `properties_` slot is created, so
+    // settings round-trip is unaffected. Absent / "desktop" renders
+    // normally on desktop.
+    std::string platform = prop.value("platform", "");
+    if (platform == "ipad") {
+        return;
+    }
+
     std::string label = prop.value("label", id);
     std::string type = prop.value("type", "int");
     std::string controlType = prop.value("controlType", "slider");
