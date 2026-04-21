@@ -24,6 +24,9 @@ struct XLightsApp: App {
             ContentView()
                 .environment(viewModel)
         }
+        .commands {
+            XLSequencerCommands(viewModel: viewModel)
+        }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .inactive:
@@ -57,13 +60,6 @@ struct ContentView: View {
 
     @State private var showMediaManager = false
 
-    /// Session-scoped dismissals for the migration banner. Keyed by
-    /// "<file version> → <app version>" so opening a different
-    /// older sequence shows its own banner even after dismissal.
-    /// Re-appears on app relaunch — stored in memory only, matching
-    /// desktop's banner behaviour.
-    @State private var dismissedMigrationKeys: Set<String> = []
-
     /// Autosave recovery state. When a sequence opens with a
     /// newer `.xbkp` alongside its `.xsq`, we sheet the user:
     /// Recover (promote .xbkp → .xsq + reopen) or Discard
@@ -82,16 +78,6 @@ struct ContentView: View {
                 MissingMediaBanner(
                     count: viewModel.brokenMediaCount,
                     onReview: { showMediaManager = true })
-            }
-            if viewModel.isSequenceLoaded,
-               let migration = migrationInfo(),
-               !dismissedMigrationKeys.contains(migration.key) {
-                MigrationBanner(
-                    fileVersion: migration.file,
-                    appVersion: migration.app,
-                    onDismiss: {
-                        dismissedMigrationKeys.insert(migration.key)
-                    })
             }
             Group {
                 if !viewModel.isShowFolderLoaded {
@@ -160,17 +146,6 @@ struct ContentView: View {
         if has { autosaveRecoveryDate = when }
     }
 
-    /// Returns the file / app version pair when they disagree.
-    /// An empty file version means the sequence hasn't been opened
-    /// yet or was loaded before the field existed — suppress the
-    /// banner either way.
-    private func migrationInfo() -> (file: String, app: String, key: String)? {
-        let file = viewModel.document.sequenceFileVersion() ?? ""
-        let app = viewModel.document.currentAppVersion() ?? ""
-        if file.isEmpty || app.isEmpty { return nil }
-        if file == app { return nil }
-        return (file, app, "\(file)→\(app)")
-    }
 }
 
 struct MemoryWarningBanner: View {
@@ -214,39 +189,6 @@ struct MissingMediaBanner: View {
         .padding(.vertical, 6)
         .foregroundStyle(.white)
         .background(Color.red.opacity(0.85))
-    }
-}
-
-/// Yellow banner shown when the open sequence's saved xLights
-/// version differs from the current build. E-4 migration in
-/// `SequenceFile::AdjustEffectSettingsForVersion` has already
-/// run by the time we reach this banner; the banner just tells
-/// the user the sequence has been upgraded in-memory and a save
-/// will persist the new form.
-struct MigrationBanner: View {
-    let fileVersion: String
-    let appVersion: String
-    let onDismiss: () -> Void
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "arrow.triangle.2.circlepath")
-            Text("Sequence was created in xLights \(fileVersion). Migrated to \(appVersion) — save to update.")
-                .font(.caption)
-                .lineLimit(2)
-            Spacer()
-            Button {
-                onDismiss()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.caption)
-            }
-            .foregroundStyle(.white)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .foregroundStyle(.white)
-        .background(Color.yellow.opacity(0.9).overlay(Color.orange.opacity(0.3)))
     }
 }
 

@@ -738,6 +738,14 @@
 - (void)setAudioVolume:(int)volume;
 - (int)audioVolume;
 
+// F-4 playback speed. Mirrors desktop's 8 discrete speed options
+// (0.25x / 0.5x / 0.75x / 1.0x / 1.5x / 2x / 3x / 4x) routed
+// through `AudioManager::SetPlaybackRate`. On iOS this drives the
+// AVAudioEngine time-pitch unit so audio stays audible at off-1x
+// speeds without a pitch shift. No-audio sequences scale their
+// timer tick in Swift instead — this call is a no-op there.
+- (void)setAudioPlaybackRate:(float)rate;
+
 // Waveform data — returns downsampled peaks for display
 // Returns array of alternating min/max float values for the given time range
 - (NSData*)waveformDataFromMS:(long)startMS

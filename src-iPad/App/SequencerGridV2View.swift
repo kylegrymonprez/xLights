@@ -74,8 +74,6 @@ struct SequencerGridV2View: View {
     @State private var showAddTimingTrackAlert: Bool = false
     @State private var newTimingTrackName: String = ""
 
-    /// F-6 Display Elements editor sheet state.
-    @State private var showingDisplayElements: Bool = false
 
     /// B70 rename-timing-mark alert state.
     @State private var renameMarkTarget: TimingMarkMenuTarget?
@@ -593,8 +591,10 @@ struct SequencerGridV2View: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        // F-6 — Display Elements editor modal.
-        .sheet(isPresented: $showingDisplayElements) {
+        // F-6 — Display Elements editor modal. State lives on the
+        // view model so F-4 menu-bar "Edit Display Elements…" can
+        // flip the same flag.
+        .sheet(isPresented: Bindable(viewModel).showingDisplayElements) {
             DisplayElementsSheet()
                 .environment(viewModel)
         }
@@ -764,7 +764,7 @@ struct SequencerGridV2View: View {
                     // and manage per-view model + timing membership.
                     Divider()
                     Button {
-                        showingDisplayElements = true
+                        viewModel.showingDisplayElements = true
                     } label: {
                         Label("Edit Display Elements…",
                               systemImage: "rectangle.stack.badge.plus")

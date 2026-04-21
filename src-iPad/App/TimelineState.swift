@@ -1,6 +1,7 @@
 import CoreGraphics
 import Observation
 import QuartzCore
+import SwiftUI
 
 /// Shared horizontal-scroll + zoom state for the effects grid. The three
 /// right-column cells (ruler+waveform, timing effects, main grid) all bind
@@ -30,5 +31,21 @@ final class TimelineState {
 
     func noteUserInteraction() {
         lastUserInteractionAt = CACurrentMediaTime()
+    }
+}
+
+// F-4 — focusable bridge between the scene's command bar and the
+// SequencerView's local timeline state. The menu-bar zoom items
+// (View → Zoom In / Zoom Out) read the current instance via
+// `@FocusedValue(\.timeline)`; SequencerView exposes it with
+// `.focusedValue(\.timeline, timeline)`.
+struct TimelineFocusedValueKey: FocusedValueKey {
+    typealias Value = TimelineState
+}
+
+extension FocusedValues {
+    var timeline: TimelineState? {
+        get { self[TimelineFocusedValueKey.self] }
+        set { self[TimelineFocusedValueKey.self] = newValue }
     }
 }

@@ -32,6 +32,12 @@ class SequencerViewModel {
     var isPaused = false
     var playPositionMS: Int = 0
     var volume: Int = 100
+    // F-4 playback speed. Desktop exposes 0.25/0.5/0.75/1.0/1.5/2/3/4x
+    // — we match that set in the Playback menu. Applied to the
+    // AVAudioEngine time-pitch unit via the bridge on `play()`, and
+    // also used to scale the wall-clock elapsed for no-audio
+    // sequences in `startPlaybackTimer`.
+    var playSpeed: Float = 1.0
 
     // B32 loop region: when `hasLoopRegion`, playback (B33 Play
     // Loop mode) wraps from `loopEndMS` back to `loopStartMS`, and
@@ -118,6 +124,23 @@ class SequencerViewModel {
     var availableEffects: [String] = []
     var selectedPaletteEffect: String?
     var showInspector = false
+
+    // F-4 menu-bar routing. The WindowGroup's `.commands { }` block
+    // lives at app level, but several actions (Save As file exporter
+    // + alerts, Sequence Settings sheet, Display Elements sheet) are
+    // owned by `SequencerView`. Flipping a flag here lets the
+    // SwiftUI view observe and present the appropriate UI without
+    // hard-coupling the command handler to view internals.
+    var showingSequenceSettings = false
+    var showingDisplayElements = false
+    // Save As is a multi-step flow (persist, open exporter, handle
+    // errors). The menu command bumps this counter; the SequencerView
+    // `.onChange` reacts exactly once per command invocation even if
+    // the user hits ⇧⌘S twice back-to-back.
+    var saveAsRequestToken: Int = 0
+    // Same pattern for Close — surfaces the existing dirty-prompt
+    // flow from the view without duplicating the logic.
+    var closeRequestToken: Int = 0
 
     // Active drag snapshot, set by the grid's gesture handlers and
     // consumed by any view that needs to render live drag feedback
@@ -670,6 +693,10 @@ class SequencerViewModel {
     func play() {
         stopScrub()
         if hasAudio {
+            // Apply current rate before starting — AVAudioEngine
+            // reads the time-pitch unit's rate at Play time and
+            // applies it to the about-to-start playback.
+            document.setAudioPlaybackRate(playSpeed)
             document.audioPlay()
         }
         // Record wall clock reference for timer-driven playback
@@ -777,6 +804,25 @@ class SequencerViewModel {
         document.setAudioVolume(Int32(volume))
     }
 
+    // F-4 playback speed. Applies the new rate to the audio engine
+    // (if audible) and rebases the wall-clock reference so the
+    // no-audio timer path keeps advancing from the current position
+    // without an instantaneous jump.
+    func setPlaybackSpeed(_ speed: Float) {
+        let clamped = max(0.1, min(speed, 8.0))
+        if abs(clamped - playSpeed) < 0.001 { return }
+        playSpeed = clamped
+        // Always push to the audio engine — it's a no-op when no
+        // sequence is loaded and harmless to set ahead of a play().
+        document.setAudioPlaybackRate(clamped)
+        // Rebase no-audio timer anchor so the tick keeps advancing
+        // from the current position at the new rate.
+        if isPlaying && !hasAudio {
+            playbackStartTime = CFAbsoluteTimeGetCurrent()
+            playbackStartMS = playPositionMS
+        }
+    }
+
     // MARK: - Playback Timer
 
     private func startPlaybackTimer() {
@@ -812,8 +858,12 @@ class SequencerViewModel {
                     self.document.audioSeek(toMS: self.loopStartMS)
                 }
             } else {
-                // Timer-driven: use wall clock elapsed since play started
-                let elapsedMS = Int((CFAbsoluteTimeGetCurrent() - self.playbackStartTime) * 1000.0)
+                // Timer-driven: use wall clock elapsed since play
+                // started, scaled by the current playback speed
+                // (animation sequences without audio can't ride the
+                // audio engine's time-pitch unit).
+                let wallElapsed = CFAbsoluteTimeGetCurrent() - self.playbackStartTime
+                let elapsedMS = Int(wallElapsed * 1000.0 * Double(self.playSpeed))
                 let pos = self.playbackStartMS + elapsedMS
                 if pos >= self.sequenceDurationMS {
                     self.playPositionMS = self.sequenceDurationMS

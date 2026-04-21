@@ -125,10 +125,28 @@ struct SequencerView: View {
         } message: {
             Text(saveAsError ?? "")
         }
-        .sheet(isPresented: $showingSequenceSettings) {
+        .sheet(isPresented: Bindable(viewModel).showingSequenceSettings) {
             SequenceSettingsSheet()
                 .environment(viewModel)
         }
+        // F-4 menu routing — one-shot tokens bumped by the
+        // WindowGroup's `.commands` block. Save As and Close involve
+        // file-exporter / dirty-prompt flows that live here on the
+        // view; observing a monotonic counter makes the command
+        // invocation idempotent w.r.t. SwiftUI state resets.
+        .onChange(of: viewModel.saveAsRequestToken) { _, _ in
+            startSaveAs()
+        }
+        .onChange(of: viewModel.closeRequestToken) { _, _ in
+            if viewModel.checkDirtyNow() {
+                showingUnsavedPrompt = true
+            } else {
+                viewModel.closeSequence()
+            }
+        }
+        // F-4: expose the live timeline to menu-bar commands (zoom).
+        // `SequencerScene`-level Commands use `@FocusedValue(\.timeline)`.
+        .focusedValue(\.timeline, timeline)
     }
 
     // MARK: - Save As (E-1)
@@ -139,8 +157,10 @@ struct SequencerView: View {
     @State private var saveAsError: String? = nil
 
     // MARK: - Sequence Settings (E-3)
-
-    @State private var showingSequenceSettings = false
+    //
+    // State moved to `SequencerViewModel.showingSequenceSettings` so
+    // the F-4 menu command can flip it alongside the gear toolbar
+    // button. No local @State here.
 
     /// Persist the current in-memory state to the existing path
     /// (so the bytes are up-to-date), then present the system
@@ -208,7 +228,6 @@ struct SequencerView: View {
                 } label: {
                     Label("Save", systemImage: "square.and.arrow.down")
                 }
-                .keyboardShortcut("s", modifiers: [.command])
                 .disabled(!viewModel.isDirty)
 
                 Button {
@@ -216,7 +235,6 @@ struct SequencerView: View {
                 } label: {
                     Label("Save As…", systemImage: "square.and.arrow.down.on.square")
                 }
-                .keyboardShortcut("s", modifiers: [.command, .shift])
                 .disabled(!viewModel.isSequenceLoaded)
             } label: {
                 ZStack(alignment: .topTrailing) {
@@ -235,7 +253,7 @@ struct SequencerView: View {
 
             // Sequence Settings (E-3) — gear icon.
             Button {
-                showingSequenceSettings = true
+                viewModel.showingSequenceSettings = true
             } label: {
                 Image(systemName: "gearshape")
             }
@@ -258,7 +276,6 @@ struct SequencerView: View {
             Button(action: { viewModel.togglePlayPause() }) {
                 Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
             }
-            .keyboardShortcut(.space, modifiers: [])
             Button(action: {
                 viewModel.seekTo(ms: min(viewModel.sequenceDurationMS,
                                          viewModel.playPositionMS + 10_000))
@@ -287,136 +304,19 @@ struct SequencerView: View {
 
             Spacer()
 
-            // Undo / Redo
+            // Undo / Redo — shortcuts live in the F-4 `.commands`
+            // block (XLightsCommands.swift); these toolbar buttons
+            // are now tap-only.
             Button(action: { viewModel.undo() }) {
                 Image(systemName: "arrow.uturn.backward")
             }
-            .keyboardShortcut("z", modifiers: [.command])
             .disabled(!viewModel.undoManager.canUndo)
 
             Button(action: { viewModel.redo() }) {
                 Image(systemName: "arrow.uturn.forward")
             }
-            .keyboardShortcut("z", modifiers: [.command, .shift])
             .disabled(!viewModel.undoManager.canRedo)
 
-            // Hidden buttons that exist purely to publish keyboard
-            // shortcuts. SwiftUI requires the shortcut to live on a
-            // visible control, but .frame(0) + .opacity(0) keeps them
-            // invisible while still reachable by the key event.
-            Group {
-                Button("Delete") {
-                    viewModel.deleteSelectedEffects()
-                }
-                .keyboardShortcut(.delete, modifiers: [])
-                .disabled(viewModel.selectedEffect == nil && viewModel.selectedEffects.isEmpty)
-
-                Button("Delete Forward") {
-                    viewModel.deleteSelectedEffects()
-                }
-                .keyboardShortcut(.deleteForward, modifiers: [])
-                .disabled(viewModel.selectedEffect == nil && viewModel.selectedEffects.isEmpty)
-
-                Button("Copy") { viewModel.copySelectedEffects() }
-                    .keyboardShortcut("c", modifiers: [.command])
-                    .disabled(viewModel.selectedEffect == nil
-                              && viewModel.selectedEffects.isEmpty)
-
-                Button("Paste") {
-                    // Paste onto the selected effect's row at the
-                    // current play position; if nothing is selected,
-                    // fall back to the first model row. Silently
-                    // skipped by the view model if no clipboard.
-                    let rowIdx = viewModel.selectedEffect?.rowIndex
-                        ?? viewModel.rows.firstIndex(where: { $0.timing == nil })
-                        ?? 0
-                    viewModel.pasteEffect(rowIndex: rowIdx,
-                                           startMS: viewModel.playPositionMS)
-                }
-                .keyboardShortcut("v", modifiers: [.command])
-                .disabled(!viewModel.hasClipboard)
-
-                Button("Duplicate") { viewModel.duplicateSelectedEffect() }
-                    .keyboardShortcut("d", modifiers: [.command])
-                    .disabled(viewModel.selectedEffect == nil)
-
-                // Arrow-key navigation: Left/Right cycles within the
-                // current row, Up/Down steps between model rows and
-                // picks the effect whose time range best overlaps.
-                Button("Previous Effect") { viewModel.selectPreviousEffect() }
-                    .keyboardShortcut(.leftArrow, modifiers: [])
-                    .disabled(viewModel.selectedEffect == nil)
-                Button("Next Effect") { viewModel.selectNextEffect() }
-                    .keyboardShortcut(.rightArrow, modifiers: [])
-                    .disabled(viewModel.selectedEffect == nil)
-                Button("Effect Above") { viewModel.selectEffectAbove() }
-                    .keyboardShortcut(.upArrow, modifiers: [])
-                    .disabled(viewModel.selectedEffect == nil)
-                Button("Effect Below") { viewModel.selectEffectBelow() }
-                    .keyboardShortcut(.downArrow, modifiers: [])
-                    .disabled(viewModel.selectedEffect == nil)
-
-                // B4 modified-arrow editing — Shift stretches end,
-                // Ctrl fine-nudges start+end (1 ms), Option(Alt) nudges
-                // by one frame interval. Duration preserved for the
-                // nudges; stretch is end-only. All clamped against
-                // the selected effect's neighbours.
-                Button("Stretch End Forward") {
-                    viewModel.stretchSelectedEffectEnd(by: viewModel.frameIntervalMS)
-                }
-                .keyboardShortcut(.rightArrow, modifiers: [.shift])
-                .disabled(viewModel.selectedEffect == nil)
-                Button("Stretch End Back") {
-                    viewModel.stretchSelectedEffectEnd(by: -viewModel.frameIntervalMS)
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [.shift])
-                .disabled(viewModel.selectedEffect == nil)
-                Button("Nudge Forward 1ms") {
-                    viewModel.nudgeSelectedEffect(by: 1)
-                }
-                .keyboardShortcut(.rightArrow, modifiers: [.control])
-                .disabled(viewModel.selectedEffect == nil)
-                Button("Nudge Back 1ms") {
-                    viewModel.nudgeSelectedEffect(by: -1)
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [.control])
-                .disabled(viewModel.selectedEffect == nil)
-                Button("Nudge Forward Frame") {
-                    viewModel.nudgeSelectedEffect(by: viewModel.frameIntervalMS)
-                }
-                .keyboardShortcut(.rightArrow, modifiers: [.option])
-                .disabled(viewModel.selectedEffect == nil)
-                Button("Nudge Back Frame") {
-                    viewModel.nudgeSelectedEffect(by: -viewModel.frameIntervalMS)
-                }
-                .keyboardShortcut(.leftArrow, modifiers: [.option])
-                .disabled(viewModel.selectedEffect == nil)
-
-                // Escape cancels the current selection / context, so
-                // arrow-key drill-down doesn't strand the user inside
-                // a row they can't get out of with the keyboard.
-                Button("Clear Selection") { viewModel.clearSelection() }
-                    .keyboardShortcut(.escape, modifiers: [])
-
-                // Home / End seek to sequence start / end. Frame-step
-                // with ',' and '.' nudges `playPositionMS` by exactly
-                // one frame interval — useful for precise scrub
-                // without touching the ruler.
-                Button("Seek Start") { viewModel.seekTo(ms: 0) }
-                    .keyboardShortcut(.home, modifiers: [])
-                Button("Seek End") { viewModel.seekTo(ms: viewModel.sequenceDurationMS) }
-                    .keyboardShortcut(.end, modifiers: [])
-                Button("Frame Back") {
-                    viewModel.seekTo(ms: viewModel.playPositionMS - viewModel.frameIntervalMS)
-                }
-                .keyboardShortcut(",", modifiers: [])
-                Button("Frame Forward") {
-                    viewModel.seekTo(ms: viewModel.playPositionMS + viewModel.frameIntervalMS)
-                }
-                .keyboardShortcut(".", modifiers: [])
-            }
-            .frame(width: 0, height: 0)
-            .opacity(0)
 
             Divider().frame(height: 24)
 
@@ -438,19 +338,19 @@ struct SequencerView: View {
             Divider().frame(height: 24)
 
             // Zoom — shares state with pinch-to-zoom on the grid.
+            // Keyboard shortcuts for zoom live in the F-4 `.commands`
+            // block, reading the timeline via `@FocusedValue`.
             HStack(spacing: 4) {
                 Button(action: {
                     timeline.pixelsPerMS = max(0.005, timeline.pixelsPerMS / 1.5)
                 }) {
                     Image(systemName: "minus.magnifyingglass")
                 }
-                .keyboardShortcut("-", modifiers: [.command])
                 Button(action: {
                     timeline.pixelsPerMS = min(2.0, timeline.pixelsPerMS * 1.5)
                 }) {
                     Image(systemName: "plus.magnifyingglass")
                 }
-                .keyboardShortcut("=", modifiers: [.command])
             }
 
             if viewModel.hasAudio {

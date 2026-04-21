@@ -2690,6 +2690,13 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
     return am ? am->GetVolume() : 100;
 }
 
+- (void)setAudioPlaybackRate:(float)rate {
+    // Static on AudioManager — routes to the current active
+    // AVAudioEngineOutput's time-pitch unit on iOS. Safe to call
+    // even when no sequence is loaded / no audio manager exists.
+    AudioManager::SetPlaybackRate(rate);
+}
+
 - (NSData*)waveformDataFromMS:(long)startMS
                          toMS:(long)endMS
                    numSamples:(int)numSamples {

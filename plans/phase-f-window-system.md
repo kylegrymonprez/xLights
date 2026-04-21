@@ -252,7 +252,74 @@ persistence.
 
 ---
 
-## F-4. Menu bar + Commands *(priority 2 — native feel on HK)*
+## F-4. Menu bar + Commands *(✓ landed 2026-04-21 — pending device verification)*
+
+**Shipped:**
+- `src-iPad/App/XLightsCommands.swift` — `XLSequencerCommands: Commands`
+  hosting File / Edit / View / Playback menus. Attached to the
+  WindowGroup in `XLightsApp.swift` via `.commands { … }`.
+- `TimelineFocusedValueKey` + `FocusedValues.timeline` extension
+  added to `TimelineState.swift`. `SequencerView` exposes its
+  timeline via `.focusedValue(\.timeline, timeline)` so the
+  Zoom In / Out commands can read it.
+- `SequencerViewModel` gained `showingSequenceSettings`,
+  `showingDisplayElements`, `saveAsRequestToken`, and
+  `closeRequestToken` so view-owned flows (file exporter, dirty-
+  prompt, Display Elements sheet, Sequence Settings sheet) can be
+  signalled from the app-level command handlers. `SequencerView`
+  `.onChange` observes the tokens and runs the existing
+  `startSaveAs()` / dirty-prompt logic.
+- Deleted the hidden shortcut Group at the bottom of the toolbar in
+  `SequencerView.swift`; removed `.keyboardShortcut` modifiers from
+  visible toolbar buttons (Save, Save As, Undo, Redo, Play/Pause,
+  Zoom In, Zoom Out). Toolbar buttons still respond to taps; the
+  shortcut bindings now live exclusively in Commands.
+
+**Shortcuts now in the menu bar:**
+
+| Menu | Item | Shortcut |
+|---|---|---|
+| File | Close | ⌘W |
+| File | Save | ⌘S |
+| File | Save As… | ⇧⌘S |
+| File | Sequence Settings… | — |
+| Edit | Undo | ⌘Z |
+| Edit | Redo | ⇧⌘Z |
+| Edit | Copy | ⌘C |
+| Edit | Paste | ⌘V |
+| Edit | Duplicate | ⌘D |
+| Edit | Delete | ⌫ |
+| Edit | Clear Selection | ⎋ |
+| View | Zoom Out | ⌘- |
+| View | Zoom In | ⌘= |
+| View | Show / Hide Preview | ⌘1 |
+| View | Show / Hide Inspector | ⌘2 |
+| View | Edit Display Elements… | ⇧⌘D |
+| Playback | Play / Pause | Space |
+| Playback | Stop | — |
+| Playback | Rewind to Start | Home |
+| Playback | Jump to End | End |
+| Playback | Back 10 Seconds | ⌥← |
+| Playback | Forward 10 Seconds | ⌥→ |
+| Playback | Previous / Next Frame | , / . |
+| Playback | Previous / Next / Above / Below Effect | ← / → / ↑ / ↓ |
+
+**Intentionally omitted from v1:** Cut (⌘X) and Find (⌘F). Both
+would swallow the key event even while disabled; better to leave them
+out until B53 (row-level cut) and B97 (Find/Replace) land. Also
+excluded: New Sequence and Open… from the File menu — the sequence
+picker is reachable via Close, and wiring menu→picker-sheet adds
+surface without freeing the user from anything.
+
+**Device verification (pending user):** hardware keyboard attached,
+menu bar shows File / Edit / View / Playback, every command fires,
+disabled states track selection / playback / sequence-loaded, Space
+doesn't swallow typing when a text field has focus (Display Elements
+name field, Sequence Settings metadata fields, etc.).
+
+---
+
+## F-4 original spec (for audit reference)
 
 iPadOS 26 shows the SwiftUI menu bar whenever a hardware keyboard is
 attached. Every shortcut the app already implements is discoverable
