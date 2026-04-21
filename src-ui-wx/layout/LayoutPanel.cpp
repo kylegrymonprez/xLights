@@ -837,6 +837,8 @@ LayoutPanel::LayoutPanel(wxWindow* parent, xLightsFrame *xl, wxPanel* sequencer)
         if (fgs3) {
             fgs3->Detach(CheckBox_3D);
             fgs3->Detach(CheckBoxOverlap);
+            fgs3->Detach(CheckBoxShowNames);
+            fgs3->Detach(CheckBoxShowInfo);
             lps->Detach(fgs3);
             delete fgs3;
         }
@@ -942,15 +944,23 @@ LayoutPanel::LayoutPanel(wxWindow* parent, xLightsFrame *xl, wxPanel* sequencer)
     wxPanel* layoutControlsBar = new wxPanel(PreviewGLPanel, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxBORDER_SIMPLE);
     CheckBox_3D->Reparent(layoutControlsBar);
     CheckBoxOverlap->Reparent(layoutControlsBar);
+    CheckBoxShowNames->Reparent(layoutControlsBar);
+    CheckBoxShowInfo->Reparent(layoutControlsBar);
     ButtonSavePreview->Reparent(layoutControlsBar);
+    ButtonSavePreview->SetMinSize(wxSize(120, 48));
     {
         wxBoxSizer* lcbSizer = new wxBoxSizer(wxHORIZONTAL);
-        lcbSizer->Add(CheckBox_3D, 0, wxALL|wxALIGN_CENTER_VERTICAL, 5);
-        lcbSizer->Add(CheckBoxOverlap, 0, wxALL|wxALIGN_CENTER_VERTICAL, 5);
-        lcbSizer->Add(ButtonSavePreview, 0, wxALL|wxALIGN_CENTER_VERTICAL, 5);
+        lcbSizer->AddStretchSpacer(1);
+        lcbSizer->Add(CheckBox_3D, 0, wxALL|wxALIGN_CENTER_VERTICAL, 8);
+        lcbSizer->Add(CheckBoxOverlap, 0, wxALL|wxALIGN_CENTER_VERTICAL, 8);
+        lcbSizer->Add(CheckBoxShowNames, 0, wxALL|wxALIGN_CENTER_VERTICAL, 8);
+        lcbSizer->Add(CheckBoxShowInfo, 0, wxALL|wxALIGN_CENTER_VERTICAL, 8);
+        lcbSizer->Add(ButtonSavePreview, 0, wxALL|wxALIGN_CENTER_VERTICAL, 8);
+        lcbSizer->AddStretchSpacer(1);
         layoutControlsBar->SetSizer(lcbSizer);
+        layoutControlsBar->SetMinSize(wxSize(-1, 68));
     }
-    PreviewGLPanel->GetSizer()->Add(layoutControlsBar, 0, wxALIGN_CENTER_HORIZONTAL | wxALIGN_BOTTOM, 3);
+    PreviewGLPanel->GetSizer()->Add(layoutControlsBar, 0, wxEXPAND|wxBOTTOM, 3);
     PreviewGLPanel->Layout();
 
     TreeListViewModels->SetColumnWidth(0, wxCOL_WIDTH_AUTOSIZE);
