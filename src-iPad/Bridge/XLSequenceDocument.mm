@@ -2954,6 +2954,252 @@ static void rewriteMovingHeadFixture(Effect& eff, int fixture) {
     return YES;
 }
 
+// MARK: - DMX state + remap (G8 — C7)
+
+namespace {
+
+static constexpr int kDMXChannelCount = 48;
+
+/// Read a DMX channel slider value (0..255) from the effect
+/// settings. Falls back to TEXTCTRL + the stored default when
+/// the SLIDER key isn't present.
+static int readDMXChannel(Effect& eff, int channel) {
+    auto& s = eff.GetSettings();
+    std::string sliderKey = "E_SLIDER_DMX" + std::to_string(channel);
+    std::string textKey = "E_TEXTCTRL_DMX" + std::to_string(channel);
+    int val = 0;
+    if (s.Contains(sliderKey)) {
+        val = s.GetInt(sliderKey, 0);
+    } else if (s.Contains(textKey)) {
+        val = s.GetInt(textKey, 0);
+    }
+    if (val < 0) val = 0;
+    if (val > 255) val = 255;
+    return val;
+}
+
+/// Write a DMX channel slider value through both the slider and
+/// text-control sibling keys so the UI stays consistent. Desktop
+/// writes both; iPad's JSON-backed sliders store only one of
+/// them, but clearing both paths keeps whichever the inspector
+/// reads in sync.
+static void writeDMXChannel(Effect& eff, int channel, int value) {
+    auto& s = eff.GetSettings();
+    if (value < 0) value = 0;
+    if (value > 255) value = 255;
+    std::string valStr = std::to_string(value);
+    s[std::string("E_SLIDER_DMX") + std::to_string(channel)] =
+        SettingValue(valStr);
+    s[std::string("E_TEXTCTRL_DMX") + std::to_string(channel)] =
+        SettingValue(valStr);
+}
+
+/// Format a DMX byte (0..255) as `#XXXXXX` using the same
+/// channel for R/G/B — the storage convention desktop uses in
+/// state `s<n>-Color` entries so round-trips are lossless.
+static std::string formatDMXColor(int v) {
+    if (v < 0) v = 0;
+    if (v > 255) v = 255;
+    char buf[8];
+    std::snprintf(buf, sizeof(buf), "#%02x%02x%02x", v, v, v);
+    return std::string(buf);
+}
+
+/// Parse a `#RRGGBB` hex string into its red byte. State files
+/// encode DMX values in the red channel (see desktop's
+/// `DMXPanel.cpp:452`). Returns 0 on parse failure.
+static int parseDMXColorRed(const std::string& hex) {
+    if (hex.size() < 7 || hex.front() != '#') return 0;
+    auto hexDigit = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+        if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+        return -1;
+    };
+    int hi = hexDigit(hex[1]);
+    int lo = hexDigit(hex[2]);
+    if (hi < 0 || lo < 0) return 0;
+    return (hi << 4) | lo;
+}
+
+} // namespace
+
+- (BOOL)dmxStateExistsForRow:(int)rowIndex
+                      atIndex:(int)effectIndex
+                     stateName:(NSString*)stateName {
+    if (stateName.length == 0) return NO;
+    if (!_context) return NO;
+    auto eff = lookupEffect(*_context, rowIndex, effectIndex);
+    if (!eff.ok()) return NO;
+    Model* m = [self _targetModelForRow:rowIndex];
+    if (!m) return NO;
+    return m->HasState(std::string([stateName UTF8String])) ? YES : NO;
+}
+
+- (BOOL)dmxSaveStateForRow:(int)rowIndex
+                    atIndex:(int)effectIndex
+                   stateName:(NSString*)stateName
+                   overwrite:(BOOL)overwrite {
+    if (stateName.length == 0) return NO;
+    if (!_context) return NO;
+    auto eff = lookupEffect(*_context, rowIndex, effectIndex);
+    if (!eff.ok()) return NO;
+    Model* m = [self _targetModelForRow:rowIndex];
+    if (!m) return NO;
+    struct { Effect* effect; Model* model; bool ok() const { return true; } } look = { eff.effect, m };
+
+    std::string name([stateName UTF8String]);
+    if (look.model->HasState(name) && !overwrite) {
+        return NO;
+    }
+
+    std::map<std::string, std::string> attributes;
+    attributes["CustomColors"] = "1";
+    attributes["Name"] = name;
+    attributes["Type"] = "SingleNode";
+
+    uint32_t maxChannels = look.model->GetChanCount();
+    if (maxChannels > (uint32_t)kDMXChannelCount) maxChannels = kDMXChannelCount;
+
+    for (int i = 1; i <= kDMXChannelCount; ++i) {
+        std::string sKey = "s" + std::to_string(i);
+        std::string sNameKey = sKey + "-Name";
+        std::string sColorKey = sKey + "-Color";
+        if ((uint32_t)i <= maxChannels) {
+            int v = readDMXChannel(*look.effect, i);
+            attributes[sNameKey] = name;
+            attributes[sKey] = "Node " + std::to_string(i);
+            attributes[sColorKey] = formatDMXColor(v);
+        } else {
+            attributes[sNameKey] = "";
+            attributes[sKey] = "";
+            attributes[sColorKey] = "";
+        }
+    }
+
+    look.model->AddState(attributes);
+    // In-memory only for v1. When xlights_rgbeffects.xml gets
+    // persisted elsewhere the state shows up on reload; otherwise
+    // it's session-scoped. The DMX panel UI calls this out.
+    return YES;
+}
+
+- (BOOL)dmxLoadStateForRow:(int)rowIndex
+                    atIndex:(int)effectIndex
+                   stateName:(NSString*)stateName {
+    if (stateName.length == 0) return NO;
+    if (!_context) return NO;
+    auto eff = lookupEffect(*_context, rowIndex, effectIndex);
+    if (!eff.ok()) return NO;
+    Model* m = [self _targetModelForRow:rowIndex];
+    if (!m) return NO;
+    struct { Effect* effect; Model* model; bool ok() const { return true; } } look = { eff.effect, m };
+
+    std::string name([stateName UTF8String]);
+    const auto& states = look.model->GetStateInfo();
+    auto it = states.find(name);
+    if (it == states.end()) return NO;
+
+    // Match desktop validation — only "Custom colour single node"
+    // states are shaped correctly for DMX channel reuse.
+    auto findOrEmpty = [&](const std::string& k) -> std::string {
+        auto jt = it->second.find(k);
+        return (jt == it->second.end()) ? std::string() : jt->second;
+    };
+    if (findOrEmpty("CustomColors") != "1"
+        || findOrEmpty("Type") != "SingleNode") {
+        return NO;
+    }
+
+    uint32_t maxChannels = look.model->GetChanCount();
+    if (maxChannels > (uint32_t)kDMXChannelCount) maxChannels = kDMXChannelCount;
+
+    bool changed = false;
+    for (int i = 1; i <= (int)maxChannels; ++i) {
+        std::string nameKey = "s" + std::to_string(i) + "-Name";
+        if (it->second.find(nameKey) == it->second.end()) continue;
+        std::string colorKey = "s" + std::to_string(i) + "-Color";
+        auto colIt = it->second.find(colorKey);
+        if (colIt == it->second.end()) continue;
+        int val = parseDMXColorRed(colIt->second);
+        writeDMXChannel(*look.effect, i, val);
+        changed = true;
+    }
+    if (changed) {
+        look.effect->IncrementChangeCount();
+    }
+    return changed ? YES : NO;
+}
+
+- (BOOL)dmxRemapChannelsForRow:(int)rowIndex
+                        atIndex:(int)effectIndex
+                         preset:(int)preset {
+    if (!_context) return NO;
+    auto eff = lookupEffect(*_context, rowIndex, effectIndex);
+    if (!eff.ok()) return NO;
+    struct { Effect* effect; bool ok() const { return true; } } look = { eff.effect };
+
+    // Snapshot every channel's pre-remap value so we can apply a
+    // permutation without stepping on ourselves.
+    std::array<int, kDMXChannelCount + 1> before{};  // 1-based
+    for (int i = 1; i <= kDMXChannelCount; ++i) {
+        before[i] = readDMXChannel(*look.effect, i);
+    }
+
+    std::array<int, kDMXChannelCount + 1> after = before;
+    switch (preset) {
+        case 0: // Shift +1
+            for (int i = 1; i <= kDMXChannelCount; ++i) {
+                int src = i - 1;
+                if (src < 1) src = kDMXChannelCount;
+                after[i] = before[src];
+            }
+            break;
+        case 1: // Shift -1
+            for (int i = 1; i <= kDMXChannelCount; ++i) {
+                int src = i + 1;
+                if (src > kDMXChannelCount) src = 1;
+                after[i] = before[src];
+            }
+            break;
+        case 2: // Reverse
+            for (int i = 1; i <= kDMXChannelCount; ++i) {
+                after[i] = before[kDMXChannelCount + 1 - i];
+            }
+            break;
+        case 3: // Invert All
+            for (int i = 1; i <= kDMXChannelCount; ++i) {
+                after[i] = 255 - before[i];
+            }
+            break;
+        case 4: // Double
+            for (int i = 1; i <= kDMXChannelCount; ++i) {
+                int v = before[i] * 2;
+                after[i] = v > 255 ? 255 : v;
+            }
+            break;
+        case 5: // Half
+            for (int i = 1; i <= kDMXChannelCount; ++i) {
+                after[i] = before[i] / 2;
+            }
+            break;
+        default:
+            return NO;
+    }
+
+    bool changed = false;
+    for (int i = 1; i <= kDMXChannelCount; ++i) {
+        if (after[i] != before[i]) {
+            writeDMXChannel(*look.effect, i, after[i]);
+            changed = true;
+        }
+    }
+    if (changed) {
+        look.effect->IncrementChangeCount();
+    }
+    return changed ? YES : NO;
+}
+
 - (int)syncMovingHeadPositionForRow:(int)rowIndex
                               atIndex:(int)effectIndex {
     if (!_context) return 0;

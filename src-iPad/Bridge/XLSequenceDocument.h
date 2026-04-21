@@ -666,4 +666,62 @@
 - (int)syncMovingHeadPositionForRow:(int)rowIndex
                               atIndex:(int)effectIndex;
 
+// MARK: - DMX state + remap plumbing (G8 — C7)
+//
+// Model states live on the `Model` object's in-memory
+// `stateInfo` map. Desktop's Save-State writes a new entry then
+// fires `EVT_RGBEFFECTS_CHANGED` to persist `xlights_rgbeffects.xml`;
+// iPad v1 keeps the save in-memory for the session and does NOT
+// persist (documented in the banner on the DMX panel). Loading
+// desktop-authored states works across restarts because the
+// states were already read out of the XML at show-folder open.
+
+/// True iff a state with `stateName` already exists on the
+/// effect's target model. Used for the save-overwrite prompt.
+- (BOOL)dmxStateExistsForRow:(int)rowIndex
+                      atIndex:(int)effectIndex
+                     stateName:(NSString*)stateName;
+
+/// Copy the current effect's `E_SLIDER_DMX1..48` values into a
+/// new (or existing) state on the model. Builds the attribute
+/// map matching desktop's `DMXPanel::OnSaveAsStateClick`
+/// (CustomColors=1, Type=SingleNode, s<n>-Color="#XXXXXX"). In-
+/// memory only — not persisted to disk in v1.
+///
+/// `overwrite=NO` aborts when the state already exists.
+/// Returns YES on successful save.
+- (BOOL)dmxSaveStateForRow:(int)rowIndex
+                    atIndex:(int)effectIndex
+                   stateName:(NSString*)stateName
+                   overwrite:(BOOL)overwrite;
+
+/// Pull a saved state's channel values back into the effect's
+/// `E_SLIDER_DMX1..N` settings. Matches desktop's
+/// `DMXPanel::OnLoadFromStateClick`: validates `Type=SingleNode`
+/// and `CustomColors=1`, reads `s<n>-Color` hex, extracts the
+/// red channel as the DMX byte, writes it via the settings map
+/// (so the UI sliders pick up the change through the normal
+/// observable path). Returns YES on successful apply, NO if the
+/// state isn't present or doesn't match the expected shape.
+- (BOOL)dmxLoadStateForRow:(int)rowIndex
+                    atIndex:(int)effectIndex
+                   stateName:(NSString*)stateName;
+
+/// Preset channel remappings for the DMX effect. Smaller scope
+/// than desktop's `RemapDMXChannelsDialog` — iPad v1 exposes a
+/// handful of common transforms via a menu instead of the full
+/// 48-row grid editor (deferred to post-v1).
+///
+///   0 = Shift +1     (channel n value → channel n+1, wrap)
+///   1 = Shift -1     (channel n value → channel n-1, wrap)
+///   2 = Reverse      (1↔48, 2↔47, …)
+///   3 = Invert All   (each channel value = 255 - old)
+///   4 = Double       (each channel value × 2, clamp to 255)
+///   5 = Half         (each channel value / 2)
+///
+/// Returns YES when anything changed.
+- (BOOL)dmxRemapChannelsForRow:(int)rowIndex
+                        atIndex:(int)effectIndex
+                         preset:(int)preset;
+
 @end
