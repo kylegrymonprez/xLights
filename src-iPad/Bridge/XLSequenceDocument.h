@@ -217,6 +217,54 @@
 - (BOOL)insertEffectLayerBelowAtIndex:(int)rowIndex;
 - (BOOL)removeEffectLayerAtIndex:(int)rowIndex;
 
+// B57: global collapse / expand. `collapseAllElements` sets
+// `SetCollapsed(true)` on every non-timing Element; `expandAll` does
+// the opposite. Repopulates row info so the caller just needs to
+// reloadRows afterwards.
+- (void)collapseAllElements;
+- (void)expandAllElements;
+
+// B46: in-place rename of an effect layer's name (`EffectLayer::
+// SetLayerName`). Empty string clears the name. Returns NO if the
+// row doesn't resolve to an EffectLayer.
+- (BOOL)renameLayerAtRow:(int)rowIndex
+                    name:(NSString*)newName
+    NS_SWIFT_NAME(renameLayer(atRow:name:));
+
+// B51: Element-level render-disabled toggle. Disables rendering for
+// the whole element (model + submodels + strands + nodes). Reads via
+// `elementRenderDisabled` / writes via `setElementRenderDisabled`.
+- (BOOL)elementRenderDisabledAtRow:(int)rowIndex
+    NS_SWIFT_NAME(elementRenderDisabled(atRow:));
+- (void)setElementRenderDisabled:(BOOL)disabled atRow:(int)rowIndex
+    NS_SWIFT_NAME(setElementRenderDisabled(_:atRow:));
+
+// B50: return the count of effects on the given row's layer. Used
+// to gate the "Delete All Effects" menu entry and report "N effects
+// will be deleted" in the confirm alert.
+- (int)effectCountOnRow:(int)rowIndex
+    NS_SWIFT_NAME(effectCountOnRow(_:));
+
+// B87: drop any word + phoneme layers (layers 1 and 2) from the
+// timing element the given row belongs to. Rejected if the element
+// has no sub-layers, or if any word/phoneme mark is locked. Matches
+// desktop's implicit "empty layer when user doesn't need it" cleanup;
+// no explicit desktop menu entry — it's an inverse of
+// BreakdownPhrases.
+- (BOOL)removeWordsAndPhonemesAtRow:(int)rowIndex
+    NS_SWIFT_NAME(removeWordsAndPhonemes(atRow:));
+
+// B76: timing-track fixed-vs-variable accessors. Fixed tracks carry
+// a non-zero `mFixed` interval (milliseconds-per-mark) that
+// prevents per-mark editing. `makeTimingTrackVariable` calls
+// `SetFixedTiming(0)` which unlocks user editing while leaving the
+// existing fixed-period marks in place. Returns NO if the row isn't
+// a timing element.
+- (BOOL)timingTrackIsFixedAtRow:(int)rowIndex
+    NS_SWIFT_NAME(timingTrackIsFixed(atRow:));
+- (BOOL)makeTimingTrackVariableAtRow:(int)rowIndex
+    NS_SWIFT_NAME(makeTimingTrackVariable(atRow:));
+
 // Timing track rename / delete. `renameTiming…` wires through
 // `SequenceElements::RenameTimingTrack` so effect references to
 // the old name update in-place. `deleteTiming…` goes through
@@ -561,6 +609,17 @@
 - (NSData*)waveformDataFromMS:(long)startMS
                          toMS:(long)endMS
                    numSamples:(int)numSamples;
+
+// B41: same as above, with a filter type parameter matching
+// `AUDIOSAMPLETYPE` (0=RAW, 1=BASS, 2=TREBLE, 3=ALTO, 4=NONVOCALS).
+// If `GetFilteredAudioData` returns null (unfiltered source), the
+// method falls back to the raw waveform rather than returning an
+// empty buffer.
+- (NSData*)waveformDataFromMS:(long)startMS
+                         toMS:(long)endMS
+                   numSamples:(int)numSamples
+                   filterType:(int)filterType
+    NS_SWIFT_NAME(waveformData(fromMS:toMS:numSamples:filterType:));
 
 // Effect-background batch append. Mirrors desktop's
 // `EffectsGrid::DrawEffectBackground` helper — resolves the

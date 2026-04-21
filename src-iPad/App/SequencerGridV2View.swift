@@ -53,6 +53,20 @@ struct SequencerGridV2View: View {
     @State private var renameMarkTarget: TimingMarkMenuTarget?
     @State private var renameMarkText: String = ""
 
+    /// B32 loop-region context-menu trigger. Set non-nil when the
+    /// user long-presses inside the existing loop band; cleared
+    /// when the confirmation dialog dismisses.
+    @State private var loopMenuPresented: Bool = false
+    /// B41 waveform filter-picker trigger.
+    @State private var waveformMenuPresented: Bool = false
+
+    /// B21 edit-timing dialog state. Fields are bound to seconds
+    /// strings so users enter `5.25` and see `0.75` for duration;
+    /// commit parses with `strtod`.
+    @State private var editTimingTarget: ContextMenuTarget?
+    @State private var editTimingStartText: String = ""
+    @State private var editTimingEndText: String = ""
+
     var body: some View {
         GeometryReader { geo in
             // Partition rows into timing band (row 2) vs model band (row 3).
@@ -77,7 +91,7 @@ struct SequencerGridV2View: View {
                 VStack(spacing: 0) {
                     // Row 1: view-picker corner + ruler/waveform strip.
                     HStack(alignment: .top, spacing: 0) {
-                        topLeftCorner
+                        topLeftCorner(availableWidth: geo.size.width)
                             .frame(width: metrics.rowHeaderWidth,
                                    height: metrics.topChromeHeight)
                         Divider()
@@ -93,7 +107,15 @@ struct SequencerGridV2View: View {
                                 set: { timeline.hScrollOffsetPx = $0 }),
                             onSeek: { ms in viewModel.seekTo(ms: ms) },
                             onPinchZoom: pinchZoomAction,
-                            onUserInteraction: { timeline.noteUserInteraction() }
+                            onUserInteraction: { timeline.noteUserInteraction() },
+                            loopStartMS: viewModel.loopStartMS,
+                            loopEndMS: viewModel.loopEndMS,
+                            hasLoop: viewModel.hasLoopRegion,
+                            onSetLoop: { start, end in
+                                viewModel.setLoopRegion(startMS: start, endMS: end)
+                            },
+                            onLoopMenu: { _ in loopMenuPresented = true },
+                            onWaveformMenu: { waveformMenuPresented = true }
                         )
                         .frame(height: metrics.topChromeHeight)
                     }
@@ -244,6 +266,20 @@ struct SequencerGridV2View: View {
                 Button("Match Duration") {
                     viewModel.alignSelectedEffects(.matchDuration)
                 }
+                Button("Shift-Align Start") {
+                    viewModel.alignSelectedEffects(.startTimesShift)
+                }
+                Button("Shift-Align End") {
+                    viewModel.alignSelectedEffects(.endTimesShift)
+                }
+                Button("Align to Closest Timing Mark") {
+                    viewModel.alignSelectedEffectsToTimingMarks()
+                }
+                if viewModel.canCloseGapInSelection {
+                    Button("Close Gap") {
+                        viewModel.closeGapInSelectedEffects()
+                    }
+                }
                 Button("Delete \(n) Effects", role: .destructive) {
                     viewModel.deleteSelectedEffects()
                 }
@@ -270,8 +306,17 @@ struct SequencerGridV2View: View {
                         viewModel.splitSelectedEffectAtPlayMarker()
                     }
                 }
+                Button("Edit Timing…") {
+                    let e = viewModel.rows[target.rowIndex].effects[target.effectIndex]
+                    editTimingStartText = Self.formatMS(e.startTimeMS)
+                    editTimingEndText = Self.formatMS(e.endTimeMS)
+                    editTimingTarget = target
+                }
                 Button("Select All in Row") {
                     viewModel.selectAllEffectsInRow(rowIndex: target.rowIndex)
+                }
+                Button("Select All in Model") {
+                    viewModel.selectAllEffectsInModel(rowIndex: target.rowIndex)
                 }
                 Button("Select All in Column") {
                     let e = viewModel.rows[target.rowIndex].effects[target.effectIndex]
@@ -357,6 +402,77 @@ struct SequencerGridV2View: View {
         } message: {
             Text("Name for the new variable timing track.")
         }
+        // B21 edit-timing alert. Two fields (start, end) in seconds
+        // with 3 decimal places; parses with `strtod` per repo rule
+        // (no throwing std::stod). Calls `moveEffect` on commit.
+        .alert("Edit Timing",
+               isPresented: Binding(
+                get: { editTimingTarget != nil },
+                set: { if !$0 { editTimingTarget = nil } }
+               ),
+               presenting: editTimingTarget) { target in
+            TextField("Start (seconds)", text: $editTimingStartText)
+                .keyboardType(.decimalPad)
+            TextField("End (seconds)", text: $editTimingEndText)
+                .keyboardType(.decimalPad)
+            Button("OK") {
+                if let startMS = Self.parseSeconds(editTimingStartText),
+                   let endMS = Self.parseSeconds(editTimingEndText),
+                   endMS > startMS {
+                    viewModel.moveEffect(rowIndex: target.rowIndex,
+                                          effectIndex: target.effectIndex,
+                                          newStartMS: startMS, newEndMS: endMS)
+                }
+                editTimingTarget = nil
+            }
+            Button("Cancel", role: .cancel) {
+                editTimingTarget = nil
+            }
+        } message: { _ in
+            Text("Enter start and end times in seconds.")
+        }
+        // B41 waveform filter picker.
+        .confirmationDialog(
+            "Waveform",
+            isPresented: $waveformMenuPresented
+        ) {
+            ForEach(SequencerViewModel.WaveformFilter.allCases, id: \.rawValue) { filter in
+                Button {
+                    viewModel.waveformFilter = filter
+                } label: {
+                    if viewModel.waveformFilter == filter {
+                        Label(filter.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(filter.displayName)
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+        // B32 loop-region context menu (long-press inside the loop
+        // band). Actions: toggle Play Loop (B33), Render Loop Region
+        // (B44), Clear Loop.
+        .confirmationDialog(
+            "Loop Region",
+            isPresented: $loopMenuPresented
+        ) {
+            Button(viewModel.loopPlayEnabled ? "Stop Play Loop" : "Play Loop Region") {
+                if !viewModel.isPlaying {
+                    viewModel.loopPlayEnabled = true
+                    viewModel.seekTo(ms: viewModel.loopStartMS)
+                    viewModel.play()
+                } else {
+                    viewModel.toggleLoopPlay()
+                }
+            }
+            Button("Render Loop Region") {
+                viewModel.renderLoopRegion()
+            }
+            Button("Clear Loop", role: .destructive) {
+                viewModel.clearLoopRegion()
+            }
+            Button("Cancel", role: .cancel) {}
+        }
         // B70 rename-timing-mark alert.
         .alert("Rename Mark",
                isPresented: Binding(
@@ -381,6 +497,29 @@ struct SequencerGridV2View: View {
         } message: { _ in
             Text("Timing-mark label (leave blank to clear).")
         }
+    }
+
+    /// B21 time formatting / parsing helpers. `formatMS` emits
+    /// `5.250` for 5250 ms (3 decimal places, trimmed trailing
+    /// zero-run if none are needed — actually keep them for
+    /// consistent alignment). `parseSeconds` goes the other way
+    /// using strtod (the repo avoids std::stod / std::stoi because
+    /// they throw on bad input).
+    static func formatMS(_ ms: Int) -> String {
+        return String(format: "%.3f", Double(ms) / 1000.0)
+    }
+
+    static func parseSeconds(_ s: String) -> Int? {
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        var endPtr: UnsafeMutablePointer<CChar>? = nil
+        let val = trimmed.withCString { cStr -> Double in
+            strtod(cStr, &endPtr)
+        }
+        // Reject if strtod didn't consume anything meaningful.
+        if endPtr == nil { return nil }
+        if val < 0 || !val.isFinite { return nil }
+        return Int((val * 1000.0).rounded())
     }
 
     /// B67: default add-mark duration is 500 ms, clamped against the
@@ -414,7 +553,7 @@ struct SequencerGridV2View: View {
 
     // MARK: - Row 1: view/time corner + top chrome
 
-    private var topLeftCorner: some View {
+    private func topLeftCorner(availableWidth: CGFloat) -> some View {
         let views = (viewModel.document.availableViews() as [String])
         let currentIdx = Int(viewModel.document.currentViewIndex())
         let currentName = (currentIdx >= 0 && currentIdx < views.count)
@@ -445,6 +584,34 @@ struct SequencerGridV2View: View {
                         showAddTimingTrackAlert = true
                     } label: {
                         Label("Add Timing Track…", systemImage: "plus.rectangle")
+                    }
+                    // B37: re-fit the whole sequence into the viewport.
+                    Divider()
+                    Button {
+                        zoomToFitSequence(availableWidth: availableWidth)
+                    } label: {
+                        Label("Zoom to Fit", systemImage: "arrow.up.left.and.arrow.down.right")
+                    }
+                    // B36: fit the current selection (single or multi).
+                    if viewModel.selectedEffect != nil
+                        || !viewModel.selectedEffects.isEmpty {
+                        Button {
+                            zoomToSelection(availableWidth: availableWidth)
+                        } label: {
+                            Label("Zoom to Selection", systemImage: "arrow.up.backward.and.arrow.down.forward")
+                        }
+                    }
+                    // B57: global collapse / expand.
+                    Divider()
+                    Button {
+                        viewModel.collapseAllModels()
+                    } label: {
+                        Label("Collapse All", systemImage: "chevron.up.chevron.down")
+                    }
+                    Button {
+                        viewModel.expandAllElements()
+                    } label: {
+                        Label("Expand All", systemImage: "arrow.up.and.down")
                     }
                 } label: {
                     HStack(spacing: 2) {
@@ -544,6 +711,50 @@ struct SequencerGridV2View: View {
         fitDurationMS = durationMS
     }
 
+    /// B37: unconditional zoom-to-fit (ignores the load-once guard on
+    /// `fitDurationMS`). Wired to the View-picker menu entry.
+    private func zoomToFitSequence(availableWidth: CGFloat) {
+        let durationMS = viewModel.sequenceDurationMS
+        guard durationMS > 0 else { return }
+        let contentAvail = availableWidth - metrics.rowHeaderWidth
+        guard contentAvail > 1 else { return }
+        let ppms = contentAvail / CGFloat(durationMS)
+        timeline.pixelsPerMS = min(max(ppms, 0.005), 2.0)
+        timeline.hScrollOffsetPx = 0
+    }
+
+    /// B36: zoom so the selected effect's range (or the union of all
+    /// selected effects' ranges) fills the horizontal viewport with
+    /// small margins on each side. No-op when nothing is selected or
+    /// when the resulting range would clamp against the zoom limits.
+    private func zoomToSelection(availableWidth: CGFloat) {
+        var minStart = Int.max
+        var maxEnd = Int.min
+        if let single = viewModel.selectedEffect {
+            minStart = single.startTimeMS
+            maxEnd = single.endTimeMS
+        } else {
+            for sel in viewModel.selectedEffects {
+                minStart = min(minStart, sel.startTimeMS)
+                maxEnd = max(maxEnd, sel.endTimeMS)
+            }
+        }
+        guard minStart < maxEnd else { return }
+        let contentAvail = availableWidth - metrics.rowHeaderWidth
+        guard contentAvail > 1 else { return }
+        let rangeMS = maxEnd - minStart
+        // Reserve ~15% margin total (7.5% each side) so selection
+        // doesn't kiss the edges.
+        let margin: CGFloat = 0.15
+        let targetPx = contentAvail * (1 - margin)
+        let ppms = targetPx / CGFloat(rangeMS)
+        timeline.pixelsPerMS = min(max(ppms, 0.005), 2.0)
+        let selCenterMS = CGFloat(minStart + rangeMS / 2)
+        let viewCenterPx = contentAvail / 2
+        timeline.hScrollOffsetPx = max(0,
+            selCenterMS * timeline.pixelsPerMS - viewCenterPx)
+    }
+
     // MARK: - Row 2: timing band
 
     private func timingHeaders(_ rows: [SequencerViewModel.RowInfo]) -> some View {
@@ -557,7 +768,22 @@ struct SequencerGridV2View: View {
                     canBreakdownPhrases: viewModel.canBreakdownPhrases(rowIndex: row.id),
                     onBreakdownPhrases: {
                         _ = viewModel.breakdownPhrases(rowIndex: row.id)
-                    }
+                    },
+                    canRemoveWordsAndPhonemes: viewModel.canRemoveWordsAndPhonemes(rowIndex: row.id),
+                    onRemoveWordsAndPhonemes: {
+                        _ = viewModel.removeWordsAndPhonemes(rowIndex: row.id)
+                    },
+                    canMakeVariable: viewModel.timingTrackIsFixed(rowIndex: row.id),
+                    onMakeVariable: {
+                        _ = viewModel.makeTimingTrackVariable(rowIndex: row.id)
+                    },
+                    onSubdivide: { raw in
+                        if let mode = SequencerViewModel.SubdivisionMode(rawValue: raw) {
+                            _ = viewModel.generateSubdividedTimingTrack(
+                                sourceRowIndex: row.id, mode: mode)
+                        }
+                    },
+                    canSubdivide: row.layerIndex == 0 && !row.effects.isEmpty
                 )
             }
         }
@@ -579,7 +805,25 @@ struct SequencerGridV2View: View {
                     onRowsChanged: { viewModel.reloadRows() },
                     onSelectAllEffects: {
                         viewModel.selectAllEffectsInRow(rowIndex: row.id)
-                    }
+                    },
+                    onSelectAllEffectsInModel: {
+                        viewModel.selectAllEffectsInModel(rowIndex: row.id)
+                    },
+                    onRenameLayer: { newName in
+                        _ = viewModel.renameLayer(rowIndex: row.id, name: newName)
+                    },
+                    effectCountOnRow: row.effects.count,
+                    onDeleteAllEffectsOnRow: {
+                        _ = viewModel.deleteAllEffectsOnRow(rowIndex: row.id)
+                    },
+                    elementRenderDisabled: viewModel.isElementRenderDisabled(rowIndex: row.id),
+                    onToggleRenderDisabled: {
+                        viewModel.toggleElementRenderDisabled(rowIndex: row.id)
+                    },
+                    onCopyRow: { viewModel.copyRow(rowIndex: row.id) },
+                    onCutRow: { viewModel.cutRow(rowIndex: row.id) },
+                    onCopyModel: { viewModel.copyModel(rowIndex: row.id) },
+                    onCutModel: { viewModel.cutModel(rowIndex: row.id) }
                 )
             }
             Spacer(minLength: 0)

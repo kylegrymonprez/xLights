@@ -18,6 +18,19 @@ struct TimingRowHeader: View {
     /// can't use.
     var canBreakdownPhrases: Bool = false
     var onBreakdownPhrases: (() -> Void)?
+    /// B87: surfaced as "Remove Words / Phonemes" when the phrase
+    /// layer has extra sub-layers to strip.
+    var canRemoveWordsAndPhonemes: Bool = false
+    var onRemoveWordsAndPhonemes: (() -> Void)?
+    /// B76: surfaced as "Make Variable" on fixed-interval timing
+    /// tracks. Nil hides the entry.
+    var canMakeVariable: Bool = false
+    var onMakeVariable: (() -> Void)?
+    /// B80: subdivision callback. Fired with the chosen
+    /// `SubdivisionMode.rawValue` so RowHeaderViews doesn't pull in
+    /// the whole view-model enum by type.
+    var onSubdivide: ((_ rawMode: Int) -> Void)?
+    var canSubdivide: Bool = false
 
     // Active state is carried on `row.timing?.isActive` so a toggle
     // here flips the struct equality and re-runs the grid body —
@@ -78,6 +91,7 @@ struct TimingRowHeader: View {
                 .font(.caption)
                 .foregroundStyle(.white)
                 .lineLimit(1)
+                .help(row.displayName)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 6)
@@ -107,6 +121,34 @@ struct TimingRowHeader: View {
                     Button { fire() } label: {
                         Label("Breakdown Phrases",
                                systemImage: "text.append")
+                    }
+                }
+                if canRemoveWordsAndPhonemes, let fire = onRemoveWordsAndPhonemes {
+                    Button(role: .destructive) { fire() } label: {
+                        Label("Remove Words / Phonemes",
+                               systemImage: "rectangle.stack.badge.minus")
+                    }
+                }
+                if canMakeVariable, let fire = onMakeVariable {
+                    Button { fire() } label: {
+                        Label("Make Variable",
+                               systemImage: "pencil.and.list.clipboard")
+                    }
+                }
+                if canSubdivide, let fire = onSubdivide {
+                    Menu {
+                        Button("1/2") { fire(2) }
+                        Button("1/3") { fire(3) }
+                        Button("1/4") { fire(4) }
+                        Button("1/6") { fire(6) }
+                        Button("1/8") { fire(8) }
+                        Divider()
+                        Button("2×") { fire(-2) }
+                        Button("4×") { fire(-4) }
+                        Button("8×") { fire(-8) }
+                    } label: {
+                        Label("Generate Subdivided Timing Track…",
+                               systemImage: "square.split.2x1")
                     }
                 }
                 Button(role: .destructive) {
@@ -168,8 +210,31 @@ struct ModelRowHeader: View {
     /// the row-heading long-press menu. Wired on the outer view to
     /// `SequencerViewModel.selectAllEffectsInRow(rowIndex:)`.
     var onSelectAllEffects: (() -> Void)?
+    /// B52 select-every-effect-in-the-model (row + sub-layers +
+    /// submodels + strands + nodes). Shown on model rows where it
+    /// differs from `onSelectAllEffects` (which is row-scoped only).
+    var onSelectAllEffectsInModel: (() -> Void)?
+    /// B46 rename-layer callback + initial label. The outer view
+    /// wires this to `SequencerViewModel.renameLayer(rowIndex:name:)`
+    /// and then refreshes rows.
+    var onRenameLayer: ((_ newName: String) -> Void)?
+    /// B50 delete-all-effects-on-row + count (for the confirm alert).
+    var effectCountOnRow: Int = 0
+    var onDeleteAllEffectsOnRow: (() -> Void)?
+    /// B51 toggle element render-disabled flag.
+    var elementRenderDisabled: Bool = false
+    var onToggleRenderDisabled: (() -> Void)?
+    /// B53 / B54 row + model cut / copy. Paste is the global Cmd+V
+    /// already plumbed for multi-effect clipboards (B98).
+    var onCopyRow: (() -> Void)?
+    var onCutRow: (() -> Void)?
+    var onCopyModel: (() -> Void)?
+    var onCutModel: (() -> Void)?
 
     @State private var showDeleteLayerConfirm: Bool = false
+    @State private var showDeleteAllEffectsConfirm: Bool = false
+    @State private var showRenameLayer: Bool = false
+    @State private var renameLayerText: String = ""
 
     var body: some View {
         let isSubLayer = row.layerIndex > 0
@@ -238,23 +303,27 @@ struct ModelRowHeader: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .help(row.displayName)
             } else if isNodeRow {
                 Text(row.displayName)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .help(row.displayName)
             } else if layerCount > 1 {
                 Text("\(row.displayName) [\(layerCount)]")
                     .font(.caption)
                     .fontWeight(isSubmodelRow ? .regular : .medium)
                     .foregroundStyle(isSubmodelRow ? Color.secondary : Color.primary)
                     .lineLimit(1)
+                    .help(row.displayName)
             } else {
                 Text(row.displayName)
                     .font(.caption)
                     .fontWeight(isSubmodelRow ? .regular : .medium)
                     .foregroundStyle(isSubmodelRow ? Color.secondary : Color.primary)
                     .lineLimit(1)
+                    .help(row.displayName)
             }
             Spacer(minLength: 0)
         }
@@ -283,9 +352,62 @@ struct ModelRowHeader: View {
                     Label("Select All Effects in Row",
                            systemImage: "checkmark.rectangle.stack")
                 }
+            }
+            if !isSubLayer && !isNodeRow,
+               let fire = onSelectAllEffectsInModel {
+                Button {
+                    fire()
+                } label: {
+                    Label("Select All Effects in Model",
+                           systemImage: "rectangle.stack.fill.badge.plus")
+                }
+            }
+            if effectCountOnRow > 0, onDeleteAllEffectsOnRow != nil {
+                Button(role: .destructive) {
+                    showDeleteAllEffectsConfirm = true
+                } label: {
+                    Label("Delete All Effects on Row",
+                           systemImage: "trash.slash")
+                }
+            }
+            if effectCountOnRow > 0, let fire = onCopyRow {
+                Button { fire() } label: {
+                    Label("Copy Row", systemImage: "doc.on.doc")
+                }
+            }
+            if effectCountOnRow > 0, let fire = onCutRow {
+                Button(role: .destructive) { fire() } label: {
+                    Label("Cut Row", systemImage: "scissors")
+                }
+            }
+            if !isSubLayer && !isNodeRow, let fire = onCopyModel {
+                Button { fire() } label: {
+                    Label("Copy Model", systemImage: "square.stack.3d.up")
+                }
+            }
+            if !isSubLayer && !isNodeRow, let fire = onCutModel {
+                Button(role: .destructive) { fire() } label: {
+                    Label("Cut Model",
+                           systemImage: "square.stack.3d.up.trianglebadge.exclamationmark")
+                }
+            }
+            if !isSubLayer && !isNodeRow, let fire = onToggleRenderDisabled {
+                Button { fire() } label: {
+                    Label(elementRenderDisabled ? "Enable Render" : "Disable Render",
+                           systemImage: elementRenderDisabled ? "play.rectangle" : "stop.rectangle")
+                }
+            }
+            if !row.effects.isEmpty || onToggleRenderDisabled != nil
+                || onDeleteAllEffectsOnRow != nil {
                 Divider()
             }
             if !isNodeRow {
+                if onRenameLayer != nil {
+                    Button {
+                        renameLayerText = document.rowLayerName(at: Int32(row.id)) ?? ""
+                        showRenameLayer = true
+                    } label: { Label("Rename Layer", systemImage: "pencil") }
+                }
                 Button {
                     if document.insertEffectLayerAbove(at: Int32(row.id)) {
                         onRowsChanged()
@@ -333,6 +455,25 @@ struct ModelRowHeader: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Delete layer \(row.layerIndex + 1) of \(row.displayName)? All effects on this layer will be lost.")
+        }
+        .alert("Delete All Effects",
+               isPresented: $showDeleteAllEffectsConfirm) {
+            Button("Delete All", role: .destructive) {
+                onDeleteAllEffectsOnRow?()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Delete all \(effectCountOnRow) effects on \(row.displayName)? Undo with ⌘Z.")
+        }
+        .alert("Rename Layer",
+               isPresented: $showRenameLayer) {
+            TextField("Name", text: $renameLayerText)
+            Button("OK") {
+                onRenameLayer?(renameLayerText)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enter a layer name (used as the header label).")
         }
     }
 

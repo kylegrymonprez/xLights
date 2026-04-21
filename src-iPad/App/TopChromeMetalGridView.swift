@@ -16,6 +16,20 @@ struct TopChromeMetalGridView: UIViewRepresentable {
     let onSeek: (Int) -> Void
     let onPinchZoom: (CGFloat, CGFloat) -> Void
     var onUserInteraction: (() -> Void)?
+    // B32 loop-region inputs + callbacks. When `hasLoop`, the region
+    // is shaded across both ruler and waveform. Long-press + drag on
+    // the ruler fires `onSetLoop(startMS, endMS)` on each .changed so
+    // the outer view sees the live extent; long-press over an
+    // existing loop (no drag) fires `onLoopMenu(x)` so the outer
+    // view can present the loop context menu.
+    var loopStartMS: Int = 0
+    var loopEndMS: Int = 0
+    var hasLoop: Bool = false
+    var onSetLoop: ((_ startMS: Int, _ endMS: Int) -> Void)?
+    var onLoopMenu: ((_ atXInView: CGFloat) -> Void)?
+    /// B41: long-press on the waveform strip surfaces the filter-
+    /// variant menu (bass / treble / alto / non-vocals / full).
+    var onWaveformMenu: (() -> Void)?
 
     func makeUIView(context: Context) -> TopChromeMetalMTKView {
         let v = TopChromeMetalMTKView()
@@ -36,6 +50,12 @@ struct TopChromeMetalGridView: UIViewRepresentable {
         c.onPinchZoom = onPinchZoom
         c.onUpdateScrollX = { scrollOffsetX = $0 }
         c.onUserInteraction = onUserInteraction
+        c.loopStartMS = loopStartMS
+        c.loopEndMS = loopEndMS
+        c.hasLoop = hasLoop
+        c.onSetLoop = onSetLoop
+        c.onLoopMenu = onLoopMenu
+        c.onWaveformMenu = onWaveformMenu
         view.setNeedsDisplay()
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -54,6 +74,19 @@ struct TopChromeMetalGridView: UIViewRepresentable {
         var onUpdateScrollX: (CGFloat) -> Void = { _ in }
         var onUserInteraction: (() -> Void)?
         var panStartScrollX: CGFloat = 0
+        // B39: set on `.began` when the pan started in the ruler
+        // strip (y < rulerHeight); `.changed` ticks drive continuous
+        // `onSeek` instead of the scroll path.
+        var scrubbingFromRuler: Bool = false
+        // B32 loop-region inputs + live drag state.
+        var loopStartMS: Int = 0
+        var loopEndMS: Int = 0
+        var hasLoop: Bool = false
+        var onSetLoop: ((Int, Int) -> Void)?
+        var onLoopMenu: ((CGFloat) -> Void)?
+        var onWaveformMenu: (() -> Void)?
+        var loopDragAnchorMS: Int?
+        var loopDragCurrentMS: Int?
     }
 }
 
@@ -137,6 +170,40 @@ final class TopChromeMetalMTKView: MTKView, MTKViewDelegate {
                                       r: 0.08, g: 0.08, b: 0.08, a: 1.0)
         }
         bridge.flushFilledRectBatch()
+
+        // B32 loop-region highlight. Draws whichever of the
+        // persisted region or the in-flight drag range is active.
+        let activeLoopStart: Int?
+        let activeLoopEnd: Int?
+        if let a = c.loopDragAnchorMS, let b = c.loopDragCurrentMS {
+            activeLoopStart = min(a, b)
+            activeLoopEnd = max(a, b)
+        } else if c.hasLoop {
+            activeLoopStart = c.loopStartMS
+            activeLoopEnd = c.loopEndMS
+        } else {
+            activeLoopStart = nil
+            activeLoopEnd = nil
+        }
+        if let ls = activeLoopStart, let le = activeLoopEnd, le > ls,
+           c.pixelsPerMS > 0 {
+            let x1 = CGFloat(ls) * c.pixelsPerMS - c.scrollOffsetX
+            let x2 = CGFloat(le) * c.pixelsPerMS - c.scrollOffsetX
+            let totalH = c.rulerHeight + c.waveformHeight
+            bridge.beginFilledRectBatch()
+            // Soft blue band across the whole strip.
+            bridge.appendFilledRectX(x1, y: 0, w: max(1, x2 - x1), h: totalH,
+                                      r: 0.35, g: 0.60, b: 1.0, a: 0.18)
+            bridge.flushFilledRectBatch()
+            // Boundary lines at the edges for clarity.
+            bridge.beginLineBatch()
+            let bc: (CGFloat, CGFloat, CGFloat) = (0.45, 0.70, 1.0)
+            bridge.appendLineX1(x1, y1: 0, x2: x1, y2: totalH,
+                                 r: bc.0, g: bc.1, b: bc.2, a: 0.95)
+            bridge.appendLineX1(x2, y1: 0, x2: x2, y2: totalH,
+                                 r: bc.0, g: bc.1, b: bc.2, a: 0.95)
+            bridge.flushLineBatch()
+        }
 
         // Ruler ticks + labels.
         if c.pixelsPerMS > 0 && c.durationMS > 0 {
@@ -233,6 +300,78 @@ final class TopChromeMetalMTKView: MTKView, MTKViewDelegate {
         addGestureRecognizer(pan)
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(onPinch(_:)))
         addGestureRecognizer(pinch)
+        // B32 loop region: long-press on the ruler establishes a
+        // loop region; dragging extends it. Over an existing loop
+        // band, a plain long-press pops the loop context menu.
+        let lp = UILongPressGestureRecognizer(target: self,
+                                                action: #selector(onLongPressLoop(_:)))
+        lp.minimumPressDuration = 0.5
+        // Allow drag during long-press so the finger can sweep out
+        // the region without cancelling the gesture.
+        lp.allowableMovement = 1_000
+        addGestureRecognizer(lp)
+    }
+
+    @objc func onLongPressLoop(_ g: UILongPressGestureRecognizer) {
+        guard let c = coordinator, c.pixelsPerMS > 0 else { return }
+        let p = g.location(in: self)
+        // B41: long-press in the waveform strip (below the ruler)
+        // surfaces the filter-variant menu on .began. Only ruler
+        // presses proceed to the loop-region path below.
+        if p.y >= c.rulerHeight {
+            if g.state == .began, c.hasAudio {
+                c.onWaveformMenu?()
+            }
+            return
+        }
+        let ms = max(0, min(c.durationMS,
+                             Int((p.x + c.scrollOffsetX) / c.pixelsPerMS)))
+        switch g.state {
+        case .began:
+            // If the press lands inside the existing loop band AND
+            // the finger hasn't moved yet, defer to the .changed
+            // tick to decide between menu vs re-drag. Desktop
+            // equivalent: shift-click to set vs right-click to get
+            // menu — iPad collapses both to long-press so we use
+            // drag-distance as the discriminator.
+            c.loopDragAnchorMS = ms
+            c.loopDragCurrentMS = ms
+            setNeedsDisplay()
+        case .changed:
+            c.loopDragCurrentMS = ms
+            if let anchor = c.loopDragAnchorMS {
+                let lo = min(anchor, ms), hi = max(anchor, ms)
+                if hi > lo {
+                    c.onSetLoop?(lo, hi)
+                }
+            }
+            setNeedsDisplay()
+        case .ended:
+            defer {
+                c.loopDragAnchorMS = nil
+                c.loopDragCurrentMS = nil
+                setNeedsDisplay()
+            }
+            if let anchor = c.loopDragAnchorMS,
+               let current = c.loopDragCurrentMS {
+                let lo = min(anchor, current), hi = max(anchor, current)
+                // Tiny drags count as "just a long-press" — surface
+                // the menu if the press landed on the loop band.
+                let dragPx = CGFloat(abs(current - anchor)) * c.pixelsPerMS
+                if dragPx < 6, c.hasLoop,
+                   ms >= c.loopStartMS, ms <= c.loopEndMS {
+                    c.onLoopMenu?(p.x)
+                } else if hi > lo {
+                    c.onSetLoop?(lo, hi)
+                }
+            }
+        case .cancelled, .failed:
+            c.loopDragAnchorMS = nil
+            c.loopDragCurrentMS = nil
+            setNeedsDisplay()
+        default:
+            break
+        }
     }
 
     @objc func onTap(_ g: UITapGestureRecognizer) {
@@ -246,12 +385,32 @@ final class TopChromeMetalMTKView: MTKView, MTKViewDelegate {
         guard let c = coordinator else { return }
         switch g.state {
         case .began:
-            c.panStartScrollX = c.scrollOffsetX
+            let p = g.location(in: self)
+            // B39: drag starting in the ruler strip continuously
+            // updates the play head; drag in the waveform area keeps
+            // its existing scroll behavior.
+            c.scrubbingFromRuler = (p.y < c.rulerHeight) && (c.pixelsPerMS > 0)
+            if c.scrubbingFromRuler {
+                let ms = max(0, min(c.durationMS,
+                                     Int((p.x + c.scrollOffsetX) / c.pixelsPerMS)))
+                c.onSeek(ms)
+            } else {
+                c.panStartScrollX = c.scrollOffsetX
+            }
             c.onUserInteraction?()
         case .changed:
-            let t = g.translation(in: self)
-            c.onUpdateScrollX(max(0, c.panStartScrollX - t.x))
+            let p = g.location(in: self)
+            if c.scrubbingFromRuler, c.pixelsPerMS > 0 {
+                let ms = max(0, min(c.durationMS,
+                                     Int((p.x + c.scrollOffsetX) / c.pixelsPerMS)))
+                c.onSeek(ms)
+            } else {
+                let t = g.translation(in: self)
+                c.onUpdateScrollX(max(0, c.panStartScrollX - t.x))
+            }
             c.onUserInteraction?()
+        case .ended, .cancelled, .failed:
+            c.scrubbingFromRuler = false
         default: break
         }
     }

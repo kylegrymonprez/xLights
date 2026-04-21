@@ -317,9 +317,10 @@ struct SequencerView: View {
                 .keyboardShortcut(.deleteForward, modifiers: [])
                 .disabled(viewModel.selectedEffect == nil && viewModel.selectedEffects.isEmpty)
 
-                Button("Copy") { viewModel.copySelectedEffect() }
+                Button("Copy") { viewModel.copySelectedEffects() }
                     .keyboardShortcut("c", modifiers: [.command])
-                    .disabled(viewModel.selectedEffect == nil)
+                    .disabled(viewModel.selectedEffect == nil
+                              && viewModel.selectedEffects.isEmpty)
 
                 Button("Paste") {
                     // Paste onto the selected effect's row at the
@@ -354,6 +355,42 @@ struct SequencerView: View {
                 Button("Effect Below") { viewModel.selectEffectBelow() }
                     .keyboardShortcut(.downArrow, modifiers: [])
                     .disabled(viewModel.selectedEffect == nil)
+
+                // B4 modified-arrow editing — Shift stretches end,
+                // Ctrl fine-nudges start+end (1 ms), Option(Alt) nudges
+                // by one frame interval. Duration preserved for the
+                // nudges; stretch is end-only. All clamped against
+                // the selected effect's neighbours.
+                Button("Stretch End Forward") {
+                    viewModel.stretchSelectedEffectEnd(by: viewModel.frameIntervalMS)
+                }
+                .keyboardShortcut(.rightArrow, modifiers: [.shift])
+                .disabled(viewModel.selectedEffect == nil)
+                Button("Stretch End Back") {
+                    viewModel.stretchSelectedEffectEnd(by: -viewModel.frameIntervalMS)
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [.shift])
+                .disabled(viewModel.selectedEffect == nil)
+                Button("Nudge Forward 1ms") {
+                    viewModel.nudgeSelectedEffect(by: 1)
+                }
+                .keyboardShortcut(.rightArrow, modifiers: [.control])
+                .disabled(viewModel.selectedEffect == nil)
+                Button("Nudge Back 1ms") {
+                    viewModel.nudgeSelectedEffect(by: -1)
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [.control])
+                .disabled(viewModel.selectedEffect == nil)
+                Button("Nudge Forward Frame") {
+                    viewModel.nudgeSelectedEffect(by: viewModel.frameIntervalMS)
+                }
+                .keyboardShortcut(.rightArrow, modifiers: [.option])
+                .disabled(viewModel.selectedEffect == nil)
+                Button("Nudge Back Frame") {
+                    viewModel.nudgeSelectedEffect(by: -viewModel.frameIntervalMS)
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [.option])
+                .disabled(viewModel.selectedEffect == nil)
 
                 // Escape cancels the current selection / context, so
                 // arrow-key drill-down doesn't strand the user inside

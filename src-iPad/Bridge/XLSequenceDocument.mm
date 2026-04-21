@@ -568,6 +568,99 @@ static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
     _context->GetSequenceElements().PopulateRowInformation();
 }
 
+- (void)collapseAllElements {
+    auto& se = _context->GetSequenceElements();
+    size_t n = se.GetElementCount(se.GetCurrentView());
+    for (size_t i = 0; i < n; i++) {
+        Element* e = se.GetElement(i, se.GetCurrentView());
+        if (!e) continue;
+        if (e->GetType() == ElementType::ELEMENT_TYPE_TIMING) continue;
+        e->SetCollapsed(true);
+    }
+    se.PopulateRowInformation();
+}
+
+- (void)expandAllElements {
+    auto& se = _context->GetSequenceElements();
+    size_t n = se.GetElementCount(se.GetCurrentView());
+    for (size_t i = 0; i < n; i++) {
+        Element* e = se.GetElement(i, se.GetCurrentView());
+        if (!e) continue;
+        if (e->GetType() == ElementType::ELEMENT_TYPE_TIMING) continue;
+        e->SetCollapsed(false);
+    }
+    se.PopulateRowInformation();
+}
+
+- (BOOL)renameLayerAtRow:(int)rowIndex name:(NSString*)newName {
+    auto* layer = [self effectLayerForRow:rowIndex];
+    if (!layer) return NO;
+    std::string n = newName ? std::string([newName UTF8String]) : std::string();
+    layer->SetLayerName(n);
+    _context->GetSequenceElements().PopulateRowInformation();
+    return YES;
+}
+
+- (BOOL)elementRenderDisabledAtRow:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    return row->element->IsRenderDisabled() ? YES : NO;
+}
+
+- (void)setElementRenderDisabled:(BOOL)disabled atRow:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return;
+    row->element->SetRenderDisabled(disabled ? true : false);
+}
+
+- (int)effectCountOnRow:(int)rowIndex {
+    auto* layer = [self effectLayerForRow:rowIndex];
+    if (!layer) return 0;
+    return layer->GetEffectCount();
+}
+
+- (BOOL)timingTrackIsFixedAtRow:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    if (row->element->GetType() != ElementType::ELEMENT_TYPE_TIMING) return NO;
+    TimingElement* te = dynamic_cast<TimingElement*>(row->element);
+    return (te && te->IsFixedTiming()) ? YES : NO;
+}
+
+- (BOOL)makeTimingTrackVariableAtRow:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    if (row->element->GetType() != ElementType::ELEMENT_TYPE_TIMING) return NO;
+    TimingElement* te = dynamic_cast<TimingElement*>(row->element);
+    if (!te || !te->IsFixedTiming()) return NO;
+    te->SetFixedTiming(0);
+    _context->GetSequenceElements().PopulateRowInformation();
+    return YES;
+}
+
+- (BOOL)removeWordsAndPhonemesAtRow:(int)rowIndex {
+    auto& se = _context->GetSequenceElements();
+    auto* row = se.GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    if (row->element->GetType() != ElementType::ELEMENT_TYPE_TIMING) return NO;
+    TimingElement* te = dynamic_cast<TimingElement*>(row->element);
+    if (!te) return NO;
+    if (te->GetEffectLayerCount() <= 1) return NO;
+    // Lock guard — same rule as BreakdownPhrases.
+    for (int k = (int)te->GetEffectLayerCount() - 1; k > 0; --k) {
+        EffectLayer* ck = te->GetEffectLayer(k);
+        if (!ck) continue;
+        for (auto&& eff : ck->GetAllEffects()) {
+            if (eff && eff->IsLocked()) return NO;
+        }
+    }
+    while (te->GetEffectLayerCount() > 1) {
+        te->RemoveEffectLayer((int)te->GetEffectLayerCount() - 1);
+    }
+    se.PopulateRowInformation();
+    return YES;
+}
+
 - (BOOL)rowIsSubmodelAtIndex:(int)rowIndex {
     auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
     return (row && row->submodel) ? YES : NO;
@@ -1997,6 +2090,14 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
 - (NSData*)waveformDataFromMS:(long)startMS
                          toMS:(long)endMS
                    numSamples:(int)numSamples {
+    return [self waveformDataFromMS:startMS toMS:endMS
+                         numSamples:numSamples filterType:0];
+}
+
+- (NSData*)waveformDataFromMS:(long)startMS
+                         toMS:(long)endMS
+                   numSamples:(int)numSamples
+                   filterType:(int)filterType {
     auto* am = [self audioManager];
     if (!am || !am->IsOk() || numSamples <= 0) return nil;
 
@@ -2012,17 +2113,41 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
     long samplesPerBucket = totalSamples / numSamples;
     if (samplesPerBucket < 1) samplesPerBucket = 1;
 
+    // Source-pointer resolution: raw path or filter-specific path.
+    // Filter ids map to `AUDIOSAMPLETYPE` (RAW/BASS/TREBLE/ALTO/
+    // NONVOCALS in that order). `GetFilteredAudioData` may return
+    // nullptr when the AudioManager hasn't finished filtering yet
+    // (first-time build of that filter) or when the source isn't
+    // filter-capable; fall back to raw so the user still sees a
+    // waveform.
+    float* sourceData = nullptr;
+    AUDIOSAMPLETYPE type = AUDIOSAMPLETYPE::RAW;
+    switch (filterType) {
+        case 1: type = AUDIOSAMPLETYPE::BASS; break;
+        case 2: type = AUDIOSAMPLETYPE::TREBLE; break;
+        case 3: type = AUDIOSAMPLETYPE::ALTO; break;
+        case 4: type = AUDIOSAMPLETYPE::NONVOCALS; break;
+        default: break;
+    }
+    if (type != AUDIOSAMPLETYPE::RAW) {
+        FilteredAudioData* fad = am->GetFilteredAudioData(type, 0, 127);
+        if (fad && fad->data0) {
+            sourceData = fad->data0 + startSample;
+        }
+    }
+    if (!sourceData) {
+        sourceData = am->GetRawLeftDataPtr(startSample);
+        if (!sourceData) return nil;
+    }
+
     // Output: numSamples * 2 floats (min, max pairs)
     std::vector<float> peaks(numSamples * 2);
-    float* leftData = am->GetRawLeftDataPtr(startSample);
-    if (!leftData) return nil;
-
     for (int i = 0; i < numSamples; i++) {
         long bucketStart = i * samplesPerBucket;
         long bucketEnd = std::min(bucketStart + samplesPerBucket, totalSamples);
         float mn = 0, mx = 0;
         for (long s = bucketStart; s < bucketEnd; s++) {
-            float v = leftData[s];
+            float v = sourceData[s];
             if (v < mn) mn = v;
             if (v > mx) mx = v;
         }

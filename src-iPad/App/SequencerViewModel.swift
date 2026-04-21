@@ -32,6 +32,18 @@ class SequencerViewModel {
     var isPaused = false
     var playPositionMS: Int = 0
     var volume: Int = 100
+
+    // B32 loop region: when `hasLoopRegion`, playback (B33 Play
+    // Loop mode) wraps from `loopEndMS` back to `loopStartMS`, and
+    // B44 Render Selected Region operates on this range.
+    // `loopStartMS == loopEndMS` means cleared; UI also treats 0..0
+    // as "no loop."
+    var loopStartMS: Int = 0
+    var loopEndMS: Int = 0
+    /// B33 Play Loop mode — when on + hasLoopRegion, the playback
+    /// timer wraps at `loopEndMS` back to `loopStartMS`.
+    var loopPlayEnabled: Bool = false
+    var hasLoopRegion: Bool { loopEndMS > loopStartMS }
     // True while a selection-scoped preview loop is advancing
     // `playPositionMS`. Observed by the preview panes so they keep their
     // MTKView display link running during scrub (not just real playback).
@@ -41,6 +53,26 @@ class SequencerViewModel {
     var waveformPeaks: [Float] = []
     var waveformStartMS: Int = 0
     var waveformEndMS: Int = 0
+
+    // B41 waveform filter type. Matches the bridge's filterType
+    // parameter (0=RAW, 1=BASS, 2=TREBLE, 3=ALTO, 4=NONVOCALS).
+    // Observed so the ruler right-click menu's radio state stays
+    // in sync and a zoom-triggered reload keeps the filter.
+    enum WaveformFilter: Int, CaseIterable {
+        case raw = 0, bass = 1, treble = 2, alto = 3, nonVocals = 4
+        var displayName: String {
+            switch self {
+            case .raw:       return "Full Range"
+            case .bass:      return "Bass"
+            case .treble:    return "Treble"
+            case .alto:      return "Alto"
+            case .nonVocals: return "Non-Vocals"
+            }
+        }
+    }
+    var waveformFilter: WaveformFilter = .raw {
+        didSet { if oldValue != waveformFilter { reloadWaveformCurrent() } }
+    }
     // Peak count used to build the current `waveformPeaks`. Compared against
     // the target-for-current-zoom to decide whether to re-sample.
     @ObservationIgnored private var waveformSampleCount: Int = 0
@@ -694,6 +726,52 @@ class SequencerViewModel {
         stop()
     }
 
+    // MARK: - Loop region (B32 / B33 / B44)
+
+    /// B32: set the loop region to `[startMS, endMS]`, clamped to
+    /// the sequence bounds. If the range collapses (end <= start)
+    /// the region is cleared.
+    func setLoopRegion(startMS: Int, endMS: Int) {
+        let lo = max(0, min(sequenceDurationMS, min(startMS, endMS)))
+        let hi = max(0, min(sequenceDurationMS, max(startMS, endMS)))
+        if hi <= lo {
+            clearLoopRegion()
+            return
+        }
+        loopStartMS = lo
+        loopEndMS = hi
+    }
+
+    /// B32: clear the loop region + turn off play-loop mode.
+    func clearLoopRegion() {
+        loopStartMS = 0
+        loopEndMS = 0
+        loopPlayEnabled = false
+    }
+
+    /// B33: toggle play-loop. When enabled and `hasLoopRegion`, the
+    /// playback timer wraps `playPositionMS` back to `loopStartMS`
+    /// each time it crosses `loopEndMS`. No-op when the region is
+    /// cleared.
+    func toggleLoopPlay() {
+        guard hasLoopRegion else { loopPlayEnabled = false; return }
+        loopPlayEnabled.toggle()
+    }
+
+    /// B44: render only the loop region. Uses the existing
+    /// per-model render primitive; touches every row so the output
+    /// buffer gets refreshed across the range.
+    func renderLoopRegion() {
+        guard hasLoopRegion else { return }
+        for (idx, row) in rows.enumerated() {
+            if row.timing != nil { continue }
+            renderRangeAndTrack(rowIndex: idx,
+                                startMS: loopStartMS,
+                                endMS: loopEndMS,
+                                clear: false)
+        }
+    }
+
     func setVolume(_ vol: Int) {
         volume = max(0, min(100, vol))
         document.setAudioVolume(Int32(volume))
@@ -724,6 +802,15 @@ class SequencerViewModel {
                     self.stopPlaybackTimer()
                     return
                 }
+                // B33 play-loop: wrap back to loopStart when the
+                // head crosses loopEnd. Audio seek is used to keep
+                // the audio stream in sync; playback continues
+                // without re-issuing `audioPlay`.
+                if self.loopPlayEnabled, self.hasLoopRegion,
+                   self.playPositionMS >= self.loopEndMS {
+                    self.playPositionMS = self.loopStartMS
+                    self.document.audioSeek(toMS: self.loopStartMS)
+                }
             } else {
                 // Timer-driven: use wall clock elapsed since play started
                 let elapsedMS = Int((CFAbsoluteTimeGetCurrent() - self.playbackStartTime) * 1000.0)
@@ -736,6 +823,15 @@ class SequencerViewModel {
                     return
                 }
                 self.playPositionMS = pos
+                // B33 play-loop (no-audio path): reset the wall-clock
+                // anchor so the next tick starts measuring from the
+                // loop's start.
+                if self.loopPlayEnabled, self.hasLoopRegion,
+                   self.playPositionMS >= self.loopEndMS {
+                    self.playPositionMS = self.loopStartMS
+                    self.playbackStartMS = self.loopStartMS
+                    self.playbackStartTime = CFAbsoluteTimeGetCurrent()
+                }
             }
 
             self.sendOutputFrame()
@@ -1563,6 +1659,99 @@ class SequencerViewModel {
         return true
     }
 
+    /// B80: subdivision modes — positive values split each source
+    /// mark into N equal sub-marks; negative values combine every
+    /// |N| consecutive source marks into one.
+    enum SubdivisionMode: Int {
+        case half = 2, third = 3, quarter = 4, sixth = 6, eighth = 8
+        case combine2 = -2, combine4 = -4, combine8 = -8
+        var suffix: String {
+            switch self {
+            case .half:     return " - 1/2"
+            case .third:    return " - 1/3"
+            case .quarter:  return " - 1/4"
+            case .sixth:    return " - 1/6"
+            case .eighth:   return " - 1/8"
+            case .combine2: return " - 2x"
+            case .combine4: return " - 4x"
+            case .combine8: return " - 8x"
+            }
+        }
+    }
+
+    /// B80: for each source mark, subdivide / combine and populate
+    /// a new timing track whose name is `sourceName + suffix`.
+    /// Collides silently (returns false) if the target name already
+    /// exists — matches desktop's "Skipping" behaviour which is
+    /// friendlier than the user losing work.
+    @discardableResult
+    func generateSubdividedTimingTrack(sourceRowIndex: Int,
+                                        mode: SubdivisionMode) -> Bool {
+        guard sourceRowIndex >= 0, sourceRowIndex < rows.count else { return false }
+        let src = rows[sourceRowIndex]
+        guard let t = src.timing, !src.effects.isEmpty else { return false }
+        let newName = t.elementName + mode.suffix
+        // Build planned marks in Swift first so we can bail
+        // without mutating on collision / empty result.
+        var plannedMarks: [(Int, Int)] = []
+        let divisor = mode.rawValue
+        for (j, m) in src.effects.enumerated() {
+            let start = m.startTimeMS
+            let end = m.endTimeMS
+            let dur = end - start
+            if divisor > 0 {
+                let sub = Double(dur) / Double(divisor)
+                for k in 0..<divisor {
+                    let s = start + Int(sub * Double(k))
+                    let e = (k == divisor - 1) ? end
+                                                : start + Int(sub * Double(k + 1))
+                    if e > s { plannedMarks.append((s, e)) }
+                }
+            } else {
+                let mul = -divisor
+                if j % mul != 0 { continue }
+                var groupEnd = end
+                for extra in 1..<mul where j + extra < src.effects.count {
+                    groupEnd = src.effects[j + extra].endTimeMS
+                }
+                plannedMarks.append((start, groupEnd))
+            }
+        }
+        if plannedMarks.isEmpty { return false }
+        // Add the new timing track.
+        if !document.addTimingTrackNamed(newName) { return false }
+        reloadRows()
+        // Find the just-added row by name (bridge uniquifies on
+        // collision but the addTimingTrack call would have failed
+        // at our pre-check if there was a user-visible collision).
+        guard let newRowIdx = rows.firstIndex(where: {
+            $0.timing?.elementName == newName
+        }) else { return false }
+        for (s, e) in plannedMarks {
+            _ = addTimingMark(rowIndex: newRowIdx,
+                               startMS: s, endMS: e, label: "")
+        }
+        return true
+    }
+
+    /// B76: convert a fixed-interval timing track to variable
+    /// (user-editable). Existing marks are kept in place; only the
+    /// fixed-period flag is cleared. Not undo-able for first cut.
+    @discardableResult
+    func makeTimingTrackVariable(rowIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        if !document.makeTimingTrackVariable(atRow: Int32(rowIndex)) {
+            return false
+        }
+        reloadRows()
+        return true
+    }
+
+    func timingTrackIsFixed(rowIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        return document.timingTrackIsFixed(atRow: Int32(rowIndex))
+    }
+
     /// B84: break every phrase mark on the given timing row into
     /// per-word sub-marks on layer 1. The timing element's existing
     /// word + phoneme layers are discarded first (matches desktop).
@@ -1697,6 +1886,54 @@ class SequencerViewModel {
         setMultiSelection(hits)
     }
 
+    /// B52: select every effect on the given model row plus every
+    /// row below it that belongs to the same model — sub-layers,
+    /// submodels, strands, nodes. Walks back from `rowIndex` to
+    /// find the model's top row (first row with `nestDepth == 0
+    /// && layerIndex == 0 && !isSubmodel`), then forward until the
+    /// next such row (or end of list), collecting effects on every
+    /// non-timing row along the way.
+    func selectAllEffectsInModel(rowIndex: Int) {
+        guard rowIndex >= 0, rowIndex < rows.count else { return }
+        // Walk back to find the top model row.
+        var top = rowIndex
+        while top > 0 {
+            let r = rows[top]
+            if r.timing == nil, r.nestDepth == 0, r.layerIndex == 0,
+               !r.isSubmodel {
+                break
+            }
+            top -= 1
+        }
+        // If the loop bailed at 0 but that row isn't a top model row,
+        // nothing to do.
+        let startRow = rows[top]
+        if startRow.timing != nil || startRow.nestDepth != 0
+            || startRow.layerIndex != 0 || startRow.isSubmodel {
+            return
+        }
+        // Walk forward including every related row.
+        var hits: Set<EffectSelection> = []
+        var i = top
+        while i < rows.count {
+            let r = rows[i]
+            // Stop at the next top model row (but include the start).
+            if i > top, r.timing == nil, r.nestDepth == 0,
+               r.layerIndex == 0, !r.isSubmodel {
+                break
+            }
+            if r.timing != nil { i += 1; continue }
+            for (eIdx, e) in r.effects.enumerated() {
+                hits.insert(.init(rowIndex: i, effectIndex: eIdx,
+                                   name: e.name,
+                                   startTimeMS: e.startTimeMS,
+                                   endTimeMS: e.endTimeMS))
+            }
+            i += 1
+        }
+        setMultiSelection(hits)
+    }
+
     /// Select every effect across every non-timing row whose time
     /// range overlaps `[spanStartMS, spanEndMS]`. Entry point from
     /// the single-effect context menu ("Select All in Column") where
@@ -1764,11 +2001,13 @@ class SequencerViewModel {
     // MARK: - Align (B8)
 
     enum AlignMode {
-        case startTimes       // all starts → anchor's start
-        case endTimes         // all ends   → anchor's end
+        case startTimes       // all starts → anchor's start (ends stay, widen/narrow)
+        case endTimes         // all ends   → anchor's end (starts stay, widen/narrow)
         case bothTimes        // all starts + ends → anchor's range
         case centerPoints     // all midpoints → anchor's midpoint
         case matchDuration    // each effect keeps its start, end = start + anchor.duration
+        case startTimesShift  // B9: slide so start matches anchor.start, duration preserved
+        case endTimesShift    // B9: slide so end matches anchor.end, duration preserved
     }
 
     /// Align every effect in `selectedEffects` to the anchor according
@@ -1785,9 +2024,9 @@ class SequencerViewModel {
         guard selectedEffects.count >= 2 else { return }
         let anchor: EffectSelection
         switch mode {
-        case .startTimes, .bothTimes, .matchDuration, .centerPoints:
+        case .startTimes, .startTimesShift, .bothTimes, .matchDuration, .centerPoints:
             anchor = selectedEffects.min(by: { $0.startTimeMS < $1.startTimeMS })!
-        case .endTimes:
+        case .endTimes, .endTimesShift:
             anchor = selectedEffects.max(by: { $0.endTimeMS < $1.endTimeMS })!
         }
 
@@ -1828,6 +2067,13 @@ class SequencerViewModel {
             case .matchDuration:
                 newStart = sel.startTimeMS
                 newEnd = newStart + anchorDuration
+            case .startTimesShift:
+                // Slide, don't stretch. Duration preserved.
+                newStart = anchor.startTimeMS
+                newEnd = newStart + dur
+            case .endTimesShift:
+                newEnd = anchor.endTimeMS
+                newStart = newEnd - dur
             }
             moves.append(AlignMove(rowIndex: sel.rowIndex,
                                     origStartMS: sel.startTimeMS,
@@ -1854,13 +2100,324 @@ class SequencerViewModel {
         undoManager.endUndoGrouping()
         let action: String
         switch mode {
-        case .startTimes:    action = "Align Start Times"
-        case .endTimes:      action = "Align End Times"
-        case .bothTimes:     action = "Align Both Times"
-        case .centerPoints:  action = "Align Centers"
-        case .matchDuration: action = "Match Duration"
+        case .startTimes:      action = "Align Start Times"
+        case .endTimes:        action = "Align End Times"
+        case .bothTimes:       action = "Align Both Times"
+        case .centerPoints:    action = "Align Centers"
+        case .matchDuration:   action = "Match Duration"
+        case .startTimesShift: action = "Shift-Align Start"
+        case .endTimesShift:   action = "Shift-Align End"
         }
         undoManager.setActionName(action)
+    }
+
+    /// B4: stretch the selected effect's end edge by `deltaMS`
+    /// (positive extends right, negative shrinks). Clamped against
+    /// the next effect on the same row and against `startMS + 1`
+    /// as a minimum-duration floor. Routes through the existing
+    /// `moveEffect` pipeline so undo works.
+    func stretchSelectedEffectEnd(by deltaMS: Int) {
+        guard let sel = selectedEffect else { return }
+        guard sel.rowIndex < rows.count,
+              sel.effectIndex < rows[sel.rowIndex].effects.count else { return }
+        let row = rows[sel.rowIndex]
+        var maxEnd = Int.max
+        if sel.effectIndex + 1 < row.effects.count {
+            maxEnd = row.effects[sel.effectIndex + 1].startTimeMS
+        } else {
+            maxEnd = sequenceDurationMS
+        }
+        let newEnd = max(sel.startTimeMS + 1,
+                          min(maxEnd, sel.endTimeMS + deltaMS))
+        if newEnd == sel.endTimeMS { return }
+        moveEffect(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex,
+                    newStartMS: sel.startTimeMS, newEndMS: newEnd)
+    }
+
+    /// B4: slide the selected effect by `deltaMS` (positive forward,
+    /// negative back). Duration preserved. Clamped against both
+    /// neighbors on the same row. Routes through `moveEffect`.
+    func nudgeSelectedEffect(by deltaMS: Int) {
+        guard let sel = selectedEffect else { return }
+        guard sel.rowIndex < rows.count,
+              sel.effectIndex < rows[sel.rowIndex].effects.count else { return }
+        let row = rows[sel.rowIndex]
+        let prevEnd = sel.effectIndex > 0
+            ? row.effects[sel.effectIndex - 1].endTimeMS : 0
+        let nextStart = sel.effectIndex + 1 < row.effects.count
+            ? row.effects[sel.effectIndex + 1].startTimeMS : sequenceDurationMS
+        let dur = sel.endTimeMS - sel.startTimeMS
+        let newStart = max(prevEnd,
+                            min(nextStart - dur, sel.startTimeMS + deltaMS))
+        if newStart == sel.startTimeMS { return }
+        moveEffect(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex,
+                    newStartMS: newStart, newEndMS: newStart + dur)
+    }
+
+    /// B53: copy every effect on a given row into the clipboard
+    /// (preserving relative timing). Selection is set to the copied
+    /// set — mirrors desktop's "selection lingers after Copy."
+    func copyRow(rowIndex: Int) {
+        selectAllEffectsInRow(rowIndex: rowIndex)
+        copySelectedEffects()
+    }
+
+    /// B53: cut every effect on a given row — copy then delete.
+    func cutRow(rowIndex: Int) {
+        copyRow(rowIndex: rowIndex)
+        _ = deleteAllEffectsOnRow(rowIndex: rowIndex)
+    }
+
+    /// B54: copy every effect across a model (layers + submodels +
+    /// strands + nodes) into the clipboard.
+    func copyModel(rowIndex: Int) {
+        selectAllEffectsInModel(rowIndex: rowIndex)
+        copySelectedEffects()
+    }
+
+    /// B54: cut every effect across a model — copy then delete on
+    /// every participating row. Operates over the set copied above
+    /// so rows shift without stranding references.
+    func cutModel(rowIndex: Int) {
+        copyModel(rowIndex: rowIndex)
+        deleteSelectedEffects()
+    }
+
+    /// B50: delete every effect on a given row. Uses the existing
+    /// `deleteEffect` pipeline (which re-renders cleared ranges +
+    /// registers per-effect undo) wrapped in one undo group so ⌘Z
+    /// reverses the whole bulk clear.
+    @discardableResult
+    func deleteAllEffectsOnRow(rowIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        let row = rows[rowIndex]
+        if row.effects.isEmpty { return false }
+        let count = row.effects.count
+        undoManager.beginUndoGrouping()
+        // Descending index order so earlier deletes don't shift
+        // later ones (same pattern as `deleteSelectedEffects`).
+        for i in stride(from: count - 1, through: 0, by: -1) {
+            deleteEffect(rowIndex: rowIndex, effectIndex: i)
+        }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName("Delete All Effects on Row")
+        return true
+    }
+
+    /// B51: toggle the Element-level render-disabled flag. Rendering
+    /// skips the whole element (model + submodels + strands + nodes)
+    /// while disabled. Not undo-able in first cut.
+    func toggleElementRenderDisabled(rowIndex: Int) {
+        guard rowIndex >= 0, rowIndex < rows.count else { return }
+        let cur = document.elementRenderDisabled(atRow: Int32(rowIndex))
+        document.setElementRenderDisabled(!cur, atRow: Int32(rowIndex))
+        reloadRows()
+    }
+
+    func isElementRenderDisabled(rowIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        return document.elementRenderDisabled(atRow: Int32(rowIndex))
+    }
+
+    /// B46: rename an effect layer in-place. Undo-able with the
+    /// original name.
+    @discardableResult
+    func renameLayer(rowIndex: Int, name: String) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        let origName = document.rowLayerName(at: Int32(rowIndex)) ?? ""
+        if !document.renameLayer(atRow: Int32(rowIndex), name: name) { return false }
+        reloadRows()
+        undoManager.registerUndo(withTarget: self) { vm in
+            vm.renameLayer(rowIndex: rowIndex, name: origName)
+        }
+        undoManager.setActionName("Rename Layer")
+        return true
+    }
+
+    /// B87: strip word + phoneme layers off a phrase timing row —
+    /// inverse of `breakdownPhrases`. Not currently undo-able (the
+    /// operation removes layer structure; layer-level undo is
+    /// follow-up work).
+    @discardableResult
+    func removeWordsAndPhonemes(rowIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        guard rows[rowIndex].timing != nil else { return false }
+        if !document.removeWordsAndPhonemes(atRow: Int32(rowIndex)) { return false }
+        reloadRows()
+        return true
+    }
+
+    /// True when the given timing row is the phrase layer (layer 0)
+    /// of an element that has extra layers to strip. Gates the
+    /// "Remove Words / Phonemes" menu entry.
+    func canRemoveWordsAndPhonemes(rowIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        let row = rows[rowIndex]
+        guard row.timing != nil, row.layerIndex == 0 else { return false }
+        return Int(document.rowLayerCount(at: Int32(rowIndex))) > 1
+    }
+
+    /// B57: global expand / collapse. `collapseAllModels` folds
+    /// every non-timing element to its first layer (hides sub-
+    /// layers + submodels + nodes); `expandAll` undoes that across
+    /// the sequence. Not undo-able for the first cut — users flip
+    /// back via the opposite button.
+    func collapseAllModels() {
+        document.collapseAllElements()
+        reloadRows()
+    }
+    func expandAllElements() {
+        document.expandAllElements()
+        reloadRows()
+    }
+
+    /// B10: snap every selected effect's start / end edges to the
+    /// nearest active timing-track mark edge within ~1/2 of the
+    /// effect's current duration (so a hugely-misaligned effect
+    /// doesn't grab an irrelevant nearby mark). Duration is NOT
+    /// preserved — each edge moves independently. Rejects when no
+    /// timing rows are active.
+    func alignSelectedEffectsToTimingMarks() {
+        guard selectedEffects.count >= 1 else { return }
+        let markTimes = collectActiveMarkTimes()
+        if markTimes.isEmpty { return }
+
+        struct AlignMove {
+            let rowIndex: Int
+            let origStartMS: Int
+            let newStartMS: Int
+            let newEndMS: Int
+        }
+        var moves: [AlignMove] = []
+        for sel in selectedEffects {
+            let dur = sel.endTimeMS - sel.startTimeMS
+            // Snap each edge independently to its nearest mark,
+            // threshold = half the duration (roughly matches
+            // desktop's "snap within a reasonable window" for the
+            // per-edge variant).
+            let thresh = max(100, dur / 2)
+            let newStart = nearest(markTimes, to: sel.startTimeMS, threshold: thresh)
+                ?? sel.startTimeMS
+            let newEnd = nearest(markTimes, to: sel.endTimeMS, threshold: thresh)
+                ?? sel.endTimeMS
+            if newStart == sel.startTimeMS && newEnd == sel.endTimeMS { continue }
+            // Guard against collapsing to a 0-length effect.
+            if newEnd <= newStart { continue }
+            moves.append(AlignMove(rowIndex: sel.rowIndex,
+                                    origStartMS: sel.startTimeMS,
+                                    newStartMS: newStart,
+                                    newEndMS: newEnd))
+        }
+        if moves.isEmpty { return }
+
+        undoManager.beginUndoGrouping()
+        for m in moves {
+            guard m.rowIndex >= 0, m.rowIndex < rows.count else { continue }
+            let row = rows[m.rowIndex]
+            guard let eIdx = row.effects.firstIndex(where: {
+                $0.startTimeMS == m.origStartMS
+            }) else { continue }
+            moveEffect(rowIndex: m.rowIndex, effectIndex: eIdx,
+                       newStartMS: m.newStartMS, newEndMS: m.newEndMS)
+        }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName("Align to Timing Marks")
+    }
+
+    /// B11: slide every consecutive pair of selected same-row
+    /// effects together (the later one moves back so its start =
+    /// earlier's end). Pairs across rows are ignored since "close
+    /// gap" only makes sense on one track. Rejects when no two
+    /// selected effects share a row.
+    func closeGapInSelectedEffects() {
+        guard selectedEffects.count >= 2 else { return }
+        // Group by row, sort each group by startMS ascending.
+        let byRow = Dictionary(grouping: selectedEffects, by: { $0.rowIndex })
+        var moves: [(rowIndex: Int, origStartMS: Int,
+                     newStartMS: Int, newEndMS: Int)] = []
+        for (rowIdx, effects) in byRow {
+            let sorted = effects.sorted { $0.startTimeMS < $1.startTimeMS }
+            guard sorted.count >= 2 else { continue }
+            // For each consecutive pair, push the later effect's
+            // start back to the earlier effect's end (preserving the
+            // later effect's duration).
+            var prevEnd = sorted[0].endTimeMS
+            for i in 1..<sorted.count {
+                let e = sorted[i]
+                let dur = e.endTimeMS - e.startTimeMS
+                if e.startTimeMS > prevEnd {
+                    let newStart = prevEnd
+                    let newEnd = newStart + dur
+                    moves.append((rowIndex: rowIdx,
+                                  origStartMS: e.startTimeMS,
+                                  newStartMS: newStart,
+                                  newEndMS: newEnd))
+                    prevEnd = newEnd
+                } else {
+                    prevEnd = e.endTimeMS
+                }
+            }
+        }
+        if moves.isEmpty { return }
+
+        undoManager.beginUndoGrouping()
+        // Process each row's moves in order of original startMS so
+        // later effects (which actually need to move) shift into
+        // space we know is clear — moving them first would overlap
+        // with earlier effects still at their old positions.
+        let sortedMoves = moves.sorted { $0.origStartMS < $1.origStartMS }
+        for m in sortedMoves {
+            guard m.rowIndex >= 0, m.rowIndex < rows.count else { continue }
+            let row = rows[m.rowIndex]
+            guard let eIdx = row.effects.firstIndex(where: {
+                $0.startTimeMS == m.origStartMS
+            }) else { continue }
+            moveEffect(rowIndex: m.rowIndex, effectIndex: eIdx,
+                       newStartMS: m.newStartMS, newEndMS: m.newEndMS)
+        }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName("Close Gap")
+    }
+
+    /// True iff any pair of selected effects share a row with a
+    /// positive gap between them — gates the Close Gap menu entry.
+    var canCloseGapInSelection: Bool {
+        guard selectedEffects.count >= 2 else { return false }
+        let byRow = Dictionary(grouping: selectedEffects, by: { $0.rowIndex })
+        for (_, effects) in byRow {
+            let sorted = effects.sorted { $0.startTimeMS < $1.startTimeMS }
+            for i in 1..<sorted.count {
+                if sorted[i].startTimeMS > sorted[i - 1].endTimeMS { return true }
+            }
+        }
+        return false
+    }
+
+    /// Gather all effect start+end times on every active timing
+    /// row — used by B10 and the grid-internal drag snap. Sorted
+    /// ascending; duplicates left in (cheap, hot-path doesn't care).
+    private func collectActiveMarkTimes() -> [Int] {
+        var out: [Int] = []
+        for row in rows {
+            guard let t = row.timing, t.isActive else { continue }
+            for e in row.effects {
+                out.append(e.startTimeMS)
+                out.append(e.endTimeMS)
+            }
+        }
+        return out.sorted()
+    }
+
+    private func nearest(_ times: [Int], to target: Int,
+                          threshold: Int) -> Int? {
+        guard !times.isEmpty else { return nil }
+        var best: Int?
+        var bestD = threshold + 1
+        for t in times {
+            let d = abs(t - target)
+            if d < bestD { bestD = d; best = t }
+        }
+        return best
     }
 
     func toggleDisableSelectedEffects() {
@@ -2172,17 +2729,29 @@ class SequencerViewModel {
     func undo() { undoManager.undo() }
     func redo() { undoManager.redo() }
 
-    // MARK: - Clipboard
+    // MARK: - Clipboard (B98 multi-effect)
 
-    struct EffectClipboard {
+    /// One effect snapshot, relative to a paste anchor so a multi-
+    /// effect copy preserves inter-effect timing + cross-row layout
+    /// when pasted at a new cell.
+    struct ClipboardEntry {
+        let rowOffset: Int        // target = pasteRow + rowOffset
+        let startOffsetMS: Int    // target = pasteStartMS + startOffsetMS
+        let endOffsetMS: Int
         let name: String
         let settings: String
         let palette: String
-        let durationMS: Int
     }
 
-    private var clipboard: EffectClipboard?
-    var hasClipboard: Bool { clipboard != nil }
+    private var clipboardEntries: [ClipboardEntry] = []
+    var hasClipboard: Bool { !clipboardEntries.isEmpty }
+    /// Shortcut for legacy callers: the duration of the first
+    /// clipboard entry (0 if empty). Used by the inspector's
+    /// "Duplicate" path which still expects a single-effect model.
+    var clipboardDurationMS: Int {
+        guard let first = clipboardEntries.first else { return 0 }
+        return first.endOffsetMS - first.startOffsetMS
+    }
 
     // MARK: - Arrow-key navigation
 
@@ -2257,38 +2826,96 @@ class SequencerViewModel {
         let name = document.effectName(forRow: Int32(sel.rowIndex), at: Int32(sel.effectIndex)) ?? sel.name
         let settings = document.effectSettingsString(forRow: Int32(sel.rowIndex), at: Int32(sel.effectIndex)) ?? ""
         let palette = document.effectPaletteString(forRow: Int32(sel.rowIndex), at: Int32(sel.effectIndex)) ?? ""
-        clipboard = EffectClipboard(name: name, settings: settings, palette: palette,
-                                    durationMS: sel.endTimeMS - sel.startTimeMS)
+        clipboardEntries = [ClipboardEntry(
+            rowOffset: 0, startOffsetMS: 0,
+            endOffsetMS: sel.endTimeMS - sel.startTimeMS,
+            name: name, settings: settings, palette: palette)]
     }
 
-    /// Duplicate the selected effect immediately after itself on the
-    /// same row (paste at sel.endTimeMS). Quiet no-op if there isn't
-    /// enough room before the next effect — the bridge's add path
-    /// rejects the overlap.
+    /// B98: copy every effect in `selectedEffects` into the clipboard,
+    /// preserving relative timing + row offsets. Anchor = min row
+    /// (tiebreak: min start). If only one effect is selected, falls
+    /// through to the single-effect path.
+    func copySelectedEffects() {
+        if selectedEffects.count <= 1 {
+            copySelectedEffect()
+            return
+        }
+        // Anchor: earliest-starting, lowest-rowIndex selected effect.
+        guard let anchor = selectedEffects.min(by: { a, b in
+            if a.rowIndex != b.rowIndex { return a.rowIndex < b.rowIndex }
+            return a.startTimeMS < b.startTimeMS
+        }) else { return }
+        var entries: [ClipboardEntry] = []
+        for sel in selectedEffects {
+            let name = document.effectName(forRow: Int32(sel.rowIndex),
+                                             at: Int32(sel.effectIndex)) ?? sel.name
+            let settings = document.effectSettingsString(forRow: Int32(sel.rowIndex),
+                                                           at: Int32(sel.effectIndex)) ?? ""
+            let palette = document.effectPaletteString(forRow: Int32(sel.rowIndex),
+                                                         at: Int32(sel.effectIndex)) ?? ""
+            entries.append(ClipboardEntry(
+                rowOffset: sel.rowIndex - anchor.rowIndex,
+                startOffsetMS: sel.startTimeMS - anchor.startTimeMS,
+                endOffsetMS: sel.endTimeMS - anchor.startTimeMS,
+                name: name, settings: settings, palette: palette))
+        }
+        clipboardEntries = entries
+    }
+
+    /// Duplicate the selected effect(s) immediately after the
+    /// rightmost selection end. For single-select: paste at end of
+    /// that effect. For multi-select: paste shifted forward so the
+    /// anchor lands at (max-end of selection, same row as anchor).
+    /// Undo-safe through the usual add path. Preserves the prior
+    /// clipboard so an earlier Cmd+C isn't clobbered.
     func duplicateSelectedEffect() {
-        guard let sel = selectedEffect else { return }
-        let prevClipboard = clipboard
-        copySelectedEffect()
-        pasteEffect(rowIndex: sel.rowIndex, startMS: sel.endTimeMS)
-        // Restore the clipboard so duplicate doesn't stomp whatever
-        // the user had on the Paste Here buffer from Cmd+C earlier.
-        if let prev = prevClipboard {
-            clipboard = prev
+        let prevClipboard = clipboardEntries
+        if selectedEffects.count > 1 {
+            var maxEnd = 0
+            for sel in selectedEffects { maxEnd = max(maxEnd, sel.endTimeMS) }
+            copySelectedEffects()
+            guard let anchor = selectedEffects.min(by: { a, b in
+                if a.rowIndex != b.rowIndex { return a.rowIndex < b.rowIndex }
+                return a.startTimeMS < b.startTimeMS
+            }) else { return }
+            pasteEffect(rowIndex: anchor.rowIndex, startMS: maxEnd)
+        } else if let sel = selectedEffect {
+            copySelectedEffect()
+            pasteEffect(rowIndex: sel.rowIndex, startMS: sel.endTimeMS)
+        }
+        if !prevClipboard.isEmpty {
+            clipboardEntries = prevClipboard
         }
     }
 
-    /// Paste the clipboard onto `rowIndex` starting at `startMS`. Preserves the
-    /// copied duration.
+    /// Paste the clipboard onto `(rowIndex, startMS)`. Single-entry
+    /// clipboards drop on the target cell; multi-entry clipboards
+    /// apply each entry's `rowOffset`/`startOffsetMS` to produce the
+    /// target position. Each entry goes through `addEffectWithSettings`
+    /// so the bridge validates overlap per-effect; silent
+    /// partial-paste on conflict.
     func pasteEffect(rowIndex: Int, startMS: Int) {
-        guard let clip = clipboard else { return }
+        guard !clipboardEntries.isEmpty else { return }
         guard rowIndex >= 0 && rowIndex < rows.count else { return }
-        let endMS = min(startMS + clip.durationMS, sequenceDurationMS)
-        let idx = addEffectWithSettings(rowIndex: rowIndex, name: clip.name,
-                                         settings: clip.settings, palette: clip.palette,
-                                         startMS: startMS, endMS: endMS)
-        if idx >= 0 {
-            undoManager.setActionName("Paste Effect")
+        undoManager.beginUndoGrouping()
+        for entry in clipboardEntries {
+            let targetRow = rowIndex + entry.rowOffset
+            if targetRow < 0 || targetRow >= rows.count { continue }
+            // Skip timing rows — pasting effects there isn't meaningful.
+            if rows[targetRow].timing != nil { continue }
+            let targetStart = startMS + entry.startOffsetMS
+            let targetEnd = min(startMS + entry.endOffsetMS, sequenceDurationMS)
+            guard targetEnd > targetStart else { continue }
+            _ = addEffectWithSettings(rowIndex: targetRow, name: entry.name,
+                                        settings: entry.settings,
+                                        palette: entry.palette,
+                                        startMS: targetStart, endMS: targetEnd)
         }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName(clipboardEntries.count > 1
+                                    ? "Paste \(clipboardEntries.count) Effects"
+                                    : "Paste Effect")
     }
 
     // MARK: - Lock / Disable
@@ -2368,7 +2995,8 @@ class SequencerViewModel {
         guard hasAudio else { return }
         guard let data = document.waveformData(fromMS: Int(startMS),
                                                 toMS: Int(endMS),
-                                                numSamples: Int32(numSamples)) else { return }
+                                                numSamples: Int32(numSamples),
+                                                filterType: Int32(waveformFilter.rawValue)) else { return }
 
         let count = data.count / MemoryLayout<Float>.size
         var floats = [Float](repeating: 0, count: count)
@@ -2379,6 +3007,17 @@ class SequencerViewModel {
         waveformStartMS = startMS
         waveformEndMS = endMS
         waveformSampleCount = numSamples
+    }
+
+    /// B41: re-read the waveform for the currently-cached range +
+    /// sample count, using whatever `waveformFilter` is now. Used
+    /// by the `didSet` observer on the filter property.
+    private func reloadWaveformCurrent() {
+        guard hasAudio, waveformSampleCount > 0 else { return }
+        let startMS = waveformStartMS
+        let endMS = waveformEndMS > 0 ? waveformEndMS : sequenceDurationMS
+        loadWaveform(startMS: startMS, endMS: endMS,
+                      numSamples: waveformSampleCount)
     }
 
     /// Re-sample the waveform when zoom changes enough that the current
