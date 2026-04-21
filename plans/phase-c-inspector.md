@@ -14,14 +14,19 @@ below is what's still missing.
 
 ## TL;DR
 
-1. **Multi-effect operations** (C4). Grid supports multi-select;
-   inspector doesn't consume it yet. **Blocked** — upstream grid
-   multi-select is in flight on a separate thread.
-2. **Specialised editors** (C7) — Moving Head, Sketch path, Morph
+1. **Specialised editors** (C7) — Moving Head, Sketch path, Morph
    line, DMX Remap / Save State / Load State. Each is its own
    session.
-3. **Polish items** — drag / drop in inspector, shader uniform
+2. **Polish items** — drag / drop in inspector, shader uniform
    grouping.
+
+C4 (multi-effect operations) shipped 2026-04-21 — grid multi-select
+now carries into the inspector with "N effects selected" header
+chrome, a per-property "Apply to N Other Selected" context menu
+entry, and an "Update All" header button that flushes every anchor
+value to the set. E_ keys are filtered per target so effect-specific
+props don't leak across types. G10 (Lock + Randomize) dropped per
+user feedback.
 
 Two items are deferred to Phase F (tab tear-out, keyboard
 shortcuts). A handful of smaller pieces live in `future-*.md`.
@@ -58,19 +63,9 @@ shortcuts). A handful of smaller pieces live in `future-*.md`.
 
 ### Per-property & effect-level actions
 
-- **G10 — Per-property Lock + Randomize.** `EffectMetadata.swift`
-  parses the `lockable` flag but no lock UI. No per-control
-  Randomize menu entry, no top-level "Randomize Effect" button.
-  Desktop's lock is in-memory session state (not persisted) so
-  iPad should match. P1 (low priority — uncertain whether the
-  randomize UX even belongs on iPad).
-- **G11 — Bulk Edit.** Desktop's `SetSupportsBulkEdit(true)`
-  controls get an "Apply to all selected" context-menu entry. iPad
-  has no such entry and no multi-effect carry-over to the
-  inspector. Needs G41 first (grid → inspector multi-selection). P1.
-- **G14 — "Update all like this" batch update.** Desktop's top-bar
-  "Update" writes the current panel values across all selected.
-  Falls out of G11. P2.
+All C4 items shipped (2026-04-21) — see TL;DR. G10 (Lock +
+Randomize) is out per user feedback: the randomize UX wasn't a
+fit for iPad, and the lock UI alone would be orphan without it.
 
 ---
 
@@ -98,12 +93,6 @@ Small polish follow-ups still open:
 
 - **G40 — Drag / drop in inspector.** Desktop supports drag-drop
   across palette slots and between controls. iPad has none. P2.
-- **G41 — Multi-effect selection → inspector.** Grid supports
-  multi-select; inspector doesn't materialise anything when
-  multiple effects are selected. Desktop shows the first effect's
-  panel and enables "Apply to all" context actions. iPad model
-  decision: "3 effects selected" chrome vs. inspector bulk mode.
-  Prerequisite for G11 / G14. P1.
 
 ---
 
@@ -124,11 +113,7 @@ Small polish follow-ups still open:
 | G4  | Sketch path editor | Effect | P1 |
 | G5  | Morph line editor | Effect | P1 |
 | G8  | DMX Remap / Save State / Load State dialogs | Effect | P1 |
-| G10 | Per-property Lock + Randomize | Effect | P1 |
-| G11 | Bulk Edit (apply to N selected effects) | Effect | P1 |
-| G14 | "Update all like this" batch update | Effect | P2 |
 | G40 | Drag / drop in inspector | Cross-cutting | P2 |
-| G41 | Multi-effect selection in inspector | Cross-cutting | P1 |
 | G1  | Tab tear-out / multi-window | Scaffolding | P2 (Phase F) |
 | G2-c | Shader uniform grouping for large .fs | Scaffolding | P2 |
 | G15 | Keyboard shortcuts in inspector | Effect | P2 (Phase F) |
@@ -137,25 +122,15 @@ Small polish follow-ups still open:
 
 ## 7. Suggested phasing
 
-**C4 — Multi-effect operations** *(blocked on grid multi-select)*
-- G41: wire grid multi-select into inspector. Upstream work on the
-  Metal-backed grid's multi-select is in flight on a separate
-  thread (Phase B grid-parity); hold on C4 until that lands so the
-  inspector has a reliable selected-effects source to key off.
-- G11: "Apply to all selected" per-control.
-- G14: "Update all like this" as a consequence of G11.
-- G10: Lock + single-control Randomize in the context menu;
-  top-level "Randomize effect" button.
-
 **C7 — Specialised editors** *(bigger chunks — one per session)*
 - G3: Moving Head.
 - G4: Sketch path editor.
 - G5: Morph line editor.
 - G8: DMX dialog ports.
 
-**Ship order recommendation:** C7 items are independent and can
-run in parallel with (or while waiting for) the grid multi-select
-that unblocks C4.
+Ship order is flexible — the four specialised editors have no
+interdependencies. Moving Head (G3) is the largest surface so
+taking it first amortises the scaffolding for the others.
 
 ---
 

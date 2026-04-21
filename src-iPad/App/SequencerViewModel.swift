@@ -810,9 +810,12 @@ class SequencerViewModel {
     /// Replace the full selection set (marquee result). If `newSet` is
     /// empty, acts like `clearSelection`. If size 1, promotes that
     /// effect to the single-select path so inspector + scrub + drag
-    /// handles all work normally. For N > 1 the inspector is
-    /// suppressed (`selectedEffect = nil`) but every member renders
-    /// highlighted in the grid.
+    /// handles all work normally. For N > 1 (G41): picks the top-left
+    /// effect as the anchor (smallest row, then smallest effectIndex)
+    /// and drives the inspector from that one. Individual property
+    /// controls read the anchor's values; the header chrome counts the
+    /// full set so bulk operations (G11/G14) can target every member.
+    /// Scrub is suppressed — the scrub loop is single-effect only.
     func setMultiSelection(_ newSet: Set<EffectSelection>) {
         if newSet.isEmpty {
             clearSelection()
@@ -823,11 +826,46 @@ class SequencerViewModel {
             return
         }
         stopScrub()
-        selectedEffect = nil
+
+        // Anchor = top-left: smallest rowIndex, then smallest
+        // effectIndex. Matches desktop's "first selected" in the
+        // common marquee case. Falls back to the raw first on ties
+        // (won't happen — (row,idx) tuples are unique).
+        let anchor = newSet.min(by: { a, b in
+            if a.rowIndex != b.rowIndex { return a.rowIndex < b.rowIndex }
+            return a.effectIndex < b.effectIndex
+        })!
+
+        selectedEffect = anchor
         selectedEffects = newSet
-        selectedEffectSettings = [:]
-        selectedEffectMetadata = nil
-        showInspector = false
+        showInspector = true
+        setPreviewModel(rowIndex: anchor.rowIndex)
+
+        // Load anchor's merged settings + metadata so the inspector
+        // renders current values. Identical to the single-select
+        // path except scrub is skipped.
+        var merged: [String: String] = [:]
+        if let settings = document.effectSettings(forRow: Int32(anchor.rowIndex),
+                                                   at: Int32(anchor.effectIndex)) as? [String: String] {
+            for (k, v) in settings { merged[k] = v }
+        }
+        if let palette = document.effectPalette(forRow: Int32(anchor.rowIndex),
+                                                 at: Int32(anchor.effectIndex)) as? [String: String] {
+            for (k, v) in palette { merged[k] = v }
+        }
+        selectedEffectSettings = merged
+        selectedEffectMetadata = loadEffectMetadata(anchor.name)
+        if bufferMetadata == nil { bufferMetadata = loadSharedMetadata("Buffer") }
+        if colorMetadata == nil { colorMetadata = loadSharedMetadata("Color") }
+        if blendingMetadata == nil { blendingMetadata = loadSharedMetadata("Blending") }
+    }
+
+    /// Whether the inspector is in multi-effect mode. True when more
+    /// than one effect is selected; drives the "N effects selected"
+    /// header chrome (G41) and gates bulk context-menu entries
+    /// (G11/G14).
+    var isMultiEffectSelection: Bool {
+        selectedEffects.count > 1
     }
 
     // MARK: - Metadata Loading
@@ -956,6 +994,198 @@ class SequencerViewModel {
                                      value: prev)
             }
             undoManager.setActionName("Edit \(key)")
+        }
+    }
+
+    // MARK: - Multi-effect bulk edit (G11 / G14)
+
+    /// Rule for whether `key` is safe to propagate from the anchor
+    /// effect to `targetName`. Shared prefixes (B_/C_/T_) apply to
+    /// every effect; E_-prefixed keys are effect-specific and only
+    /// safe when the target is the same effect type or already has
+    /// that key in its settings map.
+    private func bulkKeyAppliesTo(_ key: String,
+                                   target: EffectSelection,
+                                   anchorName: String) -> Bool {
+        if key.hasPrefix("B_") || key.hasPrefix("C_") || key.hasPrefix("T_") {
+            return true
+        }
+        if key.hasPrefix("E_") {
+            if target.name == anchorName { return true }
+            // Allow override when the target already has the same
+            // key set (carried over from an earlier edit) — otherwise
+            // an E_ key from "On" would pollute a "Text" effect.
+            let existing = document.effectSettingValue(
+                forKey: key,
+                inRow: Int32(target.rowIndex),
+                at: Int32(target.effectIndex)) ?? ""
+            return !existing.isEmpty
+        }
+        return false
+    }
+
+    /// Apply `value` at `key` to every effect in `selectedEffects`
+    /// other than the anchor (already has `value`). Skips targets
+    /// where the rule above rejects the key. Collects previous values
+    /// into a single undo step so Cmd+Z reverts the whole batch.
+    /// Called from the per-control "Apply to all selected" context
+    /// menu entry (G11).
+    func applyValueToAllSelected(_ value: String, forKey key: String) {
+        guard let anchor = selectedEffect,
+              selectedEffects.count > 1 else { return }
+
+        struct Prev {
+            let rowIndex: Int
+            let effectIndex: Int
+            let key: String
+            let value: String
+        }
+        var prevValues: [Prev] = []
+        var changedCount = 0
+
+        for sel in selectedEffects {
+            if sel.rowIndex == anchor.rowIndex
+                && sel.effectIndex == anchor.effectIndex { continue }
+            if !bulkKeyAppliesTo(key, target: sel, anchorName: anchor.name) {
+                continue
+            }
+            let prev = document.effectSettingValue(forKey: key,
+                                                    inRow: Int32(sel.rowIndex),
+                                                    at: Int32(sel.effectIndex)) ?? ""
+            if prev == value { continue }
+
+            let changed = document.setEffectSettingValue(
+                value, forKey: key,
+                inRow: Int32(sel.rowIndex),
+                at: Int32(sel.effectIndex))
+            if changed {
+                prevValues.append(Prev(rowIndex: sel.rowIndex,
+                                        effectIndex: sel.effectIndex,
+                                        key: key, value: prev))
+                renderEffectAndTrack(rowIndex: sel.rowIndex,
+                                     effectIndex: sel.effectIndex)
+                changedCount += 1
+            }
+        }
+
+        if changedCount > 0 {
+            inspectorRevision &+= 1
+            undoManager.registerUndo(withTarget: self) { vm in
+                vm.restoreBulkSettings(prevValues.map {
+                    ($0.rowIndex, $0.effectIndex, $0.key, $0.value)
+                })
+            }
+            undoManager.setActionName("Apply \(key) to \(changedCount) Effects")
+        }
+    }
+
+    /// Copy every inspector value (settings + palette) from the
+    /// anchor effect to every other selected effect (G14 — "Update
+    /// all like this"). Keys apply through the same
+    /// `bulkKeyAppliesTo` filter so E_ keys don't leak across effect
+    /// types. One compound undo step.
+    func updateAllLikeAnchor() {
+        guard let anchor = selectedEffect,
+              selectedEffects.count > 1 else { return }
+
+        var anchorValues: [(String, String)] = []
+        if let settings = document.effectSettings(
+            forRow: Int32(anchor.rowIndex),
+            at: Int32(anchor.effectIndex)) as? [String: String] {
+            for (k, v) in settings { anchorValues.append((k, v)) }
+        }
+        if let palette = document.effectPalette(
+            forRow: Int32(anchor.rowIndex),
+            at: Int32(anchor.effectIndex)) as? [String: String] {
+            for (k, v) in palette { anchorValues.append((k, v)) }
+        }
+
+        struct Prev {
+            let rowIndex: Int
+            let effectIndex: Int
+            let key: String
+            let value: String
+        }
+        var prevValues: [Prev] = []
+        var affectedTargets = Set<String>()
+
+        for sel in selectedEffects {
+            if sel.rowIndex == anchor.rowIndex
+                && sel.effectIndex == anchor.effectIndex { continue }
+            var anyChange = false
+            for (key, value) in anchorValues {
+                if !bulkKeyAppliesTo(key, target: sel, anchorName: anchor.name) {
+                    continue
+                }
+                let prev = document.effectSettingValue(forKey: key,
+                                                        inRow: Int32(sel.rowIndex),
+                                                        at: Int32(sel.effectIndex)) ?? ""
+                if prev == value { continue }
+                let changed = document.setEffectSettingValue(
+                    value, forKey: key,
+                    inRow: Int32(sel.rowIndex),
+                    at: Int32(sel.effectIndex))
+                if changed {
+                    prevValues.append(Prev(rowIndex: sel.rowIndex,
+                                            effectIndex: sel.effectIndex,
+                                            key: key, value: prev))
+                    anyChange = true
+                }
+            }
+            if anyChange {
+                renderEffectAndTrack(rowIndex: sel.rowIndex,
+                                     effectIndex: sel.effectIndex)
+                affectedTargets.insert("\(sel.rowIndex):\(sel.effectIndex)")
+            }
+        }
+
+        if !prevValues.isEmpty {
+            inspectorRevision &+= 1
+            let rollback = prevValues.map {
+                ($0.rowIndex, $0.effectIndex, $0.key, $0.value)
+            }
+            undoManager.registerUndo(withTarget: self) { vm in
+                vm.restoreBulkSettings(rollback)
+            }
+            undoManager.setActionName("Update \(affectedTargets.count) Effects")
+        }
+    }
+
+    /// Undo restore for bulk writes — re-applies the captured
+    /// previous values as a single compound step, registering a
+    /// redo that re-writes the current values back.
+    func restoreBulkSettings(_ entries: [(Int, Int, String, String)]) {
+        struct Curr {
+            let rowIndex: Int
+            let effectIndex: Int
+            let key: String
+            let value: String
+        }
+        var forwardValues: [Curr] = []
+        for (r, i, k, v) in entries {
+            let curr = document.effectSettingValue(forKey: k,
+                                                    inRow: Int32(r),
+                                                    at: Int32(i)) ?? ""
+            if curr == v { continue }
+            if document.setEffectSettingValue(v, forKey: k,
+                                               inRow: Int32(r), at: Int32(i)) {
+                forwardValues.append(Curr(rowIndex: r, effectIndex: i,
+                                           key: k, value: curr))
+                if selectedEffect?.rowIndex == r
+                    && selectedEffect?.effectIndex == i {
+                    selectedEffectSettings[k] = v
+                }
+                renderEffectAndTrack(rowIndex: r, effectIndex: i)
+            }
+        }
+        if !forwardValues.isEmpty {
+            inspectorRevision &+= 1
+            let redo = forwardValues.map {
+                ($0.rowIndex, $0.effectIndex, $0.key, $0.value)
+            }
+            undoManager.registerUndo(withTarget: self) { vm in
+                vm.restoreBulkSettings(redo)
+            }
         }
     }
 

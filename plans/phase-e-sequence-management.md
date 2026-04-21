@@ -103,15 +103,15 @@ sequencer toolbar.
 
 ## E-4. Load-time migration + remaining media pieces
 
-Missing-media detection + banner landed. Open items:
+Missing-media detection + banner landed. Per-row "Replace from
+Disk…" relocation shipped (2026-04-21) — broken rows expose a red
+swipe action that opens `.fileImporter`, copies the picked file
+into the show folder's type-appropriate subdir, and either
+`ReloadMedia`s in place (when the target happens to match the
+stored path byte-for-byte) or routes through `RenameMedia` +
+`rewriteEffectValues` so every referencing effect picks up the
+new path. Open items:
 
-- **Relocate action per missing file.** When the banner opens the
-  media manager, each missing row should let the user pick a
-  replacement via `UIDocumentPickerViewController`. The replacement
-  file is copied into the show or media folder under the original
-  basename, then the stored path on every referencing effect is
-  rewritten via the same `rewriteEffectValues` helper G30 uses.
-  (G30 infrastructure already exists; just needs the UI.)
 - **Effect version migration banner.** `SequenceFile::LoadSequence`
   already runs `RenderableEffect::adjustSettings(version, effect)`
   across every effect (`SequenceFile.cpp:1895-1933`). What's

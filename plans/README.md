@@ -8,9 +8,9 @@ questions) and links here for the details.
 | File | Phase | Status |
 |---|---|---|
 | [phase-b-grid-parity.md](phase-b-grid-parity.md) | B — Effects grid parity with desktop | In progress — ~100 items pending; multi-select in flight on a separate thread |
-| [phase-c-inspector.md](phase-c-inspector.md) | C — Effect settings inspector | In progress — C4 (multi-effect) blocked on grid multi-select; C7 (specialised editors) still open |
+| [phase-c-inspector.md](phase-c-inspector.md) | C — Effect settings inspector | In progress — C4 (multi-effect) shipped 2026-04-21; C7 (specialised editors) still open |
 | [phase-d-preview.md](phase-d-preview.md) | D — Model Preview + preview polish | ✓ complete |
-| [phase-e-sequence-management.md](phase-e-sequence-management.md) | E — Sequence management (open / save / new / settings) | Partial — save / dirty / close-with-prompt and missing-media detection landed; New wizard, Sequence Settings dialog, recent documents, autosave outstanding |
+| [phase-e-sequence-management.md](phase-e-sequence-management.md) | E — Sequence management (open / save / new / settings) | Partial — save / dirty / close-with-prompt, missing-media detection, and per-row replace-from-disk relocation landed; New wizard, Sequence Settings dialog, recent documents, autosave outstanding |
 | [phase-f-window-system.md](phase-f-window-system.md) | F — Window system + Display Elements | Not started |
 | [phase-g-document.md](phase-g-document.md) | G — Document / iCloud polish | Not started |
 | [phase-h-app-store.md](phase-h-app-store.md) | H — App Store readiness | Not started |

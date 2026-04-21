@@ -526,6 +526,21 @@
 - (int)embedAllMediaOfType:(NSString*)typeFilter;
 - (int)extractAllMediaOfType:(NSString*)typeFilter;
 
+// Replace a missing / broken media file with a fresh pick from
+// disk (E-4 — relocate). Copies the source file into the show
+// folder at a path derived from the stored path's type + the
+// picked file's basename, then either re-reads the cache entry
+// in place (when the target path matches the stored path) or
+// performs a full rename-with-reference-update (when the target
+// path differs — typical when the stored path was an absolute
+// cross-machine path).
+//
+// `sourcePath` must be an on-disk absolute path the caller has
+// already obtained security-scoped access to. Returns the
+// target show-relative path on success, nil on failure.
+- (NSString*)replaceMissingMediaAtPath:(NSString*)storedPath
+                        fromSourcePath:(NSString*)sourcePath;
+
 // Rename a cache entry (G30 — C5). Works for both embedded
 // entries (cache-key swap only) and external files (also moves
 // the file on disk so the stored path resolves at the new

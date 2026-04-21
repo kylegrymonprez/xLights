@@ -2266,6 +2266,110 @@ int rewriteEffectValues(iPadRenderContext& ctx,
     return YES;
 }
 
+namespace {
+
+// Canonical show-folder subdirectory for a given MediaType. Matches
+// what desktop conventionally drops into per type (`Images/`,
+// `Shaders/`, `Videos/`) and keeps iPad's relocation parity clean.
+const char* canonicalSubdirForType(MediaType t) {
+    switch (t) {
+        case MediaType::Image:      return "Images";
+        case MediaType::SVG:        return "Images";
+        case MediaType::Shader:     return "Shaders";
+        case MediaType::Video:      return "Videos";
+        case MediaType::TextFile:   return "Text";
+        case MediaType::BinaryFile: return "Other";
+    }
+    return "";
+}
+
+} // namespace
+
+- (NSString*)replaceMissingMediaAtPath:(NSString*)storedPath
+                        fromSourcePath:(NSString*)sourcePath {
+    if (!_context || !_context->IsSequenceLoaded()) return nil;
+    if (storedPath.length == 0 || sourcePath.length == 0) return nil;
+
+    auto& media = _context->GetSequenceElements().GetSequenceMedia();
+    std::string storedStr([storedPath UTF8String]);
+    std::string srcStr([sourcePath UTF8String]);
+
+    if (!media.HasMedia(storedStr)) return nil;
+
+    // Establish the entry's media type so we can pick a target
+    // subdirectory when the stored path doesn't suggest one.
+    auto paths = media.GetAllMediaPaths();
+    std::optional<MediaType> type;
+    for (const auto& p : paths) {
+        if (p.first == storedStr) { type = p.second; break; }
+    }
+    if (!type) return nil;
+
+    // Derive the target subdirectory. Preference order:
+    //   1. If the stored path is a show-relative form with a
+    //      parent directory (e.g. `Images/Snow/flake.png`), reuse
+    //      that parent so the replacement lands in the same folder
+    //      the effect originally referenced.
+    //   2. Otherwise use a canonical per-type subdir (`Images/`,
+    //      `Shaders/`, `Videos/`, …).
+    std::string subdir;
+    {
+        std::filesystem::path storedFs(storedStr);
+        if (storedFs.is_relative() && storedFs.has_parent_path()) {
+            subdir = storedFs.parent_path().string();
+        } else {
+            subdir = canonicalSubdirForType(*type);
+        }
+    }
+
+    // Security-scoped access on the source so the copy below can
+    // read it (document-picker URLs are sandboxed until
+    // `startAccessingSecurityScopedResource` is active on the
+    // Swift side; the caller must have already done that).
+    ObtainAccessToURL(srcStr, /*enforceWritable=*/false);
+
+    // Copy the picked source into `<showDir>/<subdir>/<basename>`,
+    // appending `_N` on collision. Returns the destination absolute
+    // path, empty on failure. `reuse=false` because the broken
+    // entry's file is missing — there's no matching-byte file to
+    // reuse anyway.
+    std::string absDest = _context->MoveToShowFolder(srcStr, subdir, /*reuse*/ false);
+    if (absDest.empty()) return nil;
+
+    // Convert back to show-relative so the stored path stays
+    // portable. `MakeRelativePath` falls through unchanged if the
+    // path isn't under the show folder, but `MoveToShowFolder`
+    // always places the copy there.
+    std::string newStr = _context->MakeRelativePath(absDest);
+    if (newStr.empty()) newStr = absDest;
+
+    if (newStr == storedStr) {
+        // Common case: the replacement happens to match the stored
+        // path exactly (same basename, same parent dir). Just
+        // re-read the entry from disk; no settings map rewrite
+        // needed.
+        (void)media.ReloadMedia(storedStr);
+        bumpSequenceDirty(_context.get());
+    } else {
+        // Different target path — re-key the cache entry, then
+        // walk every effect's settings + palette maps to rewrite
+        // references. The entry's _resolvedPath cache is stale
+        // now, so reload the new key from disk as well.
+        if (!media.RenameMedia(storedStr, newStr)) {
+            // Rare: either the old path vanished between checks or
+            // the new path already exists in another cache. Fall
+            // back to leaving the copy in place — the user can
+            // manually re-point the effect from the picker.
+            return [NSString stringWithUTF8String:absDest.c_str()];
+        }
+        (void)media.ReloadMedia(newStr);
+        (void)rewriteEffectValues(*_context, storedStr, newStr);
+        bumpSequenceDirty(_context.get());
+    }
+
+    return [NSString stringWithUTF8String:newStr.c_str()];
+}
+
 - (NSString*)videoCompatibilityIssueForPath:(NSString*)path {
     if (path.length == 0) return nil;
     // Resolve via FixFile so iCloud / show-relative paths map onto

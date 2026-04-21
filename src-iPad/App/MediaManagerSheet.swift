@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 // Sequence-wide media manager (G28 — C5). Lists every media file
 // referenced by any effect in the currently-open sequence with
@@ -70,6 +71,13 @@ struct MediaManagerSheet: View {
     @State private var showingRemoveUnusedConfirm = false
     @State private var removedCount: Int? = nil
 
+    // E-4 relocation: the row a "Replace from Disk…" swipe just
+    // fired on. Drives the `.fileImporter` below — when non-nil
+    // the picker is presented and its success callback pipes
+    // the picked URL through the bridge.
+    @State private var replaceTarget: MediaInventoryItem? = nil
+    @State private var replaceError: String? = nil
+
     private static let typeOrder: [String] = [
         "image", "video", "svg", "shader", "text", "binary"
     ]
@@ -104,7 +112,8 @@ struct MediaManagerSheet: View {
                                             item: item,
                                             onEmbed: { embedOne(item) },
                                             onExtract: { extractOne(item) },
-                                            onRename: { beginRename(item) })
+                                            onRename: { beginRename(item) },
+                                            onReplace: { beginReplace(item) })
                                     }
                                     // Bulk actions on the section
                                     // footer — desktop has Embed All
@@ -191,6 +200,38 @@ struct MediaManagerSheet: View {
                )) {
             Button("OK", role: .cancel) { removedCount = nil }
         }
+        // E-4 relocation picker. `allowedContentTypes` is broad
+        // (`.item`) because the user is telling us this IS the
+        // replacement — filtering to the type-derived UTIs would
+        // mostly annoy the user whose picked file might have the
+        // wrong extension but right contents.
+        .fileImporter(
+            isPresented: Binding(
+                get: { replaceTarget != nil },
+                set: { if !$0 { replaceTarget = nil } }
+            ),
+            allowedContentTypes: [.item]
+        ) { result in
+            guard let target = replaceTarget else { return }
+            replaceTarget = nil
+            switch result {
+            case .success(let url):
+                handleReplacePick(target: target, url: url)
+            case .failure:
+                // User cancelled or picker errored — leave the
+                // entry alone.
+                break
+            }
+        }
+        .alert("Replace Failed",
+               isPresented: Binding(
+                get: { replaceError != nil },
+                set: { if !$0 { replaceError = nil } }
+               )) {
+            Button("OK", role: .cancel) { replaceError = nil }
+        } message: {
+            Text(replaceError ?? "")
+        }
     }
 
     private var brokenCount: Int {
@@ -238,6 +279,32 @@ struct MediaManagerSheet: View {
     private func bulkExtract(_ typeKey: String) {
         if viewModel.document.extractAllMedia(ofType: typeKey) > 0 {
             reload()
+        }
+    }
+
+    // MARK: - Replace from Disk (E-4 — broken rows only)
+
+    fileprivate func beginReplace(_ item: MediaInventoryItem) {
+        replaceTarget = item
+    }
+
+    private func handleReplacePick(target: MediaInventoryItem, url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer {
+            if scoped { url.stopAccessingSecurityScopedResource() }
+        }
+        let stored = target.path
+        if let result = viewModel.document.replaceMissingMedia(
+            atPath: stored, fromSourcePath: url.path) as String?
+        {
+            // `result` is the new show-relative path the file now
+            // lives at. The bridge has already rewritten every
+            // referencing effect; reloading the inventory picks up
+            // the status flip (isBroken → false).
+            _ = result
+            reload()
+        } else {
+            replaceError = "Could not copy \(url.lastPathComponent) into the show folder. Check free space and try again."
         }
     }
 
@@ -314,6 +381,7 @@ struct MediaInventoryRow: View {
     let onEmbed: () -> Void
     let onExtract: () -> Void
     let onRename: () -> Void
+    let onReplace: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
@@ -348,31 +416,37 @@ struct MediaInventoryRow: View {
             Spacer(minLength: 0)
         }
         .swipeActions(edge: .trailing) {
-            // Rename available for embedded + external (non-broken)
-            // entries. Broken entries aren't renameable since the
-            // on-disk source doesn't exist to move.
-            if !item.isBroken {
+            if item.isBroken {
+                // Broken entry — only actionable path is to point
+                // it at a replacement file on disk (E-4).
+                Button {
+                    onReplace()
+                } label: {
+                    Label("Replace from Disk…", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .tint(.red)
+            } else {
                 Button {
                     onRename()
                 } label: {
                     Label("Rename", systemImage: "pencil")
                 }
                 .tint(.orange)
-            }
-            if item.isEmbedded {
-                Button {
-                    onExtract()
-                } label: {
-                    Label("Extract", systemImage: "tray.and.arrow.up")
+                if item.isEmbedded {
+                    Button {
+                        onExtract()
+                    } label: {
+                        Label("Extract", systemImage: "tray.and.arrow.up")
+                    }
+                    .tint(.blue)
+                } else if item.isEmbeddable {
+                    Button {
+                        onEmbed()
+                    } label: {
+                        Label("Embed", systemImage: "tray.and.arrow.down")
+                    }
+                    .tint(.purple)
                 }
-                .tint(.blue)
-            } else if item.isEmbeddable && !item.isBroken {
-                Button {
-                    onEmbed()
-                } label: {
-                    Label("Embed", systemImage: "tray.and.arrow.down")
-                }
-                .tint(.purple)
             }
         }
     }

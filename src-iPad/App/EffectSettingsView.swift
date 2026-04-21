@@ -61,6 +61,9 @@ struct EffectSettingsView: View {
             if viewModel.selectedEffect != nil {
                 VStack(spacing: 0) {
                     header
+                    if viewModel.isMultiEffectSelection {
+                        multiSelectChrome
+                    }
                     timingRow
                     Divider()
                     tabBar
@@ -101,6 +104,56 @@ struct EffectSettingsView: View {
         .padding(.horizontal)
         .padding(.top, 8)
         .padding(.bottom, 4)
+    }
+
+    /// "N effects selected" chrome shown when more than one effect is
+    /// selected (G41). Values in the controls below reflect the anchor
+    /// effect; long-pressing a control exposes "Apply to all selected"
+    /// (G11), and the top-bar "Update All" button flushes every
+    /// current inspector value across the set (G14).
+    @ViewBuilder
+    private var multiSelectChrome: some View {
+        let count = viewModel.selectedEffects.count
+        let uniqueNames = Set(viewModel.selectedEffects.map { $0.name }).count
+        HStack(spacing: 8) {
+            Image(systemName: "square.stack.3d.up.fill")
+                .foregroundStyle(.tint)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("\(count) effects selected")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                Text(uniqueNames > 1
+                     ? "Showing anchor values — mixed effect types"
+                     : "Showing anchor values")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button {
+                viewModel.updateAllLikeAnchor()
+            } label: {
+                Label("Update All", systemImage: "arrow.up.and.down.and.arrow.left.and.right")
+                    .labelStyle(.iconOnly)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help("Copy every inspector value from the anchor effect to all other selected effects")
+            Button {
+                // Collapse multi-select to the anchor.
+                if let sel = viewModel.selectedEffect {
+                    viewModel.selectEffect(rowIndex: sel.rowIndex,
+                                            effectIndex: sel.effectIndex)
+                }
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Clear multi-selection")
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+        .background(Color.accentColor.opacity(0.08))
     }
 
     /// Live start / end + play-position readout. Reads the effect's
