@@ -140,7 +140,7 @@ void xlCrashHandler::HandleCrash(bool const isFatalException, std::string const&
             spdlog::critical("{}", backtrace_txt.ToStdString());
 
             std::string const logFilePath = GetLogFilePath().string();
-            std::string const logFileName = GetLogFileName().string();
+            std::string const logFileName = GetLogFileName();
             xlFrame* const topFrame = GetTopWindow();
             if (FileExists(logFilePath)) {
                 report.AddFile(logFilePath);
