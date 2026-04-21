@@ -326,8 +326,15 @@ All depend on B1 (done).
 
 - **Gap B60 — Drag row to reorder.** **P2.**
 - **Gap B61 — Drag right edge of row-heading column to resize
-  column width.** Row-heading column is fixed-width on iPad.
-  **P1.**
+  column width.** **[landed 2026-04-20].** Replaced the three
+  `Divider()` views between the row-header column and the grid
+  canvas (top-chrome, timing band, model grid) with a new
+  `ColumnResizeHandle` — 0.5-pt hairline + 12-pt transparent hit
+  strip + `.hoverEffect(.highlight)` for Magic Keyboard pointer
+  users. Width is persisted via `@AppStorage("gridRowHeaderWidth")`,
+  clamped to 80..400 pt on every read via the `metrics` computed
+  property. `metrics` itself became a computed var (was
+  `@State`; never mutated in place, so no behavior change there).
 
 ### 4.5 Icons / visual
 
@@ -661,7 +668,7 @@ feedback.
 | B57 | Show All / Collapse All (unified) | Row heading | ✓ landed |
 | B58 | Toggle Strands / Nodes / Models | Row heading | P2 |
 | B60 | Drag row to reorder | Row heading | P2 |
-| B61 | Drag-resize row-heading column width | Row heading | P1 |
+| B61 | Drag-resize row-heading column width | Row heading | ✓ landed |
 | B63 | Papagayo / FPP / group icon glyphs | Row heading | P2 |
 | B64 | Layer-count [N] indicator | Row heading | P2 |
 | B65 | Tooltip on truncated row name | Row heading | ✓ landed |

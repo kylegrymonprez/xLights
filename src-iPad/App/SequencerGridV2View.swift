@@ -45,7 +45,21 @@ struct SequencerGridV2View: View {
     // Timeline state is owned by the parent (SequencerView) so toolbar
     // zoom controls and pinch-to-zoom here share the same state.
     let timeline: TimelineState
-    @State private var metrics = GridMetrics.standard
+    // B61 — row-heading column width is user-resizable via a drag
+    // handle between the header column and the grid canvas. Persisted
+    // so the setting survives app restarts. Clamped to a sensible
+    // range (80..400 pt) both here and in the drag handler so a
+    // corrupted UserDefaults value can't strand the column.
+    @AppStorage("gridRowHeaderWidth") private var rowHeaderWidthStorage: Double = 180
+    private static let rowHeaderMinWidth: Double = 80
+    private static let rowHeaderMaxWidth: Double = 400
+    private var metrics: GridMetrics {
+        var m = GridMetrics.standard
+        m.rowHeaderWidth = CGFloat(
+            min(Self.rowHeaderMaxWidth,
+                max(Self.rowHeaderMinWidth, rowHeaderWidthStorage)))
+        return m
+    }
     @State private var rowsScroll = RowsScrollState()
     @State private var timingScroll = RowsScrollState()
     @State private var contextMenuTarget: ContextMenuTarget?
@@ -139,7 +153,7 @@ struct SequencerGridV2View: View {
                         topLeftCorner(availableWidth: geo.size.width)
                             .frame(width: metrics.rowHeaderWidth,
                                    height: metrics.topChromeHeight)
-                        Divider()
+                        rowHeaderResizeHandle(height: metrics.topChromeHeight)
                         TopChromeMetalGridView(
                             durationMS: durationMS,
                             pixelsPerMS: timeline.pixelsPerMS,
@@ -188,7 +202,7 @@ struct SequencerGridV2View: View {
                             }
                             .frame(width: metrics.rowHeaderWidth,
                                    height: timingBandH)
-                            Divider()
+                            rowHeaderResizeHandle(height: timingBandH)
                             TimingEffectsMetalGridView(
                                 rows: timingRows,
                                 rowHeight: metrics.timingRowHeight,
@@ -233,7 +247,7 @@ struct SequencerGridV2View: View {
                             modelHeaders(modelRows)
                         }
                         .frame(width: metrics.rowHeaderWidth)
-                        Divider()
+                        rowHeaderResizeHandle(height: nil)
                         modelEffectsMetalView(modelRows: modelRows)
                     }
                 }
@@ -645,6 +659,26 @@ struct SequencerGridV2View: View {
         if endPtr == nil { return nil }
         if val < 0 || !val.isFinite { return nil }
         return Int((val * 1000.0).rounded())
+    }
+
+    /// B61 drag handle between the row-header column and the grid
+    /// canvas. Visually looks like the `Divider()` it replaced (thin
+    /// hairline) but owns a wider invisible hit strip so the grab
+    /// affordance is a comfortable touch target. Drag horizontally
+    /// updates `rowHeaderWidthStorage`; the `metrics` computed
+    /// property re-clamps so the column never escapes its bounds.
+    /// `.hoverEffect` gives Magic Keyboard pointer users a proper
+    /// resize visual.
+    private func rowHeaderResizeHandle(height: CGFloat?) -> some View {
+        ColumnResizeHandle(
+            height: height,
+            minWidth: Self.rowHeaderMinWidth,
+            maxWidth: Self.rowHeaderMaxWidth,
+            width: Binding(
+                get: { rowHeaderWidthStorage },
+                set: { rowHeaderWidthStorage = $0 }
+            )
+        )
     }
 
     /// B75: write the timing track to a temp `.xtiming` file and
@@ -1266,6 +1300,47 @@ private struct PlayheadShape: Shape {
         // Full-height line.
         p.addRect(CGRect(x: cx - 1, y: 0, width: 2, height: rect.height))
         return p
+    }
+}
+
+/// B61 column-resize handle. 1-px visible hairline + 12-pt
+/// transparent hit strip with a `.hoverEffect(.highlight)` for
+/// Magic Keyboard pointer users. Horizontal drag updates the
+/// bound width directly; the receiving view re-clamps.
+private struct ColumnResizeHandle: View {
+    /// Optional explicit height. `nil` makes the handle stretch to
+    /// its parent (used in the model-rows HStack where the row
+    /// area has no fixed height).
+    let height: CGFloat?
+    let minWidth: Double
+    let maxWidth: Double
+    @Binding var width: Double
+    @State private var dragStartWidth: Double? = nil
+
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(Color(white: 0.25))
+                .frame(width: 0.5)
+            // Wider transparent hit target — a touch on a 0.5-pt
+            // line is essentially impossible.
+            Color.clear
+                .frame(width: 12)
+                .contentShape(Rectangle())
+                .hoverEffect(.highlight)
+                .gesture(
+                    DragGesture()
+                        .onChanged { value in
+                            if dragStartWidth == nil { dragStartWidth = width }
+                            if let start = dragStartWidth {
+                                let proposed = start + Double(value.translation.width)
+                                width = min(maxWidth, max(minWidth, proposed))
+                            }
+                        }
+                        .onEnded { _ in dragStartWidth = nil }
+                )
+        }
+        .frame(width: 12, height: height)
     }
 }
 
