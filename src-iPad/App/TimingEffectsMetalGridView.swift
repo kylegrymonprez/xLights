@@ -14,6 +14,7 @@ struct TimingEffectsMetalGridView: UIViewRepresentable {
     @Binding var scrollOffsetY: CGFloat
     let onSeek: (Int) -> Void
     let onPinchZoom: (CGFloat, CGFloat) -> Void
+    var onUserInteraction: (() -> Void)?
 
     func makeUIView(context: Context) -> TimingEffectsMetalMTKView {
         let v = TimingEffectsMetalMTKView()
@@ -33,6 +34,7 @@ struct TimingEffectsMetalGridView: UIViewRepresentable {
         c.onPinchZoom = onPinchZoom
         c.onUpdateScrollX = { scrollOffsetX = $0 }
         c.onUpdateScrollY = { scrollOffsetY = $0 }
+        c.onUserInteraction = onUserInteraction
         view.setNeedsDisplay()
     }
 
@@ -49,6 +51,7 @@ struct TimingEffectsMetalGridView: UIViewRepresentable {
         var onPinchZoom: (CGFloat, CGFloat) -> Void = { _, _ in }
         var onUpdateScrollX: (CGFloat) -> Void = { _ in }
         var onUpdateScrollY: (CGFloat) -> Void = { _ in }
+        var onUserInteraction: (() -> Void)?
         var panStartScrollX: CGFloat = 0
         var panStartScrollY: CGFloat = 0
     }
@@ -198,10 +201,12 @@ final class TimingEffectsMetalMTKView: MTKView, MTKViewDelegate {
         case .began:
             c.panStartScrollX = c.scrollOffsetX
             c.panStartScrollY = c.scrollOffsetY
+            c.onUserInteraction?()
         case .changed:
             let t = g.translation(in: self)
             c.onUpdateScrollX(max(0, c.panStartScrollX - t.x))
             c.onUpdateScrollY(max(0, c.panStartScrollY - t.y))
+            c.onUserInteraction?()
         default:
             break
         }
@@ -213,10 +218,12 @@ final class TimingEffectsMetalMTKView: MTKView, MTKViewDelegate {
         case .began:
             pinchAnchorX = g.location(in: self).x + c.scrollOffsetX
             pinchLastScale = 1
+            c.onUserInteraction?()
         case .changed:
             let delta = g.scale / pinchLastScale
             pinchLastScale = g.scale
             c.onPinchZoom(delta, pinchAnchorX)
+            c.onUserInteraction?()
         default:
             break
         }

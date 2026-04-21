@@ -151,6 +151,10 @@ struct ModelRowHeader: View {
     let document: XLSequenceDocument
     let onSelect: () -> Void
     let onRowsChanged: () -> Void
+    /// B2: fires when the user picks "Select All Effects in Row" from
+    /// the row-heading long-press menu. Wired on the outer view to
+    /// `SequencerViewModel.selectAllEffectsInRow(rowIndex:)`.
+    var onSelectAllEffects: (() -> Void)?
 
     @State private var showDeleteLayerConfirm: Bool = false
 
@@ -259,6 +263,15 @@ struct ModelRowHeader: View {
             }
         ))
         .contextMenu {
+            if !row.effects.isEmpty, let fire = onSelectAllEffects {
+                Button {
+                    fire()
+                } label: {
+                    Label("Select All Effects in Row",
+                           systemImage: "checkmark.rectangle.stack")
+                }
+                Divider()
+            }
             if !isNodeRow {
                 Button {
                     if document.insertEffectLayerAbove(at: Int32(row.id)) {

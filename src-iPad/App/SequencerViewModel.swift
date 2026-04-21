@@ -74,6 +74,14 @@ class SequencerViewModel {
 
     // Selection & editing
     var selectedEffect: EffectSelection?
+    /// Full set of selected effects. Always mirrors `selectedEffect`:
+    /// single-select sets it to `[primary]`, multi-select via marquee
+    /// fills it with N, clear empties it. When multi-selected, the
+    /// inspector and scrub are suppressed (selectedEffect == nil) but
+    /// the grid highlights every member. Bulk ops (delete, lock,
+    /// disable) iterate this set; single-effect ops fall back to
+    /// selectedEffect.
+    var selectedEffects: Set<EffectSelection> = []
     var selectedEffectSettings: [String: String] = [:]     // legacy: raw key/value map
     var availableEffects: [String] = []
     var selectedPaletteEffect: String?
@@ -143,7 +151,7 @@ class SequencerViewModel {
     private var memoryPollTimer: Timer?
     private var memoryWarningObserver: NSObjectProtocol?
 
-    struct EffectSelection: Equatable {
+    struct EffectSelection: Hashable {
         let rowIndex: Int
         let effectIndex: Int
         let name: String
@@ -736,13 +744,15 @@ class SequencerViewModel {
     func selectEffect(rowIndex: Int, effectIndex: Int) {
         let row = rows[rowIndex]
         let effect = row.effects[effectIndex]
-        selectedEffect = EffectSelection(
+        let sel = EffectSelection(
             rowIndex: rowIndex,
             effectIndex: effectIndex,
             name: effect.name,
             startTimeMS: effect.startTimeMS,
             endTimeMS: effect.endTimeMS
         )
+        selectedEffect = sel
+        selectedEffects = [sel]
         showInspector = true
         // Route the Model Preview to this effect's model so the scrub
         // loop below is visible in the pane.
@@ -771,6 +781,7 @@ class SequencerViewModel {
 
     func clearSelection() {
         selectedEffect = nil
+        selectedEffects = []
         selectedEffectSettings = [:]
         selectedEffectMetadata = nil
         stopScrub()
@@ -785,15 +796,38 @@ class SequencerViewModel {
         guard let sel = selectedEffect else { return }
         var merged: [String: String] = [:]
         if let settings = document.effectSettings(forRow: Int32(sel.rowIndex),
-                                                   at: Int32(sel.effectIndex)) as? [String: String] {
+                                                  at: Int32(sel.effectIndex)) as? [String: String] {
             for (k, v) in settings { merged[k] = v }
         }
         if let palette = document.effectPalette(forRow: Int32(sel.rowIndex),
-                                                 at: Int32(sel.effectIndex)) as? [String: String] {
+                                                at: Int32(sel.effectIndex)) as? [String: String] {
             for (k, v) in palette { merged[k] = v }
         }
         selectedEffectSettings = merged
         renderEffectAndTrack(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex)
+    }
+
+    /// Replace the full selection set (marquee result). If `newSet` is
+    /// empty, acts like `clearSelection`. If size 1, promotes that
+    /// effect to the single-select path so inspector + scrub + drag
+    /// handles all work normally. For N > 1 the inspector is
+    /// suppressed (`selectedEffect = nil`) but every member renders
+    /// highlighted in the grid.
+    func setMultiSelection(_ newSet: Set<EffectSelection>) {
+        if newSet.isEmpty {
+            clearSelection()
+            return
+        }
+        if newSet.count == 1, let only = newSet.first {
+            selectEffect(rowIndex: only.rowIndex, effectIndex: only.effectIndex)
+            return
+        }
+        stopScrub()
+        selectedEffect = nil
+        selectedEffects = newSet
+        selectedEffectSettings = [:]
+        selectedEffectMetadata = nil
+        showInspector = false
     }
 
     // MARK: - Metadata Loading
@@ -957,6 +991,261 @@ class SequencerViewModel {
     func deleteSelectedEffect() {
         guard let sel = selectedEffect else { return }
         deleteEffect(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex)
+    }
+
+    /// Delete every effect in `selectedEffects` as one undo step. Groups
+    /// by row and deletes effects in descending `effectIndex` order
+    /// within each row so earlier deletions don't shift indices of
+    /// later ones. Falls through to the single-select path when the
+    /// set is size 0 or 1.
+    func deleteSelectedEffects() {
+        if selectedEffects.count <= 1 {
+            deleteSelectedEffect()
+            return
+        }
+        undoManager.beginUndoGrouping()
+        let byRow = Dictionary(grouping: selectedEffects, by: { $0.rowIndex })
+        let count = selectedEffects.count
+        for (_, effects) in byRow {
+            let sortedDesc = effects.sorted { $0.effectIndex > $1.effectIndex }
+            for sel in sortedDesc {
+                deleteEffect(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex)
+            }
+        }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName("Delete \(count) Effects")
+        clearSelection()
+    }
+
+    /// Lock/unlock every effect in `selectedEffects` (multi-select bulk
+    /// op). If the set is mixed (some locked, some not), the bulk
+    /// action locks all of them; if all are already locked it unlocks
+    /// all.
+    func toggleLockSelectedEffects() {
+        if selectedEffects.count <= 1 {
+            toggleLockSelected()
+            return
+        }
+        let allLocked = selectedEffects.allSatisfy {
+            document.effectIsLocked(inRow: Int32($0.rowIndex), at: Int32($0.effectIndex))
+        }
+        let targetLocked = !allLocked
+        undoManager.beginUndoGrouping()
+        for sel in selectedEffects {
+            let cur = document.effectIsLocked(inRow: Int32(sel.rowIndex), at: Int32(sel.effectIndex))
+            if cur != targetLocked {
+                toggleLock(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex)
+            }
+        }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName(targetLocked ? "Lock Effects" : "Unlock Effects")
+    }
+
+    // MARK: - Select in row / column (B2)
+
+    /// Select every effect on the given row. Entry point from
+    /// `ModelRowHeader`'s long-press menu. No-op for rows with no
+    /// effects. If the row is a timing row (mark-only), does nothing
+    /// since timing-mark editing is deferred (B67-B72).
+    func selectAllEffectsInRow(rowIndex: Int) {
+        guard rowIndex >= 0, rowIndex < rows.count else { return }
+        let row = rows[rowIndex]
+        if row.timing != nil { return }
+        let hits: Set<EffectSelection> = Set(
+            row.effects.enumerated().map { (i, e) in
+                EffectSelection(rowIndex: rowIndex, effectIndex: i,
+                                 name: e.name,
+                                 startTimeMS: e.startTimeMS,
+                                 endTimeMS: e.endTimeMS)
+            }
+        )
+        setMultiSelection(hits)
+    }
+
+    /// Select every effect across every non-timing row whose time
+    /// range overlaps `[spanStartMS, spanEndMS]`. Entry point from
+    /// the single-effect context menu ("Select All in Column") where
+    /// the clicked effect's own range defines the column extent.
+    func selectAllEffectsInColumn(spanStartMS: Int, spanEndMS: Int) {
+        var hits: Set<EffectSelection> = []
+        for (rIdx, row) in rows.enumerated() {
+            if row.timing != nil { continue }
+            for (eIdx, e) in row.effects.enumerated() {
+                if e.endTimeMS < spanStartMS { continue }
+                if e.startTimeMS > spanEndMS { break }
+                hits.insert(.init(rowIndex: rIdx, effectIndex: eIdx,
+                                   name: e.name,
+                                   startTimeMS: e.startTimeMS,
+                                   endTimeMS: e.endTimeMS))
+            }
+        }
+        setMultiSelection(hits)
+    }
+
+    // MARK: - Split (B12)
+
+    /// Returns true if the single selected effect spans the current
+    /// `playPositionMS` (exclusive of the boundaries). Drives the
+    /// enabled state of the "Split at Play Marker" context-menu item.
+    var canSplitSelectedAtPlayMarker: Bool {
+        guard let sel = selectedEffect else { return false }
+        let m = playPositionMS
+        return m > sel.startTimeMS && m < sel.endTimeMS
+    }
+
+    /// Split the single-selected effect at `playPositionMS`. The left
+    /// half gets the original effect's settings + palette, range
+    /// `[origStart, marker]`. The right half gets the same
+    /// settings+palette, range `[marker, origEnd]`. Registers one
+    /// undo group so ⌘Z reverses both halves.
+    func splitSelectedEffectAtPlayMarker() {
+        guard let sel = selectedEffect else { return }
+        let marker = playPositionMS
+        guard marker > sel.startTimeMS, marker < sel.endTimeMS else { return }
+        let rowIndex = sel.rowIndex
+        let effectIndex = sel.effectIndex
+        let name = document.effectName(forRow: Int32(rowIndex), at: Int32(effectIndex)) ?? sel.name
+        let settings = document.effectSettingsString(forRow: Int32(rowIndex), at: Int32(effectIndex)) ?? ""
+        let palette = document.effectPaletteString(forRow: Int32(rowIndex), at: Int32(effectIndex)) ?? ""
+        let origStart = sel.startTimeMS
+        let origEnd = sel.endTimeMS
+        undoManager.beginUndoGrouping()
+        // Delete original, then add two halves. deleteEffect registers
+        // its own undo (recreate original); addEffectWithSettings
+        // registers its own (delete new). The group rolls them up.
+        deleteEffect(rowIndex: rowIndex, effectIndex: effectIndex)
+        _ = addEffectWithSettings(rowIndex: rowIndex, name: name,
+                                    settings: settings, palette: palette,
+                                    startMS: origStart, endMS: marker)
+        _ = addEffectWithSettings(rowIndex: rowIndex, name: name,
+                                    settings: settings, palette: palette,
+                                    startMS: marker, endMS: origEnd)
+        undoManager.endUndoGrouping()
+        undoManager.setActionName("Split Effect")
+        // Selection was on the deleted original → cleared. Leave the
+        // user to tap whichever half they want.
+    }
+
+    // MARK: - Align (B8)
+
+    enum AlignMode {
+        case startTimes       // all starts → anchor's start
+        case endTimes         // all ends   → anchor's end
+        case bothTimes        // all starts + ends → anchor's range
+        case centerPoints     // all midpoints → anchor's midpoint
+        case matchDuration    // each effect keeps its start, end = start + anchor.duration
+    }
+
+    /// Align every effect in `selectedEffects` to the anchor according
+    /// to `mode`. Anchor selection rule:
+    ///  - start/both/match/centers  → earliest-starting selected effect
+    ///  - end                       → latest-ending selected effect
+    ///
+    /// Same-row aligns that would collide on an overlap are rejected
+    /// by the bridge's validation per-effect (moves partially); users
+    /// multi-selecting across rows is the common case and works
+    /// straight through. Implemented as one undo group so a single
+    /// `Cmd+Z` reverses the whole alignment.
+    func alignSelectedEffects(_ mode: AlignMode) {
+        guard selectedEffects.count >= 2 else { return }
+        let anchor: EffectSelection
+        switch mode {
+        case .startTimes, .bothTimes, .matchDuration, .centerPoints:
+            anchor = selectedEffects.min(by: { $0.startTimeMS < $1.startTimeMS })!
+        case .endTimes:
+            anchor = selectedEffects.max(by: { $0.endTimeMS < $1.endTimeMS })!
+        }
+
+        // Snapshot every target move up-front (rowIndex, origStartMS,
+        // new start/end). `origStartMS` is used to re-find the effect
+        // on each row after earlier moves in the iteration may have
+        // shifted indices.
+        struct AlignMove {
+            let rowIndex: Int
+            let origStartMS: Int
+            let newStartMS: Int
+            let newEndMS: Int
+        }
+        var moves: [AlignMove] = []
+        let anchorDuration = anchor.endTimeMS - anchor.startTimeMS
+        let anchorCenter = anchor.startTimeMS + anchorDuration / 2
+        for sel in selectedEffects {
+            if sel == anchor { continue }  // anchor stays put
+            let dur = sel.endTimeMS - sel.startTimeMS
+            let newStart: Int
+            let newEnd: Int
+            switch mode {
+            case .startTimes:
+                newStart = anchor.startTimeMS
+                // Keep original end unless it would invert.
+                newEnd = max(sel.endTimeMS, newStart + 1)
+            case .endTimes:
+                newEnd = anchor.endTimeMS
+                newStart = min(sel.startTimeMS, newEnd - 1)
+            case .bothTimes:
+                newStart = anchor.startTimeMS
+                newEnd = anchor.endTimeMS
+            case .centerPoints:
+                let selCenter = sel.startTimeMS + dur / 2
+                let delta = anchorCenter - selCenter
+                newStart = max(0, sel.startTimeMS + delta)
+                newEnd = newStart + dur
+            case .matchDuration:
+                newStart = sel.startTimeMS
+                newEnd = newStart + anchorDuration
+            }
+            moves.append(AlignMove(rowIndex: sel.rowIndex,
+                                    origStartMS: sel.startTimeMS,
+                                    newStartMS: max(0, newStart),
+                                    newEndMS: max(1, newEnd)))
+        }
+        if moves.isEmpty { return }
+
+        undoManager.beginUndoGrouping()
+        for m in moves {
+            // Re-find the effect by its original startMS — earlier
+            // moves in this loop may have shifted effectIndex on the
+            // same row. Skips if the effect can't be found (would
+            // only happen if a prior move collided and triggered
+            // some external refresh).
+            guard m.rowIndex >= 0, m.rowIndex < rows.count else { continue }
+            let row = rows[m.rowIndex]
+            guard let eIdx = row.effects.firstIndex(where: {
+                $0.startTimeMS == m.origStartMS
+            }) else { continue }
+            moveEffect(rowIndex: m.rowIndex, effectIndex: eIdx,
+                       newStartMS: m.newStartMS, newEndMS: m.newEndMS)
+        }
+        undoManager.endUndoGrouping()
+        let action: String
+        switch mode {
+        case .startTimes:    action = "Align Start Times"
+        case .endTimes:      action = "Align End Times"
+        case .bothTimes:     action = "Align Both Times"
+        case .centerPoints:  action = "Align Centers"
+        case .matchDuration: action = "Match Duration"
+        }
+        undoManager.setActionName(action)
+    }
+
+    func toggleDisableSelectedEffects() {
+        if selectedEffects.count <= 1 {
+            toggleDisableSelected()
+            return
+        }
+        let allDisabled = selectedEffects.allSatisfy {
+            document.effectIsRenderDisabled(inRow: Int32($0.rowIndex), at: Int32($0.effectIndex))
+        }
+        let targetDisabled = !allDisabled
+        undoManager.beginUndoGrouping()
+        for sel in selectedEffects {
+            let cur = document.effectIsRenderDisabled(inRow: Int32(sel.rowIndex), at: Int32(sel.effectIndex))
+            if cur != targetDisabled {
+                toggleDisable(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex)
+            }
+        }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName(targetDisabled ? "Disable Effects" : "Enable Effects")
     }
 
     /// Delete a specific effect, capturing its state for undo.

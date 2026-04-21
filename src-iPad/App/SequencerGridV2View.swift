@@ -73,7 +73,8 @@ struct SequencerGridV2View: View {
                                 get: { timeline.hScrollOffsetPx },
                                 set: { timeline.hScrollOffsetPx = $0 }),
                             onSeek: { ms in viewModel.seekTo(ms: ms) },
-                            onPinchZoom: pinchZoomAction
+                            onPinchZoom: pinchZoomAction,
+                            onUserInteraction: { timeline.noteUserInteraction() }
                         )
                         .frame(height: metrics.topChromeHeight)
                     }
@@ -113,7 +114,8 @@ struct SequencerGridV2View: View {
                                     get: { timingScroll.vScrollOffsetPx },
                                     set: { timingScroll.vScrollOffsetPx = $0 }),
                                 onSeek: { ms in viewModel.seekTo(ms: ms) },
-                                onPinchZoom: pinchZoomAction
+                                onPinchZoom: pinchZoomAction,
+                                onUserInteraction: { timeline.noteUserInteraction() }
                             )
                             .frame(height: timingBandH)
                         }
@@ -152,6 +154,15 @@ struct SequencerGridV2View: View {
                     gridHeight: geo.size.height
                 )
                 .allowsHitTesting(false)
+
+                // B93: jump-scroll to keep the play marker visible during
+                // playback. Isolated in its own view so the onChange that
+                // fires on every playback tick only invalidates this
+                // zero-sized placeholder, not the main grid body.
+                AutoFollowPlayhead(
+                    timeline: timeline,
+                    availableContentWidth: max(0, geo.size.width - metrics.rowHeaderWidth)
+                )
             }
             .onAppear {
                 fitIfNeeded(durationMS: durationMS, availableWidth: geo.size.width)
@@ -187,30 +198,76 @@ struct SequencerGridV2View: View {
             ),
             presenting: contextMenuTarget
         ) { target in
-            Button("Copy") { viewModel.copySelectedEffect() }
-            if viewModel.hasClipboard {
-                Button("Paste Here") {
-                    let startMS = (viewModel.rows[target.rowIndex].effects[target.effectIndex]).startTimeMS
-                    viewModel.pasteEffect(rowIndex: target.rowIndex, startMS: startMS)
+            if viewModel.selectedEffects.count > 1 {
+                // Multi-select bulk menu.
+                let n = viewModel.selectedEffects.count
+                Button("Align Start Times") {
+                    viewModel.alignSelectedEffects(.startTimes)
                 }
+                Button("Align End Times") {
+                    viewModel.alignSelectedEffects(.endTimes)
+                }
+                Button("Align Both Times") {
+                    viewModel.alignSelectedEffects(.bothTimes)
+                }
+                Button("Align Centers") {
+                    viewModel.alignSelectedEffects(.centerPoints)
+                }
+                Button("Match Duration") {
+                    viewModel.alignSelectedEffects(.matchDuration)
+                }
+                Button("Delete \(n) Effects", role: .destructive) {
+                    viewModel.deleteSelectedEffects()
+                }
+                Button("Lock / Unlock \(n) Effects") {
+                    viewModel.toggleLockSelectedEffects()
+                }
+                Button("Disable / Enable \(n) Effects") {
+                    viewModel.toggleDisableSelectedEffects()
+                }
+                Button("Deselect All") {
+                    viewModel.clearSelection()
+                }
+                Button("Cancel", role: .cancel) {}
+            } else {
+                Button("Copy") { viewModel.copySelectedEffect() }
+                if viewModel.hasClipboard {
+                    Button("Paste Here") {
+                        let startMS = (viewModel.rows[target.rowIndex].effects[target.effectIndex]).startTimeMS
+                        viewModel.pasteEffect(rowIndex: target.rowIndex, startMS: startMS)
+                    }
+                }
+                if viewModel.canSplitSelectedAtPlayMarker {
+                    Button("Split at Play Marker") {
+                        viewModel.splitSelectedEffectAtPlayMarker()
+                    }
+                }
+                Button("Select All in Row") {
+                    viewModel.selectAllEffectsInRow(rowIndex: target.rowIndex)
+                }
+                Button("Select All in Column") {
+                    let e = viewModel.rows[target.rowIndex].effects[target.effectIndex]
+                    viewModel.selectAllEffectsInColumn(spanStartMS: e.startTimeMS,
+                                                       spanEndMS: e.endTimeMS)
+                }
+                Button(viewModel.isEffectLocked(rowIndex: target.rowIndex,
+                                                 effectIndex: target.effectIndex)
+                       ? "Unlock" : "Lock") {
+                    viewModel.toggleLock(rowIndex: target.rowIndex,
+                                         effectIndex: target.effectIndex)
+                }
+                Button(viewModel.isEffectRenderDisabled(rowIndex: target.rowIndex,
+                                                        effectIndex: target.effectIndex)
+                       ? "Enable" : "Disable") {
+                    viewModel.toggleDisable(rowIndex: target.rowIndex,
+                                            effectIndex: target.effectIndex)
+                }
+                Button("Delete", role: .destructive) {
+                    viewModel.deleteEffect(rowIndex: target.rowIndex,
+                                           effectIndex: target.effectIndex)
+                }
+                Button("Cancel", role: .cancel) {}
             }
-            Button(viewModel.isEffectLocked(rowIndex: target.rowIndex,
-                                             effectIndex: target.effectIndex)
-                   ? "Unlock" : "Lock") {
-                viewModel.toggleLock(rowIndex: target.rowIndex,
-                                     effectIndex: target.effectIndex)
-            }
-            Button(viewModel.isEffectRenderDisabled(rowIndex: target.rowIndex,
-                                                    effectIndex: target.effectIndex)
-                   ? "Enable" : "Disable") {
-                viewModel.toggleDisable(rowIndex: target.rowIndex,
-                                        effectIndex: target.effectIndex)
-            }
-            Button("Delete", role: .destructive) {
-                viewModel.deleteEffect(rowIndex: target.rowIndex,
-                                       effectIndex: target.effectIndex)
-            }
-            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -360,7 +417,10 @@ struct SequencerGridV2View: View {
                     height: h,
                     document: viewModel.document,
                     onSelect: { viewModel.selectPreviewModel(rowIndex: row.id) },
-                    onRowsChanged: { viewModel.reloadRows() }
+                    onRowsChanged: { viewModel.reloadRows() },
+                    onSelectAllEffects: {
+                        viewModel.selectAllEffectsInRow(rowIndex: row.id)
+                    }
                 )
             }
             Spacer(minLength: 0)
@@ -423,6 +483,7 @@ struct SequencerGridV2View: View {
             metrics: metrics,
             pixelsPerMS: timeline.pixelsPerMS,
             selection: viewModel.selectedEffect,
+            selectedEffects: viewModel.selectedEffects,
             activeDrag: viewModel.activeDrag,
             timingMarkTimesMS: collectActiveTimingMarkTimes(),
             renderedBackgroundsRevision: viewModel.renderedBackgroundsRevision,
@@ -450,7 +511,9 @@ struct SequencerGridV2View: View {
                 else { return nil }
                 return data
             },
-            document: viewModel.document
+            document: viewModel.document,
+            onUserInteraction: { timeline.noteUserInteraction() },
+            onMarqueeSelect: { hits in viewModel.setMultiSelection(hits) }
         )
     }
 
@@ -490,6 +553,53 @@ private struct TimeDisplayLabel: View {
         let seconds = totalSeconds % 60
         let frac = (ms % 1000) / 10
         return String(format: "%d:%02d.%02d", minutes, seconds, frac)
+    }
+}
+
+/// Invisible observer that keeps the play marker on-screen during
+/// playback (B93). Watches `viewModel.playPositionMS`; when the marker
+/// nears the right edge of the viewport, jump-scrolls so the marker
+/// sits ~10% from the left (one-viewport desktop parity). Also handles
+/// the marker having wandered off the left edge (seek-backwards during
+/// playback, or a sequence that wrapped).
+///
+/// Suppressed for 1.2 s after the user last touched any of the grid
+/// canvases so a scroll-during-playback has time to be inspected
+/// before the playhead yanks the viewport back. Suppressed outright
+/// during effect-scrub (`isScrubbing`) so the scrub loop doesn't
+/// reel the viewport around its narrow range.
+private struct AutoFollowPlayhead: View {
+    @Environment(SequencerViewModel.self) var viewModel
+    let timeline: TimelineState
+    let availableContentWidth: CGFloat
+
+    private static let suppressionWindow: CFTimeInterval = 1.2
+    private static let leftMarginFrac: CGFloat = 0.10
+
+    var body: some View {
+        Color.clear
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+            .onChange(of: viewModel.playPositionMS) { _, newMS in
+                guard viewModel.isPlaying else { return }
+                if viewModel.isScrubbing { return }
+                if availableContentWidth <= 1 { return }
+                let since = CACurrentMediaTime() - timeline.lastUserInteractionAt
+                if since < Self.suppressionWindow { return }
+
+                let worldX = CGFloat(newMS) * timeline.pixelsPerMS
+                let cur = timeline.hScrollOffsetPx
+                let leftMargin = availableContentWidth * Self.leftMarginFrac
+                let rightEdge = cur + availableContentWidth
+                // Marker fell off the right: jump so marker is at leftMargin.
+                if worldX > rightEdge {
+                    timeline.hScrollOffsetPx = max(0, worldX - leftMargin)
+                }
+                // Marker fell off the left: same — reseat at leftMargin.
+                else if worldX < cur {
+                    timeline.hScrollOffsetPx = max(0, worldX - leftMargin)
+                }
+            }
     }
 }
 

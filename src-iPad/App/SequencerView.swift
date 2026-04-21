@@ -184,16 +184,16 @@ struct SequencerView: View {
             // invisible while still reachable by the key event.
             Group {
                 Button("Delete") {
-                    viewModel.deleteSelectedEffect()
+                    viewModel.deleteSelectedEffects()
                 }
                 .keyboardShortcut(.delete, modifiers: [])
-                .disabled(viewModel.selectedEffect == nil)
+                .disabled(viewModel.selectedEffect == nil && viewModel.selectedEffects.isEmpty)
 
                 Button("Delete Forward") {
-                    viewModel.deleteSelectedEffect()
+                    viewModel.deleteSelectedEffects()
                 }
                 .keyboardShortcut(.deleteForward, modifiers: [])
-                .disabled(viewModel.selectedEffect == nil)
+                .disabled(viewModel.selectedEffect == nil && viewModel.selectedEffects.isEmpty)
 
                 Button("Copy") { viewModel.copySelectedEffect() }
                     .keyboardShortcut("c", modifiers: [.command])

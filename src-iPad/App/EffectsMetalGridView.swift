@@ -17,6 +17,12 @@ struct EffectsMetalGridView: UIViewRepresentable {
     let metrics: GridMetrics
     let pixelsPerMS: CGFloat
     let selection: SequencerViewModel.EffectSelection?
+    /// Full selection set (B1 marquee multi-select). Every member is
+    /// drawn with the selection bracket colour. When `count == 1` the
+    /// single member coincides with `selection` and shows edge + fade
+    /// drag handles; when `count > 1`, handles are suppressed (bulk
+    /// drag/resize are follow-up work).
+    let selectedEffects: Set<SequencerViewModel.EffectSelection>
     let activeDrag: SequencerViewModel.ActiveDrag?
     let timingMarkTimesMS: [Int]
     /// Bumped by the view model whenever a render kickoff has
@@ -44,6 +50,15 @@ struct EffectsMetalGridView: UIViewRepresentable {
     let fadeProvider: (Int, Int) -> (Float, Float)
     let iconProvider: (_ effectName: String, _ bucket: Int) -> Data?
     let document: XLSequenceDocument
+    /// Fired on pan/pinch `.began` and during `.changed` ticks so the
+    /// outer view can note when the user is actively scrolling. Used by
+    /// B93 follow-playhead to suppress auto-scroll during + briefly
+    /// after user interaction.
+    var onUserInteraction: (() -> Void)?
+    /// Called when a two-finger marquee drag lands, passing the set of
+    /// selections that fall inside the rectangle. Wired to
+    /// `SequencerViewModel.setMultiSelection`.
+    var onMarqueeSelect: ((Set<SequencerViewModel.EffectSelection>) -> Void)?
 
     func makeUIView(context: Context) -> EffectsMetalGridMTKView {
         let v = EffectsMetalGridMTKView()
@@ -64,6 +79,7 @@ struct EffectsMetalGridView: UIViewRepresentable {
         ctx.metrics = metrics
         ctx.pixelsPerMS = pixelsPerMS
         ctx.selection = selection
+        ctx.selectedEffects = selectedEffects
         ctx.activeDrag = activeDrag
         ctx.timingMarkTimesMS = timingMarkTimesMS
         ctx.scrollOffsetX = scrollOffsetX
@@ -74,6 +90,8 @@ struct EffectsMetalGridView: UIViewRepresentable {
         ctx.iconProvider = iconProvider
         ctx.onUpdateScrollX = { newX in scrollOffsetX = newX }
         ctx.onUpdateScrollY = { newY in scrollOffsetY = newY }
+        ctx.onUserInteraction = onUserInteraction
+        ctx.onMarqueeSelect = onMarqueeSelect
         view.setNeedsDisplay()
     }
 
@@ -95,6 +113,7 @@ struct EffectsMetalGridView: UIViewRepresentable {
         var metrics = GridMetrics.standard
         var pixelsPerMS: CGFloat = 0.1
         var selection: SequencerViewModel.EffectSelection?
+        var selectedEffects: Set<SequencerViewModel.EffectSelection> = []
         var activeDrag: SequencerViewModel.ActiveDrag?
         var timingMarkTimesMS: [Int] = []
         var scrollOffsetX: CGFloat = 0
@@ -105,6 +124,14 @@ struct EffectsMetalGridView: UIViewRepresentable {
         var iconProvider: (String, Int) -> Data? = { _, _ in nil }
         var onUpdateScrollX: (CGFloat) -> Void = { _ in }
         var onUpdateScrollY: (CGFloat) -> Void = { _ in }
+        var onUserInteraction: (() -> Void)?
+        var onMarqueeSelect: ((Set<SequencerViewModel.EffectSelection>) -> Void)?
+
+        // Marquee-select state. Stored in *world* (content) coords so
+        // the rectangle stays anchored correctly if the user scrolls
+        // the viewport while a marquee is in flight.
+        var marqueeStartWorld: CGPoint?
+        var marqueeCurrentWorld: CGPoint?
 
         // Gesture-local state.
         struct DragLocal {
@@ -285,7 +312,18 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
                 let x1 = CGFloat(startMS) * c.pixelsPerMS - c.scrollOffsetX
                 let x2 = CGFloat(endMS)   * c.pixelsPerMS - c.scrollOffsetX
                 if x2 < 0 || x1 > viewport.width { continue }
-                let isSel = (c.selection?.rowIndex == row.id && c.selection?.effectIndex == eIdx)
+                // Single-select when count <= 1 uses c.selection. For
+                // multi-select we treat every member of `selectedEffects`
+                // as selected; `selection` is nil in that case.
+                let isSel: Bool
+                if c.selectedEffects.count > 1 {
+                    isSel = c.selectedEffects.contains(where: {
+                        $0.rowIndex == row.id && $0.effectIndex == eIdx
+                    })
+                } else {
+                    isSel = (c.selection?.rowIndex == row.id
+                             && c.selection?.effectIndex == eIdx)
+                }
                 let locked = c.stateLookup.isLocked(row.id, eIdx)
                 let disabled = c.stateLookup.isDisabled(row.id, eIdx)
                 let col: (CGFloat, CGFloat, CGFloat)
@@ -540,6 +578,34 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
 
         // Drag feedback pill.
         drawDragPill(bridge: bridge, viewport: viewport, c: c)
+
+        // B1 marquee rectangle overlay. Semi-transparent blue fill
+        // with a solid-blue stroke; keeps the viewport's local
+        // coords since we translate world → view here.
+        if let start = c.marqueeStartWorld,
+           let end = c.marqueeCurrentWorld {
+            let x1 = min(start.x, end.x) - c.scrollOffsetX
+            let x2 = max(start.x, end.x) - c.scrollOffsetX
+            let y1 = min(start.y, end.y) - c.scrollOffsetY
+            let y2 = max(start.y, end.y) - c.scrollOffsetY
+            let w = max(1, x2 - x1)
+            let h = max(1, y2 - y1)
+            bridge.beginFilledRectBatch()
+            bridge.appendFilledRectX(x1, y: y1, w: w, h: h,
+                                      r: 0.35, g: 0.60, b: 1.0, a: 0.20)
+            bridge.flushFilledRectBatch()
+            bridge.beginLineBatch()
+            let lr: CGFloat = 0.45, lg: CGFloat = 0.70, lb: CGFloat = 1.0
+            bridge.appendLineX1(x1, y1: y1, x2: x2, y2: y1,
+                                 r: lr, g: lg, b: lb, a: 0.95)
+            bridge.appendLineX1(x2, y1: y1, x2: x2, y2: y2,
+                                 r: lr, g: lg, b: lb, a: 0.95)
+            bridge.appendLineX1(x2, y1: y2, x2: x1, y2: y2,
+                                 r: lr, g: lg, b: lb, a: 0.95)
+            bridge.appendLineX1(x1, y1: y2, x2: x1, y2: y1,
+                                 r: lr, g: lg, b: lb, a: 0.95)
+            bridge.flushLineBatch()
+        }
     }
 
     private func drawFadeDiamond(bridge: XLGridMetalBridge,
@@ -633,8 +699,23 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
         addGestureRecognizer(tap)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(onPan(_:)))
         pan.delegate = del
+        // Single-finger pan: scroll or effect-drag. Clamping prevents
+        // it from also grabbing the two-finger marquee pan.
+        pan.minimumNumberOfTouches = 1
+        pan.maximumNumberOfTouches = 1
         addGestureRecognizer(pan)
         ownPan = pan
+        // B1: two-finger drag → marquee multi-select (matches iPad
+        // Numbers/Keynote). Coexists with the pinch recognizer below
+        // — when the user keeps their fingers at roughly constant
+        // distance this wins; when they spread/pinch, pinch wins.
+        // Minor scale jitter during a marquee is tolerable.
+        let marquee = UIPanGestureRecognizer(target: self,
+                                              action: #selector(onMarqueePan(_:)))
+        marquee.minimumNumberOfTouches = 2
+        marquee.maximumNumberOfTouches = 2
+        marquee.delegate = del
+        addGestureRecognizer(marquee)
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(onPinch(_:)))
         pinch.delegate = del
         addGestureRecognizer(pinch)
@@ -739,6 +820,17 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
         guard g.state == .began, let c = coordinator else { return }
         let p = g.location(in: self)
         guard let hit = hitTestEffect(at: p) else { return }
+        // When the long-press lands on a member of the current
+        // multi-select, preserve the set and request a bulk context
+        // menu. Otherwise fall through to the single-effect path
+        // (collapsing any existing multi-select to this one effect).
+        let isMemberOfMulti = c.selectedEffects.count > 1 && c.selectedEffects.contains(where: {
+            $0.rowIndex == hit.rowIndex && $0.effectIndex == hit.effectIndex
+        })
+        if isMemberOfMulti {
+            c.actions.onRequestContextMenu(hit.rowIndex, hit.effectIndex, p)
+            return
+        }
         c.actions.onTapEffect(hit.rowIndex, hit.effectIndex)
         c.actions.onRequestContextMenu(hit.rowIndex, hit.effectIndex, p)
     }
@@ -749,10 +841,12 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
         case .began:
             pinchAnchorX = g.location(in: self).x
             pinchLastScale = 1
+            c.onUserInteraction?()
         case .changed:
             let delta = g.scale / pinchLastScale
             pinchLastScale = g.scale
             c.actions.onPinchZoom(delta, pinchAnchorX + c.scrollOffsetX)
+            c.onUserInteraction?()
         default:
             break
         }
@@ -773,6 +867,7 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
                 c.panStartScrollX = c.scrollOffsetX
                 c.panStartScrollY = c.scrollOffsetY
             }
+            c.onUserInteraction?()
         case .changed:
             if c.drag != nil {
                 updateEffectDrag(g: g, c: c)
@@ -784,6 +879,7 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
                 c.onUpdateScrollX(max(0, c.panStartScrollX - t.x))
                 c.onUpdateScrollY(max(0, c.panStartScrollY - t.y))
             }
+            c.onUserInteraction?()
         case .ended, .cancelled, .failed:
             stopAutoScroll(c: c)
             if let _ = c.drag {
@@ -792,6 +888,93 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
         default:
             break
         }
+    }
+
+    // MARK: - B1 marquee select (two-finger drag)
+
+    @objc func onMarqueePan(_ g: UIPanGestureRecognizer) {
+        guard let c = coordinator else { return }
+        switch g.state {
+        case .began:
+            // Treat the midpoint of the two fingers as the marquee
+            // anchor. Stored in world coords so the rectangle stays
+            // put if the view's hScrollOffsetPx changes during the
+            // drag (currently unlikely — we don't scroll during
+            // marquee — but kept consistent with effect-drag math).
+            let p = g.location(in: self)
+            c.marqueeStartWorld = CGPoint(x: p.x + c.scrollOffsetX,
+                                           y: p.y + c.scrollOffsetY)
+            c.marqueeCurrentWorld = c.marqueeStartWorld
+            setNeedsDisplay()
+        case .changed:
+            guard c.marqueeStartWorld != nil else { return }
+            let p = g.location(in: self)
+            c.marqueeCurrentWorld = CGPoint(x: p.x + c.scrollOffsetX,
+                                             y: p.y + c.scrollOffsetY)
+            setNeedsDisplay()
+        case .ended:
+            guard let start = c.marqueeStartWorld,
+                  let end = c.marqueeCurrentWorld else {
+                c.marqueeStartWorld = nil
+                c.marqueeCurrentWorld = nil
+                setNeedsDisplay()
+                return
+            }
+            let rect = CGRect(x: min(start.x, end.x),
+                              y: min(start.y, end.y),
+                              width: abs(end.x - start.x),
+                              height: abs(end.y - start.y))
+            let hits = marqueeHits(worldRect: rect, c: c)
+            c.marqueeStartWorld = nil
+            c.marqueeCurrentWorld = nil
+            setNeedsDisplay()
+            // Tiny rectangles (accidental two-finger taps) — leave
+            // existing selection alone. 6 px minimum in each axis.
+            if rect.width < 6 && rect.height < 6 { return }
+            c.onMarqueeSelect?(hits)
+        case .cancelled, .failed:
+            c.marqueeStartWorld = nil
+            c.marqueeCurrentWorld = nil
+            setNeedsDisplay()
+        default:
+            break
+        }
+    }
+
+    /// Compute which effects lie inside a world-space marquee rectangle.
+    /// An effect qualifies when its row is vertically overlapped by the
+    /// rectangle AND its `[startMS, endMS]` range overlaps the
+    /// rectangle's x range. Pure overlap (not containment) — matches
+    /// desktop's `EffectsGrid::SelectEffectsInRegion` behaviour.
+    private func marqueeHits(worldRect: CGRect,
+                              c: EffectsMetalGridView.Coordinator)
+        -> Set<SequencerViewModel.EffectSelection> {
+        guard c.pixelsPerMS > 0 else { return [] }
+        var result: Set<SequencerViewModel.EffectSelection> = []
+        var rowTop: CGFloat = 0
+        for row in c.rows {
+            let h = (row.id == c.selection?.rowIndex)
+                ? c.metrics.selectedRowHeight : c.metrics.rowHeight
+            let rowBot = rowTop + h
+            // Vertical overlap check.
+            if rowBot < worldRect.minY || rowTop > worldRect.maxY {
+                rowTop += h
+                continue
+            }
+            let leftMS = Int(worldRect.minX / c.pixelsPerMS)
+            let rightMS = Int(worldRect.maxX / c.pixelsPerMS)
+            for (eIdx, effect) in row.effects.enumerated() {
+                if effect.endTimeMS < leftMS { continue }
+                if effect.startTimeMS > rightMS { break }
+                result.insert(.init(rowIndex: row.id,
+                                     effectIndex: eIdx,
+                                     name: effect.name,
+                                     startTimeMS: effect.startTimeMS,
+                                     endTimeMS: effect.endTimeMS))
+            }
+            rowTop += h
+        }
+        return result
     }
 
     // MARK: - Drag lifecycle

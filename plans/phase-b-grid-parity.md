@@ -103,13 +103,38 @@ adjacent layer when clicking.
 
 iPad: single tap.
 
-- **Gap B1 — Multi-select.** Marquee (two-finger drag? long-press
-  + drag? dedicated select-mode toggle?) returning a
-  `Set<EffectSelection>` that the rest of the app reads. This is
-  the blocker for most other gaps in the list. **P0.**
+- **Gap B1 — Multi-select.** **[landed 2026-04-20].** Two-finger
+  drag on the effects grid opens a marquee rectangle; on release
+  every effect whose `[startMS, endMS]` range overlaps the rect
+  AND whose row is vertically inside the rect becomes selected.
+  `EffectSelection` is now `Hashable`; `SequencerViewModel`
+  exposes `selectedEffects: Set<EffectSelection>` which always
+  mirrors `selectedEffect` (single-select tap fills it with one;
+  marquee fills it with N; clear empties it). When `N > 1` the
+  inspector + scrub are suppressed and drag handles render only
+  for `N == 1`. Bulk ops landed: `deleteSelectedEffects()`
+  (groups by row + deletes descending-effectIndex for safe
+  index-shift handling, single undo group),
+  `toggleLockSelectedEffects()`, `toggleDisableSelectedEffects()`.
+  Long-press on a member of a multi-selection surfaces a bulk
+  context menu (Delete N Effects / Lock-Unlock N / Disable-Enable
+  N / Deselect All) instead of collapsing to single. The
+  existing single-finger pan gesture was clamped to
+  `maximumNumberOfTouches = 1` so a two-finger drag can't grab
+  its slot. Copy/paste on multi-select deferred to B98
+  (multi-effect clipboard with relative timing).
 - **Gap B2 — Select all effects in row / column / timing mark.**
-  Row-heading long-press entry *and* grid-context-menu entry.
-  Trivial once B1 exists. **P1.**
+  **[landed 2026-04-20, row + column].** `ModelRowHeader`'s
+  long-press menu gains "Select All Effects in Row"; the
+  single-effect long-press menu gains "Select All in Row" and
+  "Select All in Column" (column span = the long-pressed
+  effect's own `[startMS, endMS]`). Both entries call into new
+  `SequencerViewModel.selectAllEffectsInRow(rowIndex:)` /
+  `selectAllEffectsInColumn(spanStartMS:spanEndMS:)` which
+  build a Set<EffectSelection> and dispatch through
+  `setMultiSelection`. Timing-mark-based "Select Overlapping
+  Effects" deferred along with the rest of timing-mark editing
+  (B67-B72).
 - **Gap B3 — Tab-to-next-effect.** Keyboard hardware only; iPad
   arrow-keys already move selection row-ward and column-ward,
   but Tab / Shift+Tab isn't bound. **P2.**
@@ -142,9 +167,18 @@ the *range* and *snap* ops.
 All depend on B1.
 
 - **Gap B8 — Align Start / End / Both / Centerpoints / Match
-  Duration.** Five align ops in the desktop right-click menu. All
-  trivial math; none exposed on iPad. **P0** (this is one of the
-  top two things missing from the context menu).
+  Duration.** **[landed 2026-04-20].** Five entries on the
+  multi-select context menu (2+ effects required); single undo
+  group per op. Anchor rule: earliest-starting selected effect
+  for start/both/match/centers, latest-ending for end (desktop
+  uses the "last-clicked primary" but iPad marquee has no
+  primary, so we pick deterministically by position).
+  `SequencerViewModel.alignSelectedEffects(_:)` snapshots target
+  moves first, then re-finds each effect by its original
+  `startMS` on each iteration so index-shifts from earlier moves
+  in the same loop don't miss-target. Same-row aligns that would
+  overlap are rejected by the bridge's validation per-effect;
+  cross-row aligns (the common case) go through cleanly.
 - **Gap B9 — Shift-Align Start / End.** Slide selection to
   align without overlapping. **P1.**
 - **Gap B10 — Align to Closest Timing Mark.** Snap selected
@@ -152,9 +186,15 @@ All depend on B1.
   track. **P1.**
 - **Gap B11 — Close Gap.** Remove space between two selected
   effects. **P1.**
-- **Gap B12 — Split.** Split selected effect at the play marker
-  (or at the long-press location). Split-at-play-marker is a
-  single-effect op, so it *does not* need B1. **P0.**
+- **Gap B12 — Split.** **[landed 2026-04-20].** Single-effect
+  context menu entry "Split at Play Marker"; only shown when
+  `playPositionMS` lies strictly inside the selected effect's
+  range (via `canSplitSelectedAtPlayMarker`).
+  `splitSelectedEffectAtPlayMarker()` captures the original
+  name/settings/palette, deletes the original, then adds two
+  halves (`[origStart, marker]` + `[marker, origEnd]`) carrying
+  the same settings+palette. All three ops run inside one
+  `UndoManager` group so ⌘Z reverses the whole split.
 - **Gap B13 — Extend effect to next / previous.** Keyboard-only
   on desktop; handy. **P2.**
 - **Gap B14 — Paste by cell.** Desktop paste respects the
@@ -220,15 +260,31 @@ drag pill label.
 
 What desktop renders that iPad doesn't:
 
-- **Gap B25 — Effect background palette colour.** Desktop's effect
-  rectangle uses a per-effect-type colour (e.g. Spirals is purple,
-  Fire is orange). iPad's rectangle is "light gray" for all
-  unselected effects. Makes the grid look homogeneous from a
-  distance. **P1.**
+- **Gap B25 — Bracket colours sourced from `ColorManager`.** The
+  iPad grid hardcodes bracket RGB (`EffectsMetalGridView.swift:292–295`
+  uses literal `(0.85,0.85,0.85)` for unselected, `(1.00,0.85,0.25)`
+  for selected, `(0.65,0.80,1.00)` for locked, `(0.45,0.45,0.45)` for
+  disabled). Desktop sources the same visual states from
+  `ColorManager::COLOR_EFFECT_DEFAULT` / `_SELECTED` / `_LOCKED` /
+  `_DISABLED` (`EffectsGrid.cpp:6877–6888`) so user-customised
+  palettes round-trip. Route iPad bracket colours through the
+  existing `ColorManager` bridge. **Note:** desktop is *not*
+  per-effect-type coloured at the bracket level — the "per-type
+  visual" comes from effect-specific `DrawEffectBackground`
+  overrides (Spirals, Fire, Color Wash, etc.), which BM-6 already
+  wired in; see B26. **P2** (down from P1 — effect backgrounds
+  already carry the per-type visual).
 - **Gap B26 — Colour-curve / gradient preview inside effect bar.**
-  If an effect's palette slot 1 carries a ColorCurve, desktop
-  renders the gradient as the effect's fill so the user can see
-  the time colour sweep at a glance. iPad: flat rectangle. **P1.**
+  **Likely already works via BM-6** — 14 effects override
+  `DrawEffectBackground` (Color Wash, On, Morph, Galaxy,
+  Shockwave, Fan, Twinkle, Pictures, Fireworks, Ripple, etc.) to
+  paint palette gradients, and BM-6 runs a dedicated background
+  pass calling `appendEffectBackgroundForRow:...` →
+  `RenderableEffect::DrawEffectBackground`
+  (`EffectsMetalGridView.swift:335–375`). **Needs device-side
+  verify** on a sequence with a Color Wash or On effect using a
+  ColorCurve palette. If the gradient renders, B26 is closed.
+  **Verify-only.**
 - **Gap B27 — Node-level colour-channel stripes.** For node-level
   effects on multi-channel models (RGBW etc.), desktop paints
   thin stripes for each channel. **P2.**
@@ -494,20 +550,35 @@ Partially present: the selection-scoped preview loop runs when an
 
 Most behaviour here works. The gaps:
 
-- **Gap B93 — Follow-playhead during playback.** During play,
-  the grid does not auto-scroll to keep the play marker in
-  view. Desktop's behaviour: when the marker crosses the right
-  edge, jump-scroll one viewport; configurable. **P0** —
-  noticeable the first time you hit play on a long sequence.
+- **Gap B93 — Follow-playhead during playback.** **[landed
+  2026-04-20].** `AutoFollowPlayhead` (invisible `Color.clear`
+  subview in `SequencerGridV2View`) observes
+  `viewModel.playPositionMS` via `.onChange`. When the marker
+  crosses the right edge (or wanders left of the viewport,
+  e.g. from a reverse seek), it jump-scrolls so the marker sits
+  ~10% from the left — one-viewport desktop parity.
+  Suppressed for 1.2 s after any pan/pinch on any of the three
+  Metal canvases (tracked via
+  `TimelineState.lastUserInteractionAt`, updated by a new
+  `onUserInteraction` closure threaded through
+  `EffectsMetalGridView` / `TimingEffectsMetalGridView` /
+  `TopChromeMetalGridView`) so a user who scrolls during
+  playback has time to inspect the new region before the
+  playhead pulls the viewport back. Also suppressed outright
+  during effect-scrub (`isScrubbing`).
 - **Gap B94 — Visible scrollbars.** No scrollbars on iPad. Pan
   gesture is the only scroll. Fine on touch, rough with a
   trackpad. iPadOS 26 supports compact scrollbars via
   `ScrollView`; the Metal-backed grid needs a custom
   overlay. **P1.**
 - **Gap B95 — Horizontal scroll via scroll-wheel / trackpad
-  two-finger.** Pan gesture probably already catches this but
-  not verified on-device with a trackpad. **P1** — verify,
-  may already work.
+  two-finger.** The pan recognizer on `EffectsMetalGridView.swift`
+  is a plain `UIPanGestureRecognizer` with no
+  `allowedScrollTypesMask` set (defaults to `.continuous`, which
+  excludes scroll-wheel / discrete trackpad events). Fix is a
+  one-liner: set `allowedScrollTypesMask = .all` on the pan
+  recognizers in the grid, timing, and top-chrome canvases.
+  **P1 — trivial.**
 - **Gap B96 — Scroll momentum.** iPad scroll stops when
   finger lifts. Small UX gap vs SwiftUI's stock ScrollView.
   **P2.**
@@ -554,18 +625,18 @@ Severity key:
 
 | # | Gap | Area | Severity |
 |---|---|---|---|
-| B1 | Multi-effect selection (marquee / range) | Selection | P0 |
-| B2 | Select all in row / column / timing | Selection | P1 |
+| B1 | Multi-effect selection (marquee / range) | Selection | ✓ landed |
+| B2 | Select all in row / column (timing deferred) | Selection | ✓ landed |
 | B3 | Tab / Shift+Tab effect navigation | Selection | P2 |
 | B4 | Shift / Ctrl arrow stretch / nudge | Editing | P1 |
 | B5 | Snap-to-timing on resize + move | Editing | P1 |
 | B6 | Nudge by timing mark | Editing | P2 |
 | B7 | Edge-unlink indicator + command | Editing | P2 |
-| B8 | Align Start / End / Both / Centers / Match | Editing | P0 |
+| B8 | Align Start / End / Both / Centers / Match | Editing | ✓ landed |
 | B9 | Shift-Align Start / End | Editing | P1 |
 | B10 | Align to closest timing mark | Editing | P1 |
 | B11 | Close Gap | Editing | P1 |
-| B12 | Split at play marker | Editing | P0 |
+| B12 | Split at play marker | Editing | ✓ landed |
 | B13 | Extend effect to next / previous | Editing | P2 |
 | B14 | Paste by cell | Editing | P1 |
 | B15 | Randomize / Reset / Lock / Disable on selection | Editing | P1 |
@@ -578,8 +649,8 @@ Severity key:
 | B22 | Reset effect to defaults | Ctx menu | P2 |
 | B23 | Duplicate across models | Ctx menu | P2 |
 | B24 | Find possible source effects | Ctx menu | P2 |
-| B25 | Effect-type background palette colour | Visual | P1 |
-| B26 | ColorCurve gradient preview in effect bar | Visual | P1 |
+| B25 | Bracket colours sourced from `ColorManager` | Visual | P2 |
+| B26 | ColorCurve gradient preview in effect bar | Visual | Verify |
 | B27 | Node-level channel stripes | Visual | P2 |
 | B28 | Reference / previous-selection indicator | Visual | P2 |
 | B29 | Text fade / size stepping | Visual | P2 |
@@ -644,7 +715,7 @@ Severity key:
 | B90 | Add / Remove "-shimmer" suffix | Timing | P2 |
 | B91 | Divide Timings (Halve) | Timing | P2 |
 | B92 | Double-tap timing mark → loop-play region | Timing | P2 |
-| B93 | Follow-playhead during playback | Scroll | P0 |
+| B93 | Follow-playhead during playback | Scroll | ✓ landed |
 | B94 | Visible scrollbars | Scroll | P1 |
 | B95 | Trackpad two-finger / wheel scroll | Scroll | P1 |
 | B96 | Scroll momentum | Scroll | P2 |
@@ -653,7 +724,11 @@ Severity key:
 | B99 | System pasteboard (UIPasteboard) integration | Clipboard | P2 |
 | B100 | Paste-replacing-existing with confirmation | Clipboard | P2 |
 
-Counts: 12 × P0, 35 × P1, 50 × P2.
+Counts: 12 × P0, 33 × P1, 52 × P2, 1 × Verify.
+(Post-2026-04-20 verification pass: B25 dropped P1 → P2 after
+confirming desktop also uses a single bracket colour; B26 dropped
+P1 → Verify after confirming BM-6 already wires the same
+`DrawEffectBackground` path desktop uses for gradients.)
 
 ---
 
@@ -762,18 +837,37 @@ dialog, B94 visible scrollbars.
 ## 12. What this plan does **not** claim
 
 This is a static analysis of source — `EffectsGrid.cpp` vs
-`EffectsMetalGridView.swift` and friends. A few categories need
-a **device-side pass** to confirm or rule out:
+`EffectsMetalGridView.swift` and friends. A few categories were
+flagged as needing a **device-side pass** to confirm or rule out.
+2026-04-20 source-side verification pass results:
 
-- Is every effect-type rectangle really flat grey, or does the
-  palette colour flow through today and the gap is actually
-  smaller than B25 says? (Skim `effectColor` lookups in the
-  Metal bridge.)
-- Does the trackpad two-finger scroll work in iPadOS 26 via the
-  existing pan recogniser? (B95.)
-- Do the existing phoneme / word data from a desktop-authored
-  sequence render in *any* form on iPad, or is B88 a total
-  blank? Quick check with a known Papagayo sequence.
+- **B25 — "flat grey" framing.** *Resolved via source.* The iPad
+  *does* hardcode bracket RGB in `EffectsMetalGridView.swift:292–
+  295`, but desktop also uses a single colour family
+  (`COLOR_EFFECT_DEFAULT` / `_SELECTED` / `_LOCKED` / `_DISABLED`
+  in `EffectsGrid.cpp:6877–6888`), *not* per-effect-type. The
+  per-type visual comes from `DrawEffectBackground` overrides,
+  which BM-6 already wired. B25 rescoped to "source bracket
+  colours from `ColorManager`"; severity dropped to P2.
+- **B26 — ColorCurve gradient.** *Likely already works.* 14
+  effects override `DrawEffectBackground` (Color Wash, On, Morph,
+  Galaxy, Shockwave, Fan, Twinkle, Pictures, Fireworks, Ripple,
+  etc.); BM-6 runs the background pass calling that override.
+  Reclassed to **Verify** — needs a device-side check with a
+  known ColorCurve sequence. If the gradient renders, close B26.
+- **B95 — trackpad scroll.** *Resolved via source.* The pan
+  recognizer has no `allowedScrollTypesMask` set → defaults to
+  `.continuous` → excludes scroll-wheel / discrete trackpad
+  events. One-line fix (set to `.all`).
+- **B88 — phoneme / word / phrase sub-layer rendering.** *Static
+  check only.* `TimingEffectsMetalGridView.swift:105–165` draws
+  a single row per timing element; `XLSequenceDocument.mm` has
+  `lyricTimingTrackNames` but no phoneme/word bridge surface.
+  Desktop renders phrase / word / phoneme as distinct sub-layer
+  rows with `COLOR_PHRASES` / `COLOR_WORDS` / `COLOR_PHONEMES`
+  (`EffectsGrid.cpp:7034–7038`). Gap confirmed; device-side
+  check still worthwhile to see whether legacy sub-layers at
+  least appear as collapsed/single-row before editing lands.
 
 Confirming / refuting these tightens the plan but doesn't change
 the overall shape: the grid renders; the *authoring* surface

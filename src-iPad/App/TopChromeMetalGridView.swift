@@ -15,6 +15,7 @@ struct TopChromeMetalGridView: UIViewRepresentable {
     @Binding var scrollOffsetX: CGFloat
     let onSeek: (Int) -> Void
     let onPinchZoom: (CGFloat, CGFloat) -> Void
+    var onUserInteraction: (() -> Void)?
 
     func makeUIView(context: Context) -> TopChromeMetalMTKView {
         let v = TopChromeMetalMTKView()
@@ -34,6 +35,7 @@ struct TopChromeMetalGridView: UIViewRepresentable {
         c.onSeek = onSeek
         c.onPinchZoom = onPinchZoom
         c.onUpdateScrollX = { scrollOffsetX = $0 }
+        c.onUserInteraction = onUserInteraction
         view.setNeedsDisplay()
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -50,6 +52,7 @@ struct TopChromeMetalGridView: UIViewRepresentable {
         var onSeek: (Int) -> Void = { _ in }
         var onPinchZoom: (CGFloat, CGFloat) -> Void = { _, _ in }
         var onUpdateScrollX: (CGFloat) -> Void = { _ in }
+        var onUserInteraction: (() -> Void)?
         var panStartScrollX: CGFloat = 0
     }
 }
@@ -243,9 +246,11 @@ final class TopChromeMetalMTKView: MTKView, MTKViewDelegate {
         switch g.state {
         case .began:
             c.panStartScrollX = c.scrollOffsetX
+            c.onUserInteraction?()
         case .changed:
             let t = g.translation(in: self)
             c.onUpdateScrollX(max(0, c.panStartScrollX - t.x))
+            c.onUserInteraction?()
         default: break
         }
     }
@@ -256,10 +261,12 @@ final class TopChromeMetalMTKView: MTKView, MTKViewDelegate {
         case .began:
             pinchAnchorX = g.location(in: self).x + c.scrollOffsetX
             pinchLastScale = 1
+            c.onUserInteraction?()
         case .changed:
             let delta = g.scale / pinchLastScale
             pinchLastScale = g.scale
             c.onPinchZoom(delta, pinchAnchorX)
+            c.onUserInteraction?()
         default: break
         }
     }
