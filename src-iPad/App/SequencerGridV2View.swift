@@ -74,6 +74,9 @@ struct SequencerGridV2View: View {
     @State private var showAddTimingTrackAlert: Bool = false
     @State private var newTimingTrackName: String = ""
 
+    /// F-6 Display Elements editor sheet state.
+    @State private var showingDisplayElements: Bool = false
+
     /// B70 rename-timing-mark alert state.
     @State private var renameMarkTarget: TimingMarkMenuTarget?
     @State private var renameMarkText: String = ""
@@ -590,6 +593,11 @@ struct SequencerGridV2View: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        // F-6 — Display Elements editor modal.
+        .sheet(isPresented: $showingDisplayElements) {
+            DisplayElementsSheet()
+                .environment(viewModel)
+        }
         // B70 rename-timing-mark alert.
         .alert("Rename Mark",
                isPresented: Binding(
@@ -750,6 +758,16 @@ struct SequencerGridV2View: View {
                         viewModel.expandAllElements()
                     } label: {
                         Label("Expand All", systemImage: "arrow.up.and.down")
+                    }
+                    // F-6: Display Elements editor. Launches a modal
+                    // sheet that lets the user create / edit views
+                    // and manage per-view model + timing membership.
+                    Divider()
+                    Button {
+                        showingDisplayElements = true
+                    } label: {
+                        Label("Edit Display Elements…",
+                              systemImage: "rectangle.stack.badge.plus")
                     }
                 } label: {
                     HStack(spacing: 2) {

@@ -21,6 +21,7 @@
 #include "render/SequenceMedia.h"
 #include "render/SequenceFile.h"
 #include "utils/UtilFunctions.h"
+#include "render/SequenceViewManager.h"
 #include "effects/RenderableEffect.h"
 #include "effects/EffectManager.h"
 #include "effects/ShaderEffect.h"
@@ -1076,6 +1077,488 @@ static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
     se.SetCurrentView(viewIndex);
     se.SetTimingVisibility(viewName);
     se.PopulateRowInformation();
+}
+
+// MARK: - Display Elements editor (F-6)
+//
+// `SequenceViewManager` owns the view metadata (names + ordered
+// model-name lists); `SequenceElements` owns the parallel
+// `mAllViews[viewIdx]` vector of `Element*`s the grid actually walks
+// for the current view. Every mutation below keeps both in lockstep,
+// marks the sequence dirty so the 500 ms poll activates Save, and
+// posts `XLViewsChanged` so the SwiftUI view picker + any open
+// Display Elements sheet refresh.
+
+- (void)postViewsChanged {
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:@"XLViewsChanged" object:self];
+}
+
+- (BOOL)addViewNamed:(NSString*)name {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (!name) return NO;
+    std::string n = std::string([name UTF8String]);
+    // Trim whitespace to avoid collisions like " Roof" / "Roof".
+    while (!n.empty() && std::isspace((unsigned char)n.front())) n.erase(n.begin());
+    while (!n.empty() && std::isspace((unsigned char)n.back())) n.pop_back();
+    if (n.empty()) return NO;
+    auto& vm = _context->GetSequenceViewManager();
+    if (vm.GetView(n) != nullptr) return NO;  // duplicate
+    vm.AddView(n);
+    // Parallel empty slot on SequenceElements::mAllViews so the new
+    // view index is addressable via GetElement(i, viewIdx).
+    _context->GetSequenceElements().AddView(n);
+    _context->GetSequenceElements().IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
+}
+
+- (BOOL)deleteViewAtIndex:(int)idx {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (idx <= 0) return NO;  // can't delete Master View
+    auto& se = _context->GetSequenceElements();
+    auto& vm = _context->GetSequenceViewManager();
+    if (idx >= vm.GetViewCount()) return NO;
+    std::string name = se.GetViewName(idx);
+    if (name.empty()) return NO;
+
+    // If deleting the currently-active view, fall back to Master first
+    // so row info doesn't dereference a slot that's about to be
+    // erased.
+    bool wasCurrent = (se.GetCurrentView() == idx);
+    if (wasCurrent) {
+        se.SetCurrentView(MASTER_VIEW);
+        se.SetTimingVisibility("Master View");
+    }
+    se.RemoveView(idx);
+    vm.DeleteView(name);
+    if (wasCurrent) {
+        se.PopulateRowInformation();
+    }
+    se.IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
+}
+
+- (BOOL)renameViewAtIndex:(int)idx to:(NSString*)newName {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (idx <= 0) return NO;  // Master View name is fixed
+    if (!newName) return NO;
+    std::string n = std::string([newName UTF8String]);
+    while (!n.empty() && std::isspace((unsigned char)n.front())) n.erase(n.begin());
+    while (!n.empty() && std::isspace((unsigned char)n.back())) n.pop_back();
+    if (n.empty()) return NO;
+    auto& vm = _context->GetSequenceViewManager();
+    if (idx >= vm.GetViewCount()) return NO;
+    if (vm.GetView(n) != nullptr) return NO;  // collision
+    std::string oldName = vm.GetView(idx)->GetName();
+    if (oldName == n) return YES;
+    vm.RenameView(oldName, n);
+    // Desktop doesn't rewrite TimingElement::mViews CSVs on rename —
+    // stale view names there are silently dropped at load. Match that
+    // behaviour to avoid surprising round-trip side effects.
+    _context->GetSequenceElements().IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
+}
+
+- (BOOL)cloneViewAtIndex:(int)idx as:(NSString*)newName {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (!newName) return NO;
+    std::string n = std::string([newName UTF8String]);
+    while (!n.empty() && std::isspace((unsigned char)n.front())) n.erase(n.begin());
+    while (!n.empty() && std::isspace((unsigned char)n.back())) n.pop_back();
+    if (n.empty()) return NO;
+    auto& se = _context->GetSequenceElements();
+    auto& vm = _context->GetSequenceViewManager();
+    if (idx < 0 || idx >= vm.GetViewCount()) return NO;
+    if (vm.GetView(n) != nullptr) return NO;
+
+    SequenceView* src = vm.GetView(idx);
+    if (src == nullptr) return NO;
+    SequenceView* dst = vm.AddView(n);
+    if (dst == nullptr) return NO;
+
+    // Master View model list comes from the live Element set; every
+    // other view stores its own `_modelNames` which we copy directly.
+    if (idx == MASTER_VIEW) {
+        std::string models;
+        for (int i = 0; i < (int)se.GetElementCount(); i++) {
+            Element* elem = se.GetElement(i);
+            if (elem && elem->GetType() == ElementType::ELEMENT_TYPE_MODEL) {
+                if (!models.empty()) models += ",";
+                models += elem->GetName();
+            }
+        }
+        dst->SetModels(models);
+    } else {
+        dst->SetModels(src->GetModelsString());
+    }
+
+    // Parallel mAllViews slot for the new view. Timings that belonged
+    // to the source view follow (desktop `OnButtonCloneClick` copies
+    // the source view's timing memberships onto the clone).
+    se.AddView(n);
+    std::vector<std::string> timings;
+    for (int i = 0; i < (int)se.GetElementCount(idx); i++) {
+        Element* elem = se.GetElement(i, idx);
+        if (elem && elem->GetType() == ElementType::ELEMENT_TYPE_TIMING) {
+            timings.push_back(elem->GetName());
+        }
+    }
+    if (!timings.empty()) {
+        se.AddViewToTimings(timings, n);
+    }
+
+    se.IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
+}
+
+- (BOOL)moveViewUpAtIndex:(int)idx {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    // Master View is locked to index 0; user views occupy 1..N-1.
+    if (idx <= 1) return NO;
+    auto& vm = _context->GetSequenceViewManager();
+    if (idx >= vm.GetViewCount()) return NO;
+    vm.MoveViewUp(idx);
+    _context->GetSequenceElements().IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
+}
+
+- (BOOL)moveViewDownAtIndex:(int)idx {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (idx < 1) return NO;
+    auto& vm = _context->GetSequenceViewManager();
+    if (idx >= vm.GetViewCount() - 1) return NO;
+    vm.MoveViewDown(idx);
+    _context->GetSequenceElements().IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
+}
+
+// MARK: Models in a view
+
+- (NSArray<NSString*>*)modelsInViewAtIndex:(int)idx {
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    if (!_context || !_context->IsSequenceLoaded()) return out;
+    auto& se = _context->GetSequenceElements();
+    auto& vm = _context->GetSequenceViewManager();
+    if (idx < 0 || idx >= vm.GetViewCount()) return out;
+
+    if (idx == MASTER_VIEW) {
+        // Every model Element in load order. Matches desktop
+        // `GetMasterViewModels()` (line 1284 of ViewsModelsPanel.cpp).
+        for (int i = 0; i < (int)se.GetElementCount(); i++) {
+            Element* elem = se.GetElement(i);
+            if (elem && elem->GetType() == ElementType::ELEMENT_TYPE_MODEL) {
+                [out addObject:[NSString stringWithUTF8String:elem->GetName().c_str()]];
+            }
+        }
+    } else {
+        SequenceView* v = vm.GetView(idx);
+        if (!v) return out;
+        for (const auto& m : v->GetModels()) {
+            [out addObject:[NSString stringWithUTF8String:m.c_str()]];
+        }
+    }
+    return out;
+}
+
+- (BOOL)addModel:(NSString*)name toViewAtIndex:(int)idx atPosition:(int)pos {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (idx <= 0) return NO;  // Master membership is derived
+    if (!name || name.length == 0) return NO;
+    std::string n = std::string([name UTF8String]);
+    auto& se = _context->GetSequenceElements();
+    auto& vm = _context->GetSequenceViewManager();
+    SequenceView* v = vm.GetView(idx);
+    if (!v) return NO;
+    // Desktop `ViewsModelsPanel::AddSelectedModels` (non-MASTER path)
+    // auto-brings the model into the sequence via
+    // `AddMissingModelsToSequence` if it's only in the show layout, so
+    // users can pick from the full ModelManager roster when editing a
+    // user view. Match that: if `n` isn't yet an Element but *is* a
+    // known model, add it to Master first.
+    Element* elem = se.GetElement(n);
+    if (elem == nullptr) {
+        Model* m = _context->GetModel(n);
+        if (m == nullptr) return NO;  // not in show at all
+        se.AddMissingModelsToSequence(n);
+        elem = se.GetElement(n);
+        if (elem == nullptr) return NO;
+        elem->SetVisible(true);
+    }
+    if (elem->GetType() != ElementType::ELEMENT_TYPE_MODEL) return NO;
+    if (v->ContainsModel(n)) return NO;
+    v->AddModel(n, pos);
+    if (idx == se.GetCurrentView()) {
+        se.PopulateView(v->GetModelsString(), idx);
+    }
+    se.PopulateRowInformation();
+    se.IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
+}
+
+- (BOOL)removeModel:(NSString*)name fromViewAtIndex:(int)idx {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (idx <= 0) return NO;
+    if (!name || name.length == 0) return NO;
+    std::string n = std::string([name UTF8String]);
+    auto& se = _context->GetSequenceElements();
+    auto& vm = _context->GetSequenceViewManager();
+    SequenceView* v = vm.GetView(idx);
+    if (!v) return NO;
+    if (!v->ContainsModel(n)) return NO;
+    v->RemoveModel(n);
+    if (idx == se.GetCurrentView()) {
+        se.PopulateView(v->GetModelsString(), idx);
+        se.PopulateRowInformation();
+    }
+    se.IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
+}
+
+- (BOOL)moveModel:(NSString*)name inViewAtIndex:(int)idx toPosition:(int)pos {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (idx <= 0) return NO;
+    if (!name || name.length == 0) return NO;
+    std::string n = std::string([name UTF8String]);
+    auto& se = _context->GetSequenceElements();
+    auto& vm = _context->GetSequenceViewManager();
+    SequenceView* v = vm.GetView(idx);
+    if (!v) return NO;
+    if (!v->ContainsModel(n)) return NO;
+    v->RemoveModel(n);
+    v->AddModel(n, pos);
+    if (idx == se.GetCurrentView()) {
+        se.PopulateView(v->GetModelsString(), idx);
+        se.PopulateRowInformation();
+    }
+    se.IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
+}
+
+// MARK: Element roster + visibility
+
+- (NSArray<NSString*>*)allModelNamesInShow {
+    return [self modelsInViewAtIndex:MASTER_VIEW];
+}
+
+- (NSArray<NSString*>*)allTimingTrackNames {
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    if (!_context || !_context->IsSequenceLoaded()) return out;
+    auto& se = _context->GetSequenceElements();
+    for (int i = 0; i < (int)se.GetElementCount(); i++) {
+        Element* elem = se.GetElement(i);
+        if (elem && elem->GetType() == ElementType::ELEMENT_TYPE_TIMING) {
+            [out addObject:[NSString stringWithUTF8String:elem->GetName().c_str()]];
+        }
+    }
+    return out;
+}
+
+- (NSArray<NSString*>*)modelsAvailableInShowLayout {
+    // ModelManager models that are NOT yet an Element in the sequence.
+    // Matches the desktop `ViewsModelsPanel::PopulateModels` logic at
+    // lines 534-552 of ViewsModelsPanel.cpp — walk every Model in the
+    // manager, include those whose name isn't already in the Master
+    // View. Submodels are skipped (desktop never surfaces them as
+    // top-level options); the iPad inherits that by filtering on
+    // `GetDisplayAs() != SubModel`.
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    if (!_context || !_context->IsSequenceLoaded()) return out;
+    auto& se = _context->GetSequenceElements();
+    auto& mm = _context->GetModelManager();
+    for (auto it = mm.begin(); it != mm.end(); ++it) {
+        if (!it->second) continue;
+        if (it->second->GetDisplayAs() == DisplayAsType::SubModel) continue;
+        if (!se.ElementExists(it->first, MASTER_VIEW)) {
+            [out addObject:[NSString stringWithUTF8String:it->first.c_str()]];
+        }
+    }
+    // Sort for predictable ordering — ModelManager iterates in map
+    // order (alphabetical by name) already, but a belt-and-suspenders
+    // sort avoids surprises when the UI diffs the list between calls.
+    [out sortUsingSelector:@selector(localizedCaseInsensitiveCompare:)];
+    return out;
+}
+
+- (BOOL)addModelToMasterView:(NSString*)name {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (!name || name.length == 0) return NO;
+    std::string n = std::string([name UTF8String]);
+    auto& se = _context->GetSequenceElements();
+    if (se.ElementExists(n, MASTER_VIEW)) return NO;
+    // Must be a known model in the show layout.
+    Model* m = _context->GetModel(n);
+    if (m == nullptr) return NO;
+    // Mirror the desktop MASTER_VIEW branch of AddSelectedModels:
+    // create the Element visible and bootstrap one empty effect layer.
+    Element* e = se.AddElement(n, "model",
+                                /*visible=*/true, /*collapsed=*/false,
+                                /*active=*/false, /*selected=*/false,
+                                /*renderDisabled=*/false);
+    if (!e) return NO;
+    e->AddEffectLayer();
+    se.PopulateRowInformation();
+    se.IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
+}
+
+- (BOOL)elementHasEffects:(NSString*)name {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (!name || name.length == 0) return NO;
+    std::string n = std::string([name UTF8String]);
+    Element* elem = _context->GetSequenceElements().GetElement(n);
+    return (elem && elem->HasEffects()) ? YES : NO;
+}
+
+- (BOOL)removeElementFromMasterView:(NSString*)name {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (!name || name.length == 0) return NO;
+    std::string n = std::string([name UTF8String]);
+    auto& se = _context->GetSequenceElements();
+    if (!se.ElementExists(n, MASTER_VIEW)) return NO;
+    // Desktop `RemoveSelectedModels` MASTER_VIEW branch aborts the
+    // render first (issue #4134) to keep render workers from
+    // dereferencing the about-to-be-deleted Element pointers.
+    _context->AbortRender(5000);
+    se.DeleteElement(n);
+    // `DeleteElement` already repopulates row info internally; still
+    // bump the change count + broadcast so the view picker and the
+    // Display Elements sheet refresh.
+    se.IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
+}
+
+- (BOOL)elementVisible:(NSString*)name {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (!name || name.length == 0) return NO;
+    std::string n = std::string([name UTF8String]);
+    Element* elem = _context->GetSequenceElements().GetElement(n);
+    if (!elem) return NO;
+    if (elem->GetType() == ElementType::ELEMENT_TYPE_TIMING) {
+        auto* te = dynamic_cast<TimingElement*>(elem);
+        return te && te->GetMasterVisible() ? YES : NO;
+    }
+    return elem->GetVisible() ? YES : NO;
+}
+
+- (BOOL)setElementVisible:(NSString*)name visible:(BOOL)visible {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (!name || name.length == 0) return NO;
+    std::string n = std::string([name UTF8String]);
+    auto& se = _context->GetSequenceElements();
+    Element* elem = se.GetElement(n);
+    if (!elem) return NO;
+    if (elem->GetType() == ElementType::ELEMENT_TYPE_TIMING) {
+        auto* te = dynamic_cast<TimingElement*>(elem);
+        if (!te) return NO;
+        if (te->GetMasterVisible() == (bool)visible) return YES;
+        te->SetMasterVisible(visible ? true : false);
+        // If we're currently in Master View, the live visibility
+        // needs to track the master flag; SetTimingVisibility reads
+        // the right flag for the active view.
+        se.SetTimingVisibility(se.GetViewName(se.GetCurrentView()));
+    } else {
+        if (elem->GetVisible() == (bool)visible) return YES;
+        elem->SetVisible(visible ? true : false);
+    }
+    se.PopulateRowInformation();
+    se.IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
+}
+
+// MARK: Timing-track per-view membership
+
+- (NSArray<NSString*>*)viewsContainingTiming:(NSString*)timingName {
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    if (!_context || !_context->IsSequenceLoaded()) return out;
+    if (!timingName || timingName.length == 0) return out;
+    std::string n = std::string([timingName UTF8String]);
+    Element* elem = _context->GetSequenceElements().GetElement(n);
+    auto* te = dynamic_cast<TimingElement*>(elem);
+    if (!te) return out;
+    // `mViews` is a comma-separated list of view names. Empty entries
+    // can occur after a delete/rename churn — skip them.
+    std::string csv = te->GetViews();
+    size_t start = 0;
+    while (start <= csv.size()) {
+        size_t pos = csv.find(',', start);
+        std::string part = csv.substr(start, (pos == std::string::npos ? csv.size() : pos) - start);
+        // Trim
+        while (!part.empty() && std::isspace((unsigned char)part.front())) part.erase(part.begin());
+        while (!part.empty() && std::isspace((unsigned char)part.back())) part.pop_back();
+        if (!part.empty()) {
+            [out addObject:[NSString stringWithUTF8String:part.c_str()]];
+        }
+        if (pos == std::string::npos) break;
+        start = pos + 1;
+    }
+    return out;
+}
+
+- (BOOL)addTiming:(NSString*)timingName toViewNamed:(NSString*)viewName {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (!timingName || timingName.length == 0) return NO;
+    if (!viewName || viewName.length == 0) return NO;
+    std::string t = std::string([timingName UTF8String]);
+    std::string v = std::string([viewName UTF8String]);
+    auto& se = _context->GetSequenceElements();
+    // Validate: timing exists and target view exists.
+    Element* elem = se.GetElement(t);
+    if (!elem || elem->GetType() != ElementType::ELEMENT_TYPE_TIMING) return NO;
+    if (_context->GetSequenceViewManager().GetView(v) == nullptr) return NO;
+    se.AddTimingToView(t, v);
+    // Rebind visibility for the currently-active view in case we just
+    // added the timing to it.
+    se.SetTimingVisibility(se.GetViewName(se.GetCurrentView()));
+    se.PopulateRowInformation();
+    se.IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
+}
+
+- (BOOL)removeTiming:(NSString*)timingName fromViewNamed:(NSString*)viewName {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (!timingName || timingName.length == 0) return NO;
+    if (!viewName || viewName.length == 0) return NO;
+    std::string t = std::string([timingName UTF8String]);
+    std::string v = std::string([viewName UTF8String]);
+    auto& se = _context->GetSequenceElements();
+    Element* elem = se.GetElement(t);
+    if (!elem || elem->GetType() != ElementType::ELEMENT_TYPE_TIMING) return NO;
+    int vIdx = _context->GetSequenceViewManager().GetViewIndex(v);
+    if (vIdx < 0) return NO;
+    se.DeleteTimingFromView(t, vIdx);
+    se.SetTimingVisibility(se.GetViewName(se.GetCurrentView()));
+    se.PopulateRowInformation();
+    se.IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
+}
+
+- (BOOL)addTimingToAllViews:(NSString*)timingName {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    if (!timingName || timingName.length == 0) return NO;
+    std::string t = std::string([timingName UTF8String]);
+    auto& se = _context->GetSequenceElements();
+    Element* elem = se.GetElement(t);
+    if (!elem || elem->GetType() != ElementType::ELEMENT_TYPE_TIMING) return NO;
+    se.AddTimingToAllViews(t);
+    se.SetTimingVisibility(se.GetViewName(se.GetCurrentView()));
+    se.PopulateRowInformation();
+    se.IncrementChangeCount(nullptr);
+    [self postViewsChanged];
+    return YES;
 }
 
 - (EffectLayer*)effectLayerForRow:(int)rowIndex {

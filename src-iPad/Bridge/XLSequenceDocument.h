@@ -353,6 +353,107 @@
 - (int)currentViewIndex;
 - (void)setCurrentViewIndex:(int)viewIndex;
 
+// MARK: - Display Elements editor (F-6)
+//
+// View lifecycle + per-view model membership + global element visibility
+// + per-timing-track view membership. Each mutation marks the sequence
+// dirty via `SequenceElements::IncrementChangeCount` and posts
+// `XLViewsChanged` on NotificationCenter so the sequencer view picker
+// and any open Display Elements sheet refresh. When a mutation touches
+// the *current* view, row information is repopulated so a subsequent
+// `reloadRows()` sees the new set.
+
+// Views — CRUD + reorder. `addViewNamed:` / `cloneViewAtIndex:as:`
+// reject empty names and collisions. `deleteViewAtIndex:` refuses the
+// Master View (index 0); callers should disable the delete affordance
+// for that row. `moveView…` operates on the user-view portion of the
+// list — attempting to move the Master View is rejected; moving into
+// index 0 is rejected.
+- (BOOL)addViewNamed:(NSString*)name
+    NS_SWIFT_NAME(addView(named:));
+- (BOOL)deleteViewAtIndex:(int)idx
+    NS_SWIFT_NAME(deleteView(atIndex:));
+- (BOOL)renameViewAtIndex:(int)idx to:(NSString*)newName
+    NS_SWIFT_NAME(renameView(atIndex:to:));
+- (BOOL)cloneViewAtIndex:(int)idx as:(NSString*)newName
+    NS_SWIFT_NAME(cloneView(atIndex:as:));
+- (BOOL)moveViewUpAtIndex:(int)idx
+    NS_SWIFT_NAME(moveViewUp(atIndex:));
+- (BOOL)moveViewDownAtIndex:(int)idx
+    NS_SWIFT_NAME(moveViewDown(atIndex:));
+
+// Model list for the view at `idx`. Master View (0) returns every
+// model Element in the sequence; user views return their
+// `SequenceView` members in stored order.
+- (NSArray<NSString*>*)modelsInViewAtIndex:(int)idx
+    NS_SWIFT_NAME(modelsInView(atIndex:));
+
+// Add / remove / reorder a model in the user view at `idx`. Position
+// is 0-based; `-1` means "end of list". `addModel:` requires the
+// model to already be in the show's Master-View element set (pick
+// from `allModelNamesInShow`); fails with NO otherwise. `moveModel:`
+// removes then re-inserts at the requested position. All three reject
+// index 0 (Master View membership is derived, not stored).
+- (BOOL)addModel:(NSString*)name toViewAtIndex:(int)idx atPosition:(int)pos
+    NS_SWIFT_NAME(addModel(_:toViewAtIndex:atPosition:));
+- (BOOL)removeModel:(NSString*)name fromViewAtIndex:(int)idx
+    NS_SWIFT_NAME(removeModel(_:fromViewAtIndex:));
+- (BOOL)moveModel:(NSString*)name inViewAtIndex:(int)idx toPosition:(int)pos
+    NS_SWIFT_NAME(moveModel(_:inViewAtIndex:toPosition:));
+
+// Roster for the "members" pane of the editor — Master-View *Elements*
+// (models the sequence has opted in, plus every timing track). A model
+// being in the show's `ModelManager` does NOT imply it's in the
+// sequence; Effect Sequences start with zero models here.
+- (NSArray<NSString*>*)allModelNamesInShow;   // Master-View model Elements
+- (NSArray<NSString*>*)allTimingTrackNames;   // every TimingElement
+
+// Models that live in the show layout (`ModelManager`) but are not
+// yet Elements in this sequence. Drives the "Available" pane when the
+// Master View is selected — picking one adds it to the sequence via
+// `addModelToMasterView:`. Empty if no show folder is loaded.
+- (NSArray<NSString*>*)modelsAvailableInShowLayout;
+
+// Add a show-layout model to the sequence's Master View. Creates a
+// new `Element` with one fresh effect layer, matching desktop
+// `ViewsModelsPanel::AddSelectedModels` for the MASTER_VIEW branch.
+// Fails if the name isn't in `ModelManager` or already exists as an
+// Element. Rebuilds row information and fires `XLViewsChanged`.
+- (BOOL)addModelToMasterView:(NSString*)name;
+
+// True iff the named Element has any effects on any of its effect
+// layers. Used by the remove-confirmation dialog to warn users
+// before a `removeElementFromMasterView:` delete (which destroys
+// effects and layers along with the Element).
+- (BOOL)elementHasEffects:(NSString*)name;
+
+// Remove an Element from the sequence entirely (delegates to
+// `SequenceElements::DeleteElement`). Aborts in-flight render jobs
+// first so workers don't dereference the about-to-be-deleted
+// pointers (matches desktop issue #4134). Silently drops any
+// effects on the element. Also removes the element from every user
+// view's model-name list. Returns NO if no such Element exists.
+- (BOOL)removeElementFromMasterView:(NSString*)name;
+
+// Global element visibility. Models drive `Element::SetVisible`; for
+// timings this toggles `TimingElement::SetMasterVisible` (visibility
+// in the Master View). Per-non-Master-view timing visibility is
+// stored in the timing's `views` CSV — see
+// `addTiming:toViewNamed:` below.
+- (BOOL)elementVisible:(NSString*)name;
+- (BOOL)setElementVisible:(NSString*)name visible:(BOOL)visible;
+
+// Per-view membership for a timing track, via
+// `TimingElement::mViews` (comma-separated view names). An entry in
+// the CSV means "this timing is visible when that view is active".
+// The Master-Visible flag (above) governs Master-View visibility
+// separately.
+- (NSArray<NSString*>*)viewsContainingTiming:(NSString*)timingName;
+- (BOOL)addTiming:(NSString*)timingName toViewNamed:(NSString*)viewName;
+- (BOOL)removeTiming:(NSString*)timingName fromViewNamed:(NSString*)viewName;
+// B82 — add a timing track to every non-Master view in one call.
+- (BOOL)addTimingToAllViews:(NSString*)timingName;
+
 // dynamicOptions sources for JSON `choice` properties. Mirrors the desktop
 // repopulate lambdas in JsonEffectPanel (file:1777-1884). Empty arrays on
 // lookup failure — never nil. See EffectPropertyView for dispatch.
