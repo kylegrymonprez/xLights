@@ -191,6 +191,32 @@ class SequencerViewModel {
     var selectedPaletteEffect: String?
     var showInspector = false
 
+    // F-1 scene-level routing. Set to true when the corresponding
+    // preview is showing in its own Window scene. The embedded
+    // version in `SequencerView` swaps for a "docked elsewhere"
+    // placeholder so the user can't accidentally drive two copies.
+    // Flipped by the detached scene's `.onAppear` / `.onDisappear`.
+    var housePreviewDetached: Bool = false
+    var modelPreviewDetached: Bool = false
+    // F-1c: set of inspector tabs currently open in their own
+    // `inspector-tab` scene windows. The sidebar swaps to a
+    // placeholder for any tab in this set.
+    var detachedInspectorTabs: Set<String> = []
+
+    // F-1 restoration guard. iPadOS restores any WindowGroup that
+    // was alive at shutdown, so closing everything and relaunching
+    // can re-spawn a detached preview without the main sequencer.
+    // An explicit user detach inserts the scene's id / tab rawValue
+    // here, and the detached scene's `onAppear` removes it. If the
+    // token is absent when `onAppear` fires, the scene was system-
+    // restored, not user-requested — the root dismisses itself.
+    //
+    // `@ObservationIgnored` because this is ephemeral control flow,
+    // not observable state — we don't want views re-rendering on
+    // token churn.
+    @ObservationIgnored
+    var pendingDetachTokens: Set<String> = []
+
     // F-4 menu-bar routing. The WindowGroup's `.commands { }` block
     // lives at app level, but several actions (Save As file exporter
     // + alerts, Sequence Settings sheet, Display Elements sheet) are

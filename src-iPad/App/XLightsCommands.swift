@@ -173,6 +173,19 @@ struct XLSequencerCommands: Commands {
 
             Divider()
 
+            // F-1 — open / dismiss the dedicated House / Model
+            // Preview scenes + each of the four inspector tabs.
+            // `openWindow` / `dismissWindow` live in Environment
+            // and must be read inside a View body, so the actions
+            // are funnelled through helper views.
+            XLPreviewDetachCommands(viewModel: viewModel)
+
+            Divider()
+
+            XLInspectorDetachCommands(viewModel: viewModel)
+
+            Divider()
+
             Button("Edit Display Elements…") {
                 viewModel.showingDisplayElements = true
             }
@@ -323,5 +336,82 @@ private struct XLZoomCommands: View {
         }
         .keyboardShortcut("=", modifiers: [.command])
         .disabled(timeline == nil)
+    }
+}
+
+// F-1 — menu-bar entries for detaching previews into their own
+// Window scenes. `@Environment(\.openWindow)` and `\.dismissWindow`
+// resolve only inside a View body, so the commands live here and
+// the viewModel is passed in explicitly (Commands can't inject via
+// environment on their own).
+private struct XLPreviewDetachCommands: View {
+    let viewModel: SequencerViewModel
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        if viewModel.housePreviewDetached {
+            Button("Dock House Preview") {
+                dismissWindow(id: "house-preview")
+            }
+        } else {
+            Button("Detach House Preview") {
+                viewModel.pendingDetachTokens.insert("house-preview")
+                openWindow(id: "house-preview")
+            }
+            .disabled(!viewModel.isSequenceLoaded)
+        }
+
+        if viewModel.modelPreviewDetached {
+            Button("Dock Model Preview") {
+                dismissWindow(id: "model-preview")
+            }
+        } else {
+            Button("Detach Model Preview") {
+                viewModel.pendingDetachTokens.insert("model-preview")
+                openWindow(id: "model-preview")
+            }
+            .disabled(!viewModel.isSequenceLoaded)
+        }
+    }
+}
+
+// F-1c — menu entries to open each inspector tab in its own scene
+// window. Each tab has a keyboard shortcut parallel to desktop:
+// ⌥⌘E effect, ⌥⌘C colors, ⌥⌘B blending, ⌥⌘U buffer. Already-open
+// tabs flip to a "Dock …" entry that dismisses the detached scene.
+private struct XLInspectorDetachCommands: View {
+    let viewModel: SequencerViewModel
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        ForEach(InspectorTab.allCases) { tab in
+            if viewModel.detachedInspectorTabs.contains(tab.rawValue) {
+                Button("Dock \(tab.label)") {
+                    dismissWindow(id: "inspector-tab", value: tab)
+                }
+            } else {
+                Button("Open \(tab.label) in New Window") {
+                    viewModel.pendingDetachTokens.insert("inspector-tab:\(tab.rawValue)")
+                    openWindow(id: "inspector-tab", value: tab)
+                }
+                .keyboardShortcut(tab.menuShortcut.key,
+                                   modifiers: tab.menuShortcut.modifiers)
+                .disabled(!viewModel.isSequenceLoaded)
+            }
+        }
+    }
+}
+
+private extension InspectorTab {
+    /// ⌥⌘+letter bindings for "Open <tab> in New Window" menu items.
+    var menuShortcut: (key: KeyEquivalent, modifiers: EventModifiers) {
+        switch self {
+        case .effect:   return ("e", [.command, .option])
+        case .colors:   return ("c", [.command, .option])
+        case .blending: return ("b", [.command, .option])
+        case .buffer:   return ("u", [.command, .option])
+        }
     }
 }

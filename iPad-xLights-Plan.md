@@ -88,7 +88,7 @@ variants in `libdbg-ios/`.
 | C | Effect settings inspector | ✓ complete — two polish follow-ups (MH colour/path authoring, DMX state persistence) tracked in [`plans/followups.md`](plans/followups.md) | — |
 | D | Model Preview + preview polish | ✓ complete — layout-editor overlays parked in [`plans/future-layout-editing.md`](plans/future-layout-editing.md) | [`plans/phase-d-preview.md`](plans/phase-d-preview.md) |
 | E | Sequence management (open / save / new / settings) | ✓ complete — E-1 through E-6 shipped 2026-04-21. Deferred tabs (Timings import/export, Audio Tracks, Data Layers) + `.fseq` emission tracked in [`plans/followups.md`](plans/followups.md) | — |
-| F | Window system + Display Elements | In progress — F-6 Display Elements editor (2026-04-21) and F-4 menu bar / `.commands` (2026-04-21) both landed; F-1 (scene split), F-2 / F-3 / F-5 still open. | [`plans/phase-f-window-system.md`](plans/phase-f-window-system.md) |
+| F | Window system + Display Elements | In progress — F-6 Display Elements editor (2026-04-21), F-4 menu bar / `.commands` (2026-04-21), and F-1 scene-level split (2026-04-21) all landed; F-1 left one scene-restoration quirk (wrong launch geometry after closing main with a detached open) that's deferred to F-5 where per-scene persistence is owned holistically. F-2 / F-3 / F-5 still open. | [`plans/phase-f-window-system.md`](plans/phase-f-window-system.md) |
 | G | Document / iCloud polish | Not started | [`plans/phase-g-document.md`](plans/phase-g-document.md) |
 | H | App Store readiness | Not started | [`plans/phase-h-app-store.md`](plans/phase-h-app-store.md) |
 

@@ -549,6 +549,37 @@ Scene restoration needs verification that: opening a recent sequence
 from the sequence picker still honours the stored scene layout; cold
 launching with no recent sequence starts clean.
 
+### F-5 carryover from F-1 device testing (2026-04-21)
+
+F-1 left scene restoration in an "it works but the launch geometry is
+occasionally wrong" state. F-5 owns the full fix:
+
+- **Wrong-scene-geometry-on-relaunch.** After closing the main window
+  with a detached pane previously open, iPadOS sometimes reuses the
+  last-active scene's geometry on the next launch, so the main
+  sequencer opens at a detached pane's position/size. The current
+  reactive guards — `pendingDetachTokens` check in each detached
+  scene's `onAppear`, synchronous dismiss + `requestSceneSessionDestruction`
+  on main's `.inactive` transition, dirty auto-save — help but don't
+  fully suppress it; the reactive side is always racing iPadOS's
+  state persistence.
+- **Proper fix belongs in F-5** because the correct story is to own
+  per-scene persistence explicitly (`@SceneStorage` per
+  WindowGroup), not to fight the system's default. Options to
+  evaluate in F-5:
+  - `UIApplicationDelegateAdaptor` + per-WindowGroup
+    `UISceneConfiguration` with distinct delegate classes, so
+    restoration can be scoped per scene class.
+  - Destroy all persisted sessions at launch (via AppDelegate) and
+    re-create at `.defaultSize`. Tradeoff: main never remembers
+    its own size, but predictable.
+  - Explicitly write scene geometry to a shared AppStorage key
+    keyed by scene id, and apply on appear instead of trusting
+    iPadOS's cross-session persistence.
+- **Until F-5**, the F-1 hacks stay in place — they're "mostly
+  right" and no data is lost (dirty auto-save handles the
+  pill-close case).
+
 ---
 
 ## F-7. Desktop panels deferred to post-MVP

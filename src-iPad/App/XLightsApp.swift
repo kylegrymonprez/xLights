@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct XLightsApp: App {
@@ -51,11 +52,68 @@ struct XLightsApp: App {
                 break
             }
         }
+
+        // F-1 — detachable House Preview. Opened via
+        // `openWindow(id: "house-preview")` from the embedded
+        // preview's controls overlay or the View menu. The scene
+        // root flips `viewModel.housePreviewDetached` via its
+        // onAppear / onDisappear so the embedded version in
+        // SequencerView swaps for a dock placeholder while the
+        // detached window is alive. Stage Manager on iPadOS 26
+        // lets users drag this to an external display without us
+        // routing screens directly.
+        //
+        // `WindowGroup` (not `Window`) because `Window` is macOS-
+        // only. The Detach button on the embedded overlay is
+        // suppressed when the placeholder is showing, which keeps
+        // the WindowGroup from spawning a second instance.
+        // iPadOS doesn't expose `.defaultLaunchBehavior(.suppressed)`
+        // / `.restorationBehavior(.disabled)` (those are macOS-only),
+        // so the "don't auto-restore detached scenes" behaviour is
+        // implemented in the scene roots via a token check on
+        // `onAppear`: an explicit user detach sets a token, the
+        // detached scene's onAppear consumes it and proceeds;
+        // absence of a token means the scene was system-restored
+        // on launch and the root dismisses itself immediately. That
+        // fixes the "relaunch restores the last-closed scene as
+        // the main window's geometry" bug without losing genuine
+        // user-opened scenes.
+
+        WindowGroup("House Preview", id: "house-preview") {
+            DetachedHousePreviewRoot()
+                .environment(viewModel)
+        }
+        .defaultSize(width: 560, height: 360)
+        .windowResizability(.contentSize)
+
+        // F-1 — detachable Model Preview. Same pattern as House.
+        WindowGroup("Model Preview", id: "model-preview") {
+            DetachedModelPreviewRoot()
+                .environment(viewModel)
+        }
+        .defaultSize(width: 420, height: 320)
+        .windowResizability(.contentSize)
+
+        // F-1c — detachable inspector tabs. Keyed by `InspectorTab`
+        // so each of the four tabs (Effect / Colors / Blending /
+        // Buffer) opens as its own scene window. Opening the same
+        // tab twice focuses the existing window in Stage Manager.
+        // The scene root flips an entry in
+        // `viewModel.detachedInspectorTabs` so the embedded sidebar
+        // swaps to a dock placeholder.
+        WindowGroup(id: "inspector-tab", for: InspectorTab.self) { $tab in
+            DetachedInspectorRoot(tab: tab ?? .effect)
+                .environment(viewModel)
+        }
+        .defaultSize(width: 380, height: 620)
+        .windowResizability(.contentSize)
     }
 }
 
 struct ContentView: View {
     @Environment(SequencerViewModel.self) var viewModel
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.dismissWindow) private var dismissWindow
     @State private var showFolderConfig = false
 
     @State private var showMediaManager = false
@@ -109,6 +167,60 @@ struct ContentView: View {
             } else {
                 autosaveRecoveryDate = nil
                 lastCheckedSequencePath = ""
+            }
+        }
+        // F-1 runtime coupling — when the main window is about to
+        // close, dismiss the detached preview / inspector scenes
+        // and wipe their persisted sessions BEFORE main commits
+        // its own close, so iPadOS doesn't carry a detached's
+        // geometry forward as "the app state".
+        //
+        // We hook `.active → .inactive` (first step of the close
+        // sequence), not `.background` — by the time `.background`
+        // fires, main is already gone and iPadOS has persisted
+        // whatever it was going to persist.
+        //
+        // Differentiating close-this-window from app-wide
+        // background / Control Center: when the user taps the
+        // pill X on main, main alone transitions; the detached
+        // scenes stay `.foregroundActive`. In app-wide
+        // backgrounding, all scenes go `.inactive` simultaneously
+        // so no sibling stays `.foregroundActive`. Using "another
+        // scene is foregroundActive" as the predicate narrows to
+        // the window-close case.
+        //
+        // Dirty handling: Stage Manager's pill close is not
+        // interceptable — any confirmation alert we'd present is
+        // torn down with the scene. Follow the iPad-native pattern
+        // (Notes / Pages / Numbers) and silently save-on-close so
+        // no work is lost. Users who want explicit save/discard
+        // can still use the toolbar X, which prompts via
+        // `showingUnsavedPrompt` as before.
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .inactive else { return }
+            let siblingsActive = UIApplication.shared.connectedScenes.contains { scene in
+                scene.activationState == .foregroundActive
+            }
+            guard siblingsActive else { return }
+
+            if viewModel.isDirty {
+                _ = viewModel.saveSequence()
+            }
+            dismissWindow(id: "house-preview")
+            dismissWindow(id: "model-preview")
+            for tab in InspectorTab.allCases {
+                dismissWindow(id: "inspector-tab", value: tab)
+            }
+            // Destroy the foreground-active scene sessions (the
+            // detached panes). Running synchronously here, during
+            // main's `.inactive` window, gets them torn down
+            // before main commits its close — iPadOS then sees
+            // main as the last-used scene and persists its
+            // geometry, not a detached pane's.
+            for scene in UIApplication.shared.connectedScenes
+                where scene.activationState == .foregroundActive {
+                UIApplication.shared.requestSceneSessionDestruction(
+                    scene.session, options: nil, errorHandler: nil)
             }
         }
         .alert("Recover Autosave Backup?",

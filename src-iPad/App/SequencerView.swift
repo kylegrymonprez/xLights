@@ -37,6 +37,7 @@ struct XLSequenceExportDoc: FileDocument {
 
 struct SequencerView: View {
     @Environment(SequencerViewModel.self) var viewModel
+    @Environment(\.openWindow) private var openWindow
     // Shared with SequencerGridV2View so toolbar zoom and in-grid
     // pinch-to-zoom drive the same state.
     @State private var timeline = TimelineState()
@@ -67,11 +68,35 @@ struct SequencerView: View {
 
                 if viewModel.showPreview {
                     HStack(spacing: 0) {
-                        ModelPreviewView()
-                            .frame(maxWidth: .infinity)
+                        // F-1: each embedded preview swaps for a
+                        // placeholder while its dedicated Window
+                        // scene is open. Tapping "Dock Here"
+                        // dismisses the detached scene, which fires
+                        // its onDisappear and restores the embedded
+                        // view.
+                        Group {
+                            if viewModel.modelPreviewDetached {
+                                ModelPreviewDockedPlaceholder()
+                            } else {
+                                ModelPreviewView(onDetach: {
+                                    viewModel.pendingDetachTokens.insert("model-preview")
+                                    openWindow(id: "model-preview")
+                                })
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
                         Divider()
-                        HousePreviewView()
-                            .frame(maxWidth: .infinity)
+                        Group {
+                            if viewModel.housePreviewDetached {
+                                HousePreviewDockedPlaceholder()
+                            } else {
+                                HousePreviewView(onDetach: {
+                                    viewModel.pendingDetachTokens.insert("house-preview")
+                                    openWindow(id: "house-preview")
+                                })
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
                     }
                     .frame(height: effectiveH)
                     previewResizeHandle(cap: cap)
@@ -283,14 +308,11 @@ struct SequencerView: View {
                 Image(systemName: "goforward.10")
             }
 
-            Text(formatTime(viewModel.playPositionMS))
-                .monospacedDigit()
-                .frame(width: 80)
-            Text("/").foregroundStyle(.secondary)
-            Text(formatTime(viewModel.sequenceDurationMS))
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-                .frame(width: 80)
+            // Play position + duration already appear under the
+            // view picker (SequencerGridV2View.topLeftCorner). The
+            // redundant toolbar copy ate ~170pt of horizontal room
+            // and forced the "Show Preview" label into a second line
+            // in narrow / portrait layouts, so it's gone now.
 
             if viewModel.isRendering {
                 ProgressView()
@@ -365,18 +387,16 @@ struct SequencerView: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
+        // F-1: iPadOS 26 Stage Manager renders a close/-/fullscreen
+        // pill (~75pt wide) at the window's top-left as an overlay —
+        // it's NOT reported via safe-area insets. `safeAreaPadding`
+        // is a no-op here, so hard-code the clearance. Apps in
+        // fullscreen mode will see ~80pt of extra space on the
+        // toolbar's leading edge, which reads as normal margin.
+        .padding(.leading, 80)
         .background(.bar)
     }
 
-    // MARK: - Helpers
-
-    private func formatTime(_ ms: Int) -> String {
-        let totalSeconds = ms / 1000
-        let minutes = totalSeconds / 60
-        let seconds = totalSeconds % 60
-        let frac = (ms % 1000) / 10
-        return String(format: "%d:%02d.%02d", minutes, seconds, frac)
-    }
 }
 
 /// Thin draggable divider that sits under the preview pane and

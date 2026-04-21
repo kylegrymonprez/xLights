@@ -45,6 +45,7 @@ enum InspectorTab: String, CaseIterable, Identifiable, Hashable, Codable {
 
 struct EffectSettingsView: View {
     @Environment(SequencerViewModel.self) var viewModel
+    @Environment(\.openWindow) private var openWindow
 
     // Persist the selected tab across sequence loads and app launches.
     @AppStorage("inspectorTab") private var storedTab: String = InspectorTab.effect.rawValue
@@ -70,7 +71,15 @@ struct EffectSettingsView: View {
                     Divider()
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
-                            tabContent
+                            // F-1c: when the selected tab is open in
+                            // its own `inspector-tab` scene window,
+                            // show a dock placeholder here; the
+                            // content lives in the detached window.
+                            if viewModel.detachedInspectorTabs.contains(selectedTab.wrappedValue.rawValue) {
+                                InspectorTabDockedPlaceholder(tab: selectedTab.wrappedValue)
+                            } else {
+                                InspectorTabContent(tab: selectedTab.wrappedValue)
+                            }
                         }
                         .padding(.horizontal, 8)
                         .padding(.vertical, 6)
@@ -206,14 +215,31 @@ struct EffectSettingsView: View {
     // MARK: - Tab bar
 
     private var tabBar: some View {
-        Picker("Inspector Tab", selection: selectedTab) {
-            ForEach(InspectorTab.allCases) { tab in
-                Image(systemName: tab.symbol)
-                    .accessibilityLabel(tab.label)
-                    .tag(tab)
+        HStack(spacing: 6) {
+            Picker("Inspector Tab", selection: selectedTab) {
+                ForEach(InspectorTab.allCases) { tab in
+                    Image(systemName: tab.symbol)
+                        .accessibilityLabel(tab.label)
+                        .tag(tab)
+                }
             }
+            .pickerStyle(.segmented)
+
+            // F-1c: open the currently-selected tab in its own
+            // `inspector-tab` scene window. Disabled while that tab
+            // is already detached; in that case the user docks it
+            // via the placeholder's button (which dismissWindow's
+            // the detached scene).
+            Button {
+                let tab = selectedTab.wrappedValue
+                viewModel.pendingDetachTokens.insert("inspector-tab:\(tab.rawValue)")
+                openWindow(id: "inspector-tab", value: tab)
+            } label: {
+                Image(systemName: "rectangle.on.rectangle.angled")
+            }
+            .disabled(viewModel.detachedInspectorTabs.contains(selectedTab.wrappedValue.rawValue))
+            .help("Open this tab in its own window")
         }
-        .pickerStyle(.segmented)
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
     }
@@ -221,7 +247,7 @@ struct EffectSettingsView: View {
     // MARK: - Tab content
 
     @ViewBuilder
-    private var tabContent: some View {
+    private var _legacyTabContent: some View {
         switch selectedTab.wrappedValue {
         case .effect:
             if let md = viewModel.selectedEffectMetadata {
@@ -255,6 +281,195 @@ struct EffectSettingsView: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .padding()
+    }
+
+    private func formatMS(_ ms: Int) -> String {
+        let s = ms / 1000
+        let m = s / 60
+        let frac = (ms % 1000) / 10
+        return String(format: "%d:%02d.%02d", m, s % 60, frac)
+    }
+}
+
+// F-1c — reusable "content of a single inspector tab". Extracted so
+// it can be rendered either inside the embedded sidebar or inside a
+// standalone `inspector-tab` scene window.
+struct InspectorTabContent: View {
+    @Environment(SequencerViewModel.self) var viewModel
+    let tab: InspectorTab
+
+    var body: some View {
+        switch tab {
+        case .effect:
+            if let md = viewModel.selectedEffectMetadata {
+                EffectMetadataPanel(metadata: md)
+            } else {
+                unavailable("No metadata available for this effect")
+            }
+        case .colors:
+            if let md = viewModel.colorMetadata {
+                EffectMetadataPanel(metadata: md)
+            } else {
+                unavailable("Color metadata not loaded")
+            }
+        case .blending:
+            if let md = viewModel.blendingMetadata {
+                EffectMetadataPanel(metadata: md)
+            } else {
+                unavailable("Blending metadata not loaded")
+            }
+        case .buffer:
+            if let md = viewModel.bufferMetadata {
+                EffectMetadataPanel(metadata: md)
+            } else {
+                unavailable("Buffer metadata not loaded")
+            }
+        }
+    }
+
+    private func unavailable(_ msg: String) -> some View {
+        Text(msg)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding()
+    }
+}
+
+// F-1c — placeholder shown in the embedded sidebar when the
+// selected tab is open in its own window. Tapping "Dock Here"
+// dismisses the detached scene, which fires its onDisappear and
+// restores the content here.
+struct InspectorTabDockedPlaceholder: View {
+    let tab: InspectorTab
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "rectangle.on.rectangle.angled")
+                .font(.system(size: 32))
+                .foregroundStyle(.secondary)
+            Text("\(tab.label) is in its own window")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Dock Here") {
+                dismissWindow(id: "inspector-tab", value: tab)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+    }
+}
+
+// F-1c — root view for a detached inspector-tab scene window. Shows
+// the effect header + timing row for context, then the single tab's
+// content. Tracks its presence in `viewModel.detachedInspectorTabs`
+// so the embedded sidebar swaps to the dock placeholder.
+//
+// No NavigationStack — the title bar it adds imposes a ~320pt
+// minimum width that keeps the scene window from shrinking. Stage
+// Manager already displays the scene title (`WindowGroup` id) in
+// its chrome. The header row leaves ~80pt of leading padding so the
+// iPadOS 26 window-controls pill doesn't overlay the effect name.
+struct DetachedInspectorRoot: View {
+    let tab: InspectorTab
+    @Environment(SequencerViewModel.self) var viewModel
+    @Environment(\.dismissWindow) private var dismissWindow
+    @State private var suppressed: Bool = false
+
+    var body: some View {
+        Group {
+            if suppressed {
+                Color(.systemBackground)
+            } else if viewModel.selectedEffect != nil {
+                VStack(spacing: 0) {
+                    header
+                    timingRow
+                    Divider()
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            InspectorTabContent(tab: tab)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            } else {
+                VStack {
+                    Spacer()
+                    Text("Select an effect to view \(tab.label.lowercased()) settings")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+            }
+        }
+        .frame(minWidth: 220, minHeight: 280)
+        .navigationTitle("\(tab.label) — Inspector")
+        .onAppear {
+            // F-1 restoration guard (see HousePreviewView for detail).
+            let token = "inspector-tab:\(tab.rawValue)"
+            if viewModel.pendingDetachTokens.remove(token) != nil {
+                viewModel.detachedInspectorTabs.insert(tab.rawValue)
+            } else {
+                suppressed = true
+                DispatchQueue.main.async {
+                    dismissWindow(id: "inspector-tab", value: tab)
+                }
+            }
+        }
+        .onDisappear {
+            if !suppressed {
+                viewModel.detachedInspectorTabs.remove(tab.rawValue)
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack {
+            Image(systemName: tab.symbol)
+                .foregroundStyle(.secondary)
+            Text(viewModel.selectedEffect?.name ?? "")
+                .font(.headline)
+                .lineLimit(1)
+            Spacer()
+        }
+        .padding(.horizontal)
+        // iPadOS 26 Stage Manager pill overlays the leading edge;
+        // reserve ~80pt here so the effect name stays visible.
+        .padding(.leading, 80)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+    }
+
+    private var timingRow: some View {
+        let (start, end) = currentTimes()
+        return HStack(spacing: 10) {
+            Text("Start:")
+            Text(formatMS(start))
+                .monospacedDigit()
+            Spacer(minLength: 4)
+            Text("End:")
+            Text(formatMS(end))
+                .monospacedDigit()
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal)
+        .padding(.bottom, 6)
+    }
+
+    private func currentTimes() -> (Int, Int) {
+        guard let sel = viewModel.selectedEffect else { return (0, 0) }
+        if let row = viewModel.rows.first(where: { $0.id == sel.rowIndex }),
+           sel.effectIndex >= 0,
+           sel.effectIndex < row.effects.count {
+            let e = row.effects[sel.effectIndex]
+            return (e.startTimeMS, e.endTimeMS)
+        }
+        return (sel.startTimeMS, sel.endTimeMS)
     }
 
     private func formatMS(_ ms: Int) -> String {

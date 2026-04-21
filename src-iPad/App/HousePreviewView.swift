@@ -17,6 +17,12 @@ final class PreviewSettings {
 }
 
 /// House Preview — shows every model plus view objects.
+///
+/// `onDetach` is non-nil when this instance lives in the main
+/// sequencer window; calling it opens the dedicated `house-preview`
+/// scene and flips `viewModel.housePreviewDetached = true`. Detached
+/// instances pass nil so no "Detach" button appears in their own
+/// controls overlay.
 struct HousePreviewView: View {
     @Environment(SequencerViewModel.self) var viewModel
     @State private var controlsVisible: Bool = false
@@ -31,6 +37,14 @@ struct HousePreviewView: View {
     @State private var layoutGroups: [String] = ["Default"]
     @State private var activeLayoutGroup: String = "Default"
 
+    var onDetach: (() -> Void)? = nil
+    /// When true, this instance is hosted in its own Window scene.
+    /// The pane suppresses its corner title label (redundant with
+    /// Stage Manager's window title) so the iPadOS 26 window-
+    /// controls pill doesn't overlay it, and leaves room on the
+    /// leading edge for the pill's overlay geometry.
+    var detachedMode: Bool = false
+
     var body: some View {
         // Pass nil for previewModelName — House Preview must draw
         // every model, not single-model mode. `selectedModelName` is
@@ -42,7 +56,9 @@ struct HousePreviewView: View {
                          controlsVisible: $controlsVisible,
                          settings: settings,
                          layoutGroups: layoutGroups,
-                         activeLayoutGroup: $activeLayoutGroup)
+                         activeLayoutGroup: $activeLayoutGroup,
+                         onDetach: onDetach,
+                         detachedMode: detachedMode)
             .onAppear { refreshLayoutGroups() }
             .onChange(of: viewModel.isShowFolderLoaded) { _, _ in refreshLayoutGroups() }
             .onChange(of: activeLayoutGroup) { _, newValue in
@@ -65,13 +81,101 @@ struct HousePreviewView: View {
     }
 }
 
+/// F-1 — root view for the standalone House Preview scene. Hosts the
+/// same `HousePreviewView` the main window does, just without the
+/// onDetach hook (no "Detach" button inside the already-detached
+/// window) and with a black backdrop that fills the scene window.
+/// Flips `viewModel.housePreviewDetached` so the main window swaps
+/// its embedded copy for a placeholder.
+///
+/// No NavigationStack wrapper — the title bar it adds imposes a
+/// ~320pt minimum width that keeps the window from shrinking to a
+/// thumbnail. Stage Manager already shows the `WindowGroup("House
+/// Preview", ...)` title in its own chrome.
+struct DetachedHousePreviewRoot: View {
+    @Environment(SequencerViewModel.self) var viewModel
+    @Environment(\.dismissWindow) private var dismissWindow
+    @State private var suppressed: Bool = false
+
+    var body: some View {
+        Group {
+            if suppressed {
+                Color.black
+            } else {
+                HousePreviewView(detachedMode: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+            }
+        }
+        .frame(minWidth: 140, minHeight: 80)
+        // `.navigationTitle` on the scene root propagates to the
+        // iPadOS 26 Window menu without requiring a NavigationStack
+        // wrapper. Without this, the scene falls back to the app's
+        // display name ("xLights", "xLights 1", …).
+        .navigationTitle("House Preview")
+        .onAppear {
+            // F-1 restoration guard — if no token is waiting, this
+            // scene was auto-restored by iPadOS on launch rather
+            // than opened by the user. Dismiss ourselves so the
+            // app comes back to its main window only.
+            if viewModel.pendingDetachTokens.remove("house-preview") != nil {
+                viewModel.housePreviewDetached = true
+            } else {
+                suppressed = true
+                DispatchQueue.main.async {
+                    dismissWindow(id: "house-preview")
+                }
+            }
+        }
+        .onDisappear {
+            if !suppressed { viewModel.housePreviewDetached = false }
+        }
+    }
+}
+
+/// Placeholder swapped in for the embedded House Preview while the
+/// dedicated window is open. Tapping "Dock Here" dismisses the
+/// detached scene, which fires its `.onDisappear` and clears the
+/// flag; the HousePreviewView reappears in its place.
+struct HousePreviewDockedPlaceholder: View {
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "rectangle.on.rectangle.angled")
+                .font(.system(size: 34))
+                .foregroundStyle(.secondary)
+            Text("House Preview is in its own window")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Dock Here") {
+                dismissWindow(id: "house-preview")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+        .background(Color.black)
+    }
+}
+
 /// Model Preview — always 2D on desktop; no 2D/3D toggle exposed.
+///
+/// `onDetach` is non-nil for the embedded instance in the main
+/// sequencer window; calling it opens the dedicated
+/// `model-preview` scene. See `HousePreviewView` for the
+/// full F-1 pattern.
 struct ModelPreviewView: View {
     @Environment(SequencerViewModel.self) var viewModel
     @State private var controlsVisible: Bool = false
     // is3D is wired off and the toggle is hidden via supportsIs3D below.
     @State private var settings = PreviewSettings(is3DDefault: false,
                                                   showViewObjectsDefault: false)
+
+    var onDetach: (() -> Void)? = nil
+    var detachedMode: Bool = false
 
     var body: some View {
         PreviewContainer(title: "Model",
@@ -81,7 +185,69 @@ struct ModelPreviewView: View {
                          controlsVisible: $controlsVisible,
                          settings: settings,
                          layoutGroups: [],
-                         activeLayoutGroup: .constant("Default"))
+                         activeLayoutGroup: .constant("Default"),
+                         onDetach: onDetach,
+                         detachedMode: detachedMode)
+    }
+}
+
+/// F-1 — root view for the standalone Model Preview scene. See
+/// `DetachedHousePreviewRoot` for the pattern.
+struct DetachedModelPreviewRoot: View {
+    @Environment(SequencerViewModel.self) var viewModel
+    @Environment(\.dismissWindow) private var dismissWindow
+    @State private var suppressed: Bool = false
+
+    var body: some View {
+        Group {
+            if suppressed {
+                Color.black
+            } else {
+                ModelPreviewView(detachedMode: true)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black)
+            }
+        }
+        .frame(minWidth: 140, minHeight: 80)
+        .navigationTitle("Model Preview")
+        .onAppear {
+            if viewModel.pendingDetachTokens.remove("model-preview") != nil {
+                viewModel.modelPreviewDetached = true
+            } else {
+                suppressed = true
+                DispatchQueue.main.async {
+                    dismissWindow(id: "model-preview")
+                }
+            }
+        }
+        .onDisappear {
+            if !suppressed { viewModel.modelPreviewDetached = false }
+        }
+    }
+}
+
+/// Placeholder for the embedded Model Preview while its scene is open.
+struct ModelPreviewDockedPlaceholder: View {
+    @Environment(\.dismissWindow) private var dismissWindow
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "rectangle.on.rectangle.angled")
+                .font(.system(size: 34))
+                .foregroundStyle(.secondary)
+            Text("Model Preview is in its own window")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Button("Dock Here") {
+                dismissWindow(id: "model-preview")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+        .background(Color.black)
     }
 }
 
@@ -99,6 +265,15 @@ private struct PreviewContainer: View {
     let settings: PreviewSettings
     let layoutGroups: [String]
     @Binding var activeLayoutGroup: String
+    /// F-1 detach hook. Non-nil for embedded instances; the controls
+    /// overlay surfaces a "Detach" button that fires this callback.
+    /// Detached scene-root instances pass nil to hide the button.
+    var onDetach: (() -> Void)? = nil
+    /// F-1: suppresses the corner title label and indents the
+    /// controls from the leading edge so the iPadOS 26 window-
+    /// controls pill (which overlays the top-left of the scene
+    /// window) doesn't sit on top of anything important.
+    var detachedMode: Bool = false
 
     /// Model Preview ignores view objects entirely in XLMetalBridge, so the
     /// "Show View Objects" toggle is a no-op there — suppress it. Desktop
@@ -131,26 +306,32 @@ private struct PreviewContainer: View {
                                            supportsIs3D: supportsIs3D,
                                            selectedModelName: selectedModelName,
                                            layoutGroups: layoutGroups,
-                                           activeLayoutGroup: $activeLayoutGroup)
+                                           activeLayoutGroup: $activeLayoutGroup,
+                                           onDetach: onDetach)
                 }
             }
             .padding(6)
 
             // Small title label in the upper-left for orientation.
-            VStack {
-                HStack {
-                    Text(title)
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.7))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 4))
+            // Suppressed in detached mode — Stage Manager's window
+            // chrome shows the scene title there, and the iPadOS 26
+            // window-controls pill would overlap this label anyway.
+            if !detachedMode {
+                VStack {
+                    HStack {
+                        Text(title)
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.black.opacity(0.4), in: RoundedRectangle(cornerRadius: 4))
+                        Spacer()
+                    }
                     Spacer()
                 }
-                Spacer()
+                .padding(6)
+                .allowsHitTesting(false)
             }
-            .padding(6)
-            .allowsHitTesting(false)
         }
         .background(Color.black)
         .clipped()
@@ -170,6 +351,10 @@ private struct PreviewControlsOverlay: View {
     let selectedModelName: String?
     let layoutGroups: [String]
     @Binding var activeLayoutGroup: String
+    /// F-1: when set, a "Detach" button in the controls overlay
+    /// fires this callback (typically opens the pane's dedicated
+    /// Window scene).
+    var onDetach: (() -> Void)? = nil
 
     /// Current list of saved viewpoints for this pane (filtered to its
     /// 2D/3D mode, updated via `.previewViewpointListChanged`).
@@ -327,6 +512,20 @@ private struct PreviewControlsOverlay: View {
                     }
                 }
                 .menuStyle(.borderlessButton)
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            // F-1 Detach — opens the pane in its own Window scene so
+            // the user can drag it to a second display (Stage Manager)
+            // or reposition it independently of the main sequencer.
+            // Hidden inside the already-detached scene (onDetach nil).
+            if let onDetach {
+                Button {
+                    onDetach()
+                } label: {
+                    Image(systemName: "rectangle.on.rectangle.angled")
+                }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
             }
