@@ -143,7 +143,7 @@ void xlCrashHandler::HandleCrash(bool const isFatalException, std::string const&
             std::string const logFileName = GetLogFileName();
             xlFrame* const topFrame = GetTopWindow();
             if (FileExists(logFilePath)) {
-                report.AddFile(logFilePath);
+                report.AddFile(logFilePath, logFileName);
             } else if ((topFrame != nullptr) && FileExists(wxFileName(topFrame->GetCurrentDir(), logFileName.c_str()).GetFullPath())) {
                 report.AddFile(wxFileName(topFrame->GetCurrentDir(), logFileName.c_str()).GetFullPath(), logFileName.c_str());
             } else if (FileExists(wxFileName(wxGetCwd(), logFileName.c_str()).GetFullPath())) {
