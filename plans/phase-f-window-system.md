@@ -496,7 +496,44 @@ content when detached.
 
 ---
 
-## F-2. Size-class responsive layout
+## F-2 / F-3. Responsive + docked layout *(✓ landed 2026-04-21 — pending device verification)*
+
+**Shipped:** `SequencerView` now derives a `PreviewLayoutMode` enum
+(`compact` / `regularNarrow` / `regularWide`) from
+`@Environment(\.horizontalSizeClass)` + the GeometryReader's width.
+Breakpoints: sizeClass `.compact` → compact; `.regular` + width
+&lt;1200 pt → regularNarrow; ≥1200 pt → regularWide.
+
+- **Regular wide** (≥1200 pt): side-by-side House + Model previews
+  above the grid (the existing layout).
+- **Regular narrow** (1024–1200 pt, 11" iPad fullscreen / medium
+  Stage Manager): single preview shown in the band with a segmented
+  Picker to swap between House and Model. The hidden preview can
+  still be opened in its own window via the View menu's "Detach"
+  command, or reached by swapping to it first.
+- **Compact** (Slide Over / very narrow Stage Manager): same
+  swap-picker preview strip, and the 280pt sidebar inspector
+  collapses to a `.sheet` presentation driven by the same
+  `viewModel.showInspector` flag the sidebar toggle uses.
+
+Swap picker selection is persisted as `@AppStorage("dockedPreview")`.
+Moves to `@SceneStorage` when F-5 lands.
+
+Also ships two `@ViewBuilder` helpers on `SequencerView`
+(`embeddedHousePreview`, `embeddedModelPreview`) so both the
+side-by-side and single-preview branches share the same
+placeholder-swap logic for detached scenes.
+
+Device verification pending: resize Stage Manager window through the
+three breakpoints and confirm the layout flips without the MTKViews
+flickering or losing state; check compact sheet inspector on Slide
+Over.
+
+---
+
+## F-2 / F-3 original spec (for audit reference)
+
+### F-2. Size-class responsive layout
 
 Current layout assumes full-screen on ≥11" iPad. Adapt
 `SequencerView` with `@Environment(\.horizontalSizeClass)`:
@@ -514,9 +551,7 @@ Current layout assumes full-screen on ≥11" iPad. Adapt
 Use `ViewThatFits` where it reads cleanly; otherwise branch on size
 class in a computed property.
 
----
-
-## F-3. Docked layout
+### F-3. Docked layout
 
 - On ≥1200 pt horizontal: two preview panes side-by-side at the top
   of the sequencer (current behaviour, already in
@@ -530,7 +565,80 @@ class in a computed property.
 
 ---
 
-## F-5. Persistence
+## F-5. Persistence *(✓ landed 2026-04-21 — pending device verification)*
+
+**Shipped:**
+- `XLAppDelegate` (new `UIApplicationDelegate`) adapted via
+  `@UIApplicationDelegateAdaptor` on `XLightsApp`. In
+  `application(_:didFinishLaunchingWithOptions:)` it iterates
+  `UIApplication.shared.openSessions` and calls
+  `requestSceneSessionDestruction` on each — wipes all persisted
+  scene state before SwiftUI touches it. That resolves the F-1
+  carryover: main can no longer inherit a detached pane's
+  geometry on relaunch, because iPadOS has nothing to inherit.
+- Main `WindowGroup` gained `.defaultSize(width: 1200, height: 800)`
+  so the fresh-launch geometry is predictable. 12.9" fullscreen
+  users can drag bigger; Stage Manager users can drag smaller.
+- **Detach-state persistence via `@AppStorage`.** Since we opted
+  out of iPadOS's native scene restoration, we snapshot the user's
+  detach layout ourselves at the moment of main-close and re-open
+  the same set of detached scenes on the next launch. Keys:
+  `f5.houseDetachedOnClose`, `f5.modelDetachedOnClose`,
+  `f5.inspectorTabsDetachedOnClose` (CSV of tab rawValues). The
+  snapshot happens BEFORE the auto-dismiss in the scenePhase
+  `.inactive` handler; `restoreDetachedScenesIfNeeded()` fires
+  once on `ContentView.onAppear` (guarded against sheet-
+  reappearance re-entries) and primes the F-1 detach tokens for
+  each scene it explicitly re-opens via `openWindow`.
+
+**Tradeoff:** the main window no longer remembers its size across
+launches. Predictability wins over remembered geometry — the
+previous behaviour sometimes opened the app at a tiny thumbnail
+size, which was objectively worse. Layout (which panes are
+detached) IS preserved.
+
+**Scene-owned preview state** (is3D, showViewObjects, layoutGroup,
+viewpoint): deferred. The current `PreviewSettings` class is
+`@Observable` and wiring it through scene-scoped storage would
+require a nontrivial refactor. Combined with our session-
+destruction policy (which means cross-launch state wouldn't
+persist anyway), the ROI is low. Flag as a polish item and
+revisit if users ask for it.
+
+### Known limitation — Stage Manager position cache
+
+iPadOS 26 Stage Manager caches the app's last window position at a
+system level separate from the scene sessions we destroy at launch.
+There is no public SwiftUI or UIKit API on iPadOS to read or set a
+window's position — only its orientation (via
+`UIWindowScene.GeometryPreferences.iOS`). `.windowResizability(.contentSize)`
+combined with a `frame(minWidth: 1000, minHeight: 700)` on
+`ContentView` at least forces main to open at a usable size, but
+if the last-active scene at close was a detached pane in the
+corner of the screen, main inherits that corner position on
+relaunch and stays there until the user drags it.
+
+**Mitigation:** self-corrects after one relaunch — once the user
+drags main to a new position and closes again, iPadOS's cache is
+rewritten with main's new position. Subsequent launches land
+correctly.
+
+**Options explored and rejected** (see 2026-04-21 discussion):
+- `UIApplicationDelegate`'s `configurationForConnecting` hook with
+  per-WindowGroup `UISceneConfiguration` names — high effort,
+  speculative whether iPadOS actually scopes position cache per
+  config, and would require undocumented SwiftUI/UIKit plumbing.
+- `UIRequiresFullScreen = YES` in Info.plist — disables Stage
+  Manager entirely, regresses F-1's detach support.
+
+**Revisit when** iOS 27+ exposes a scene-position API, or when
+there's concrete user feedback that the "drag-once-to-reposition"
+ritual is painful enough to warrant the `UISceneConfiguration`
+exploration.
+
+---
+
+## F-5 original spec (for audit reference)
 
 Once F-1 lands, add `@SceneStorage` at each scene root:
 

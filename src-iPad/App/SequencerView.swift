@@ -35,9 +35,39 @@ struct XLSequenceExportDoc: FileDocument {
     }
 }
 
+/// F-2 / F-3 — responsive layout classification for the sequencer
+/// shell. Derived from `horizontalSizeClass` + measured width so we
+/// can distinguish "11" fullscreen or narrow Stage Manager" from
+/// "12.9" fullscreen" even though both report `.regular`.
+enum PreviewLayoutMode {
+    /// Slide Over / very narrow Stage Manager split. Inspector
+    /// collapses to a sheet; a single preview is docked at a time
+    /// with a swap picker to change it. Detach controls hidden —
+    /// Stage Manager is the escape hatch for moving panels out.
+    case compact
+    /// 11" iPad fullscreen or medium Stage Manager (roughly
+    /// 1024-1200 pt wide). Inspector stays as sidebar; one preview
+    /// docked with a swap picker; the other can detach via the
+    /// View menu.
+    case regularNarrow
+    /// 12.9"+ fullscreen or wide Stage Manager (≥1200 pt).
+    /// Side-by-side House + Model previews above the grid,
+    /// matching the desktop layout intent.
+    case regularWide
+}
+
+/// F-3 — which preview sits in the single-preview slot on the
+/// narrow / compact layouts. Persisted as a user preference so the
+/// last selection is remembered across launches.
+enum DockedPreviewKind: String, CaseIterable {
+    case house
+    case model
+}
+
 struct SequencerView: View {
     @Environment(SequencerViewModel.self) var viewModel
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     // Shared with SequencerGridV2View so toolbar zoom and in-grid
     // pinch-to-zoom drive the same state.
     @State private var timeline = TimelineState()
@@ -49,6 +79,25 @@ struct SequencerView: View {
     @AppStorage("previewPaneHeight") private var previewPaneHeight: Double = 280
     private static let previewMinHeight: Double = 160
     private static let previewMaxHeight: Double = 800
+
+    // F-3 narrow-mode docked-preview selection. @AppStorage until
+    // F-5 lifts this to @SceneStorage.
+    @AppStorage("dockedPreview") private var dockedPreviewRaw: String = DockedPreviewKind.house.rawValue
+    private var dockedPreview: Binding<DockedPreviewKind> {
+        Binding(
+            get: { DockedPreviewKind(rawValue: dockedPreviewRaw) ?? .house },
+            set: { dockedPreviewRaw = $0.rawValue }
+        )
+    }
+
+    // F-2 / F-3 layout breakpoints. sizeClass `.compact` covers
+    // Slide Over and the narrowest Stage Manager splits; inside
+    // `.regular`, 1200 pt separates "11" narrow" from "12.9" wide".
+    private func layoutMode(for width: CGFloat) -> PreviewLayoutMode {
+        if horizontalSizeClass == .compact { return .compact }
+        if width < 1200 { return .regularNarrow }
+        return .regularWide
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -62,50 +111,25 @@ struct SequencerView: View {
                               geo.size.height * 0.65))
             let effectiveH = min(max(previewPaneHeight,
                                      Self.previewMinHeight), cap)
+            let mode = layoutMode(for: geo.size.width)
             VStack(spacing: 0) {
                 toolbar
                 Divider()
 
                 if viewModel.showPreview {
-                    HStack(spacing: 0) {
-                        // F-1: each embedded preview swaps for a
-                        // placeholder while its dedicated Window
-                        // scene is open. Tapping "Dock Here"
-                        // dismisses the detached scene, which fires
-                        // its onDisappear and restores the embedded
-                        // view.
-                        Group {
-                            if viewModel.modelPreviewDetached {
-                                ModelPreviewDockedPlaceholder()
-                            } else {
-                                ModelPreviewView(onDetach: {
-                                    viewModel.pendingDetachTokens.insert("model-preview")
-                                    openWindow(id: "model-preview")
-                                })
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                        Divider()
-                        Group {
-                            if viewModel.housePreviewDetached {
-                                HousePreviewDockedPlaceholder()
-                            } else {
-                                HousePreviewView(onDetach: {
-                                    viewModel.pendingDetachTokens.insert("house-preview")
-                                    openWindow(id: "house-preview")
-                                })
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .frame(height: effectiveH)
+                    previewBand(mode: mode, effectiveH: effectiveH)
                     previewResizeHandle(cap: cap)
                 }
 
                 HStack(spacing: 0) {
                     SequencerGridV2View(timeline: timeline)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    if viewModel.showInspector {
+                    // F-2: inspector stays as a 280pt sidebar on
+                    // regular widths. In compact mode the sidebar is
+                    // dropped and the inspector is presented as a
+                    // sheet instead (see the `.sheet(...)` modifier
+                    // further down).
+                    if mode != .compact, viewModel.showInspector {
                         Divider()
                         EffectSettingsView()
                             .frame(width: 280)
@@ -113,6 +137,13 @@ struct SequencerView: View {
                 }
 
                 EffectPaletteView()
+            }
+            // F-2 compact inspector — same toggle (viewModel.showInspector),
+            // but presented as a sheet instead of inline so the grid keeps
+            // its full width.
+            .sheet(isPresented: compactInspectorBinding(mode: mode)) {
+                EffectSettingsView()
+                    .environment(viewModel)
             }
         }
         .confirmationDialog("Unsaved Changes",
@@ -397,6 +428,92 @@ struct SequencerView: View {
         .background(.bar)
     }
 
+    // MARK: - Preview band (F-2 / F-3)
+
+    /// Builds the preview region. In `regularWide` we stack House
+    /// and Model side-by-side (the existing layout). In
+    /// `regularNarrow` / `compact` we show one preview at a time
+    /// with a segmented picker to swap between them; the hidden
+    /// preview can still be opened in its own window via the View
+    /// menu (F-4) or by swapping to it first and tapping Detach.
+    @ViewBuilder
+    private func previewBand(mode: PreviewLayoutMode,
+                             effectiveH: Double) -> some View {
+        switch mode {
+        case .regularWide:
+            HStack(spacing: 0) {
+                embeddedModelPreview
+                    .frame(maxWidth: .infinity)
+                Divider()
+                embeddedHousePreview
+                    .frame(maxWidth: .infinity)
+            }
+            .frame(height: effectiveH)
+
+        case .regularNarrow, .compact:
+            VStack(spacing: 0) {
+                HStack {
+                    Picker("Preview", selection: dockedPreview) {
+                        Text("House").tag(DockedPreviewKind.house)
+                        Text("Model").tag(DockedPreviewKind.model)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 220)
+                    Spacer()
+                }
+                .padding(.horizontal, 8)
+                .padding(.top, 4)
+
+                Group {
+                    switch dockedPreview.wrappedValue {
+                    case .house: embeddedHousePreview
+                    case .model: embeddedModelPreview
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .frame(height: effectiveH)
+        }
+    }
+
+    /// F-1 embedded House Preview with detach-on-tap placeholder
+    /// swap. Factored so both layout branches reuse it.
+    @ViewBuilder
+    private var embeddedHousePreview: some View {
+        if viewModel.housePreviewDetached {
+            HousePreviewDockedPlaceholder()
+        } else {
+            HousePreviewView(onDetach: {
+                viewModel.pendingDetachTokens.insert("house-preview")
+                openWindow(id: "house-preview")
+            })
+        }
+    }
+
+    @ViewBuilder
+    private var embeddedModelPreview: some View {
+        if viewModel.modelPreviewDetached {
+            ModelPreviewDockedPlaceholder()
+        } else {
+            ModelPreviewView(onDetach: {
+                viewModel.pendingDetachTokens.insert("model-preview")
+                openWindow(id: "model-preview")
+            })
+        }
+    }
+
+    /// F-2 compact inspector binding. Only presents as a sheet when
+    /// the sizeClass is compact AND the user has asked for the
+    /// inspector (same flag the sidebar branches check). Setting
+    /// false dismisses and flips the view-model flag back.
+    private func compactInspectorBinding(mode: PreviewLayoutMode) -> Binding<Bool> {
+        Binding(
+            get: { mode == .compact && viewModel.showInspector },
+            set: { newValue in
+                if !newValue { viewModel.showInspector = false }
+            }
+        )
+    }
 }
 
 /// Thin draggable divider that sits under the preview pane and

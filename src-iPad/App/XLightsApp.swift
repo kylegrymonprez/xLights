@@ -1,8 +1,33 @@
 import SwiftUI
 import UIKit
 
+/// F-5 — destroys any persisted scene sessions at launch before
+/// SwiftUI has a chance to restore them. iPadOS 26's default
+/// state restoration conflates geometry across our multiple
+/// `WindowGroup`s — closing the main sequencer with a detached
+/// preview open can result in the main coming back at a detached
+/// pane's position/size on the next launch (see
+/// `plans/phase-f-window-system.md` § F-5 carryover).
+///
+/// Tradeoff: the main window no longer remembers its size between
+/// launches. Predictability wins — every launch starts at the
+/// main WindowGroup's `.defaultSize`, which is a vastly better
+/// experience than "small thumbnail surprise" on reopen.
+class XLAppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions:
+                        [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
+        for session in UIApplication.shared.openSessions {
+            UIApplication.shared.requestSceneSessionDestruction(
+                session, options: nil, errorHandler: nil)
+        }
+        return true
+    }
+}
+
 @main
 struct XLightsApp: App {
+    @UIApplicationDelegateAdaptor(XLAppDelegate.self) private var appDelegate
     @State private var viewModel: SequencerViewModel
     @Environment(\.scenePhase) private var scenePhase
 
@@ -24,7 +49,17 @@ struct XLightsApp: App {
         WindowGroup("xLights", id: "sequencer") {
             ContentView()
                 .environment(viewModel)
+                // F-5: declare a content-size minimum so iPadOS is
+                // forced to resize main up to at least this on
+                // launch. Without it, iPadOS inherits the
+                // last-active scene's size (often a detached
+                // pane's small thumbnail) and main opens tiny in a
+                // corner. 1000×700 is the smallest we want main
+                // to be; users can drag larger, but the floor
+                // prevents the "surprise thumbnail" relaunch.
+                .frame(minWidth: 1000, minHeight: 700)
         }
+        .windowResizability(.contentSize)
         .commands {
             XLSequencerCommands(viewModel: viewModel)
         }
@@ -114,6 +149,7 @@ struct ContentView: View {
     @Environment(SequencerViewModel.self) var viewModel
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dismissWindow) private var dismissWindow
+    @Environment(\.openWindow) private var openWindow
     @State private var showFolderConfig = false
 
     @State private var showMediaManager = false
@@ -126,6 +162,29 @@ struct ContentView: View {
     /// every re-render of the shell.
     @State private var autosaveRecoveryDate: Date? = nil
     @State private var lastCheckedSequencePath: String = ""
+
+    // F-5 detach-state persistence. iPadOS's native scene restoration
+    // is disabled (sessions destroyed at launch to avoid geometry
+    // conflation), so we record which panes were detached at the
+    // moment of main-close and re-open them explicitly on the next
+    // launch. Flags persist across launches; geometry does not.
+    @AppStorage("f5.houseDetachedOnClose")
+    private var houseDetachedOnClose: Bool = false
+    @AppStorage("f5.modelDetachedOnClose")
+    private var modelDetachedOnClose: Bool = false
+    @AppStorage("f5.inspectorTabsDetachedOnClose")
+    private var inspectorTabsDetachedCSV: String = ""
+
+    /// Guards the post-launch auto-open so it only fires once per
+    /// ContentView instance (the view reappears during sheet
+    /// presentations etc.).
+    @State private var didRestoreDetachedScenes: Bool = false
+
+    /// G-3 — sequence URL handed to us by the system (Files /
+    /// AirDrop / share sheet) before the show folder finished
+    /// loading. Replayed via the
+    /// `viewModel.isShowFolderLoaded` onChange below.
+    @State private var pendingOpenURL: URL? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -160,6 +219,22 @@ struct ContentView: View {
             if !viewModel.isShowFolderLoaded && FolderConfig.showFolder == nil {
                 showFolderConfig = true
             }
+            // F-5: re-open detached scenes that were open at the
+            // last main-close, honouring the user's working layout
+            // without relying on iPadOS's broken auto-restoration.
+            restoreDetachedScenesIfNeeded()
+        }
+        // G-3 — handle "Open in xLights" from Files / share sheets /
+        // AirDrop. The system delivers a `file://` URL to the
+        // app's registered .xsq UTI; we obtain security-scoped
+        // access to it (so subsequent reads / writes work even
+        // after the app restarts) and route into the existing
+        // openSequence flow. If the app is mid-launch and the
+        // show folder isn't loaded yet, defer until it is. `.xsqz`
+        // support is intentionally deferred — SequencePackage
+        // extraction isn't plumbed into the iPad bridge yet.
+        .onOpenURL { url in
+            handleIncomingSequenceURL(url)
         }
         .onChange(of: viewModel.isSequenceLoaded) { _, loaded in
             if loaded {
@@ -168,6 +243,14 @@ struct ContentView: View {
                 autosaveRecoveryDate = nil
                 lastCheckedSequencePath = ""
             }
+        }
+        // G-3 — replay any deferred Open-in-xLights once the show
+        // folder finishes loading (typical on cold-launch via Files
+        // tap, where the URL arrives before bookmarks restore).
+        .onChange(of: viewModel.isShowFolderLoaded) { _, loaded in
+            guard loaded, let url = pendingOpenURL else { return }
+            pendingOpenURL = nil
+            viewModel.openSequence(path: url.path)
         }
         // F-1 runtime coupling — when the main window is about to
         // close, dismiss the detached preview / inspector scenes
@@ -206,6 +289,17 @@ struct ContentView: View {
             if viewModel.isDirty {
                 _ = viewModel.saveSequence()
             }
+            // F-5: snapshot detach state before we auto-dismiss so
+            // the next launch can re-open exactly what the user
+            // had open at close. Snapshot must come BEFORE the
+            // dismissWindow calls below — those clear the live
+            // flags on the view model.
+            houseDetachedOnClose = viewModel.housePreviewDetached
+            modelDetachedOnClose = viewModel.modelPreviewDetached
+            inspectorTabsDetachedCSV = viewModel.detachedInspectorTabs
+                .sorted()
+                .joined(separator: ",")
+
             dismissWindow(id: "house-preview")
             dismissWindow(id: "model-preview")
             for tab in InspectorTab.allCases {
@@ -246,6 +340,44 @@ struct ContentView: View {
                 Text("")
             }
         }
+        // F-1 scene title — propagates to the iPadOS 26 Window menu's
+        // "Open Windows" listing. Without this, the nested
+        // `SequencePickerView` NavigationStack title ("Sequences")
+        // leaks up to the scene title and sticks even after a
+        // sequence is loaded. Prefer the active sequence's name
+        // when one is open, otherwise fall back to the app name.
+        .navigationTitle(mainSceneTitle)
+    }
+
+    /// Current title for the main sequencer scene. Used by
+    /// iPadOS's Window menu and Stage Manager chrome.
+    private var mainSceneTitle: String {
+        if viewModel.isSequenceLoaded,
+           let name = viewModel.sequenceName,
+           !name.isEmpty {
+            return name
+        }
+        return "xLights"
+    }
+
+    /// G-3 — open a sequence file the system handed us (Files-app
+    /// "Open in xLights", AirDrop accept, share-sheet target).
+    /// Obtains security-scoped access via the bridge so subsequent
+    /// reads/writes work after the app relaunches, then routes
+    /// into the standard `openSequence` flow. If the show folder
+    /// isn't loaded yet we wait — the open is queued in
+    /// `pendingOpenURL` and re-tried whenever the folder becomes
+    /// available.
+    private func handleIncomingSequenceURL(_ url: URL) {
+        let path = url.path
+        guard !path.isEmpty else { return }
+        _ = XLSequenceDocument.obtainAccess(toPath: path,
+                                             enforceWritable: true)
+        if viewModel.isShowFolderLoaded {
+            viewModel.openSequence(path: path)
+        } else {
+            pendingOpenURL = url
+        }
     }
 
     /// Run once per open: compare `.xbkp` mtime vs. `.xsq` and
@@ -256,6 +388,39 @@ struct ContentView: View {
         lastCheckedSequencePath = path
         let (has, when) = viewModel.hasRecoverableBackup()
         if has { autosaveRecoveryDate = when }
+    }
+
+    /// F-5 — re-opens any detached scenes that the user had open
+    /// at the last main-close. Idempotent (guarded by
+    /// `didRestoreDetachedScenes`), so repeated `onAppear` calls
+    /// triggered by sheet presentations don't respawn scenes.
+    ///
+    /// Deferred to the next run loop so SwiftUI has finished
+    /// constructing the main scene before we try to open siblings
+    /// — opening during the main's own `onAppear` is racy with
+    /// the scene session hand-off.
+    private func restoreDetachedScenesIfNeeded() {
+        guard !didRestoreDetachedScenes else { return }
+        didRestoreDetachedScenes = true
+
+        DispatchQueue.main.async {
+            if houseDetachedOnClose {
+                viewModel.pendingDetachTokens.insert("house-preview")
+                openWindow(id: "house-preview")
+            }
+            if modelDetachedOnClose {
+                viewModel.pendingDetachTokens.insert("model-preview")
+                openWindow(id: "model-preview")
+            }
+            let tabs = inspectorTabsDetachedCSV
+                .split(separator: ",")
+                .map(String.init)
+                .compactMap(InspectorTab.init(rawValue:))
+            for tab in tabs {
+                viewModel.pendingDetachTokens.insert("inspector-tab:\(tab.rawValue)")
+                openWindow(id: "inspector-tab", value: tab)
+            }
+        }
     }
 
 }
@@ -322,6 +487,76 @@ struct ShowFolderSetupView: View {
     }
 }
 
+/// G-2 — iCloud download state for a sequence file. Surfaced as an
+/// inline icon in the picker so users see at a glance which
+/// sequences are available offline vs. still materializing from
+/// iCloud.
+enum UbiquityStatus {
+    /// Not an iCloud file, or can't be classified — no icon shown.
+    case local
+    /// Is in iCloud and fully downloaded + current. Small cloud-
+    /// check icon, purely informative.
+    case downloaded
+    /// Is in iCloud but not yet downloaded to this device. Tap
+    /// should trigger a download before attempting to open.
+    case notDownloaded
+    /// Is in iCloud and actively downloading right now.
+    case downloading
+}
+
+/// Query the iCloud state for a file URL. Returns `.local` for
+/// non-ubiquitous or unreadable URLs, `.downloaded` /
+/// `.notDownloaded` / `.downloading` per Apple's
+/// `ubiquitousItemDownloadingStatus` + `ubiquitousItemIsDownloading`
+/// resource values.
+func ubiquityStatus(for url: URL) -> UbiquityStatus {
+    let keys: Set<URLResourceKey> = [
+        .isUbiquitousItemKey,
+        .ubiquitousItemDownloadingStatusKey,
+        .ubiquitousItemIsDownloadingKey,
+    ]
+    guard let values = try? url.resourceValues(forKeys: keys),
+          values.isUbiquitousItem == true else {
+        return .local
+    }
+    if values.ubiquitousItemIsDownloading == true {
+        return .downloading
+    }
+    switch values.ubiquitousItemDownloadingStatus {
+    case .current, .downloaded:
+        return .downloaded
+    case .notDownloaded:
+        return .notDownloaded
+    default:
+        return .downloaded
+    }
+}
+
+/// G-2 — small icon reflecting a file's `UbiquityStatus`. Suppressed
+/// for `.local` so non-iCloud files read as normal.
+struct UbiquityBadge: View {
+    let status: UbiquityStatus
+    var body: some View {
+        Group {
+            switch status {
+            case .local:
+                EmptyView()
+            case .downloaded:
+                Image(systemName: "icloud")
+                    .foregroundStyle(.secondary)
+            case .downloading:
+                Image(systemName: "icloud.and.arrow.down")
+                    .foregroundStyle(.blue)
+            case .notDownloaded:
+                Image(systemName: "icloud.and.arrow.down")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
+        .imageScale(.small)
+    }
+}
+
 struct SequencePickerView: View {
     @Environment(SequencerViewModel.self) var viewModel
     @Binding var showFolderConfig: Bool
@@ -335,18 +570,23 @@ struct SequencePickerView: View {
                 if !recent.isEmpty {
                     Section("Recent") {
                         ForEach(recent) { entry in
+                            let status = ubiquityStatus(for: URL(fileURLWithPath: entry.path))
                             Button {
-                                viewModel.openSequence(path: entry.path)
+                                openWithDownloadIfNeeded(path: entry.path, status: status)
                             } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(entry.displayName)
-                                        .font(.body)
-                                        .foregroundStyle(.primary)
-                                    Text(entry.parentFolder)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
+                                HStack(spacing: 8) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(entry.displayName)
+                                            .font(.body)
+                                            .foregroundStyle(.primary)
+                                        Text(entry.parentFolder)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    }
+                                    Spacer()
+                                    UbiquityBadge(status: status)
                                 }
                             }
                             .swipeActions(edge: .trailing) {
@@ -362,9 +602,16 @@ struct SequencePickerView: View {
                 }
                 Section(recent.isEmpty ? "Sequences" : "In This Show Folder") {
                     ForEach(viewModel.sequenceFiles, id: \.self) { file in
-                        Button(file) {
-                            let path = (viewModel.showFolderPath ?? "") + "/" + file
-                            viewModel.openSequence(path: path)
+                        let path = (viewModel.showFolderPath ?? "") + "/" + file
+                        let status = ubiquityStatus(for: URL(fileURLWithPath: path))
+                        Button {
+                            openWithDownloadIfNeeded(path: path, status: status)
+                        } label: {
+                            HStack {
+                                Text(file)
+                                Spacer()
+                                UbiquityBadge(status: status)
+                            }
                         }
                     }
                 }
@@ -410,6 +657,47 @@ struct SequencePickerView: View {
                         recent = RecentSequences.load()
                     }
             }
+        }
+    }
+
+    /// G-2 — open a sequence, starting a download first when the
+    /// file is in iCloud but not yet materialized on this device.
+    /// `FileExists()` already triggers an iCloud download as a side
+    /// effect (per Phase A), but the download is synchronous and
+    /// can be slow; calling
+    /// `startDownloadingUbiquitousItem` proactively lets iCloud
+    /// run it in the background, and the poll below attempts the
+    /// open once it's local. For `.downloading` / `.downloaded`
+    /// cases we just open immediately.
+    private func openWithDownloadIfNeeded(path: String,
+                                           status: UbiquityStatus) {
+        guard status == .notDownloaded else {
+            viewModel.openSequence(path: path)
+            return
+        }
+        let url = URL(fileURLWithPath: path)
+        try? FileManager.default.startDownloadingUbiquitousItem(at: url)
+        // Poll briefly for the file to land (up to ~5s). This is a
+        // best-effort UX — if the download is slow we just open what's
+        // there; openSequence itself calls FileExists() which kicks
+        // the download and can block.
+        waitForDownload(url: url, attemptsRemaining: 10) { [weak viewModel] in
+            viewModel?.openSequence(path: path)
+        }
+    }
+
+    private func waitForDownload(url: URL,
+                                  attemptsRemaining: Int,
+                                  then complete: @escaping () -> Void) {
+        let status = ubiquityStatus(for: url)
+        if status != .notDownloaded || attemptsRemaining <= 0 {
+            complete()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            waitForDownload(url: url,
+                             attemptsRemaining: attemptsRemaining - 1,
+                             then: complete)
         }
     }
 }

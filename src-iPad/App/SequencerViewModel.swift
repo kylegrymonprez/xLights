@@ -503,7 +503,10 @@ class SequencerViewModel {
         // before writing so the XML snapshot is stable.
         if isPlaying { pause() }
         if isScrubbing { stopScrub() }
-        let ok = document.saveSequence()
+        let path = document.currentSequencePath() ?? ""
+        let ok = coordinatedWrite(at: path) {
+            document.saveSequence()
+        }
         if ok {
             isDirty = false
         }
@@ -520,7 +523,9 @@ class SequencerViewModel {
         if isPlaying { pause() }
         if isScrubbing { stopScrub() }
         XLSequenceDocument.obtainAccess(toPath: path, enforceWritable: true)
-        let ok = document.saveSequence(as: path)
+        let ok = coordinatedWrite(at: path) {
+            document.saveSequence(as: path)
+        }
         if ok {
             isDirty = false
             // The bridge updates the underlying SequenceFile's
@@ -529,6 +534,35 @@ class SequencerViewModel {
             sequenceName = document.sequenceName()
         }
         return ok
+    }
+
+    /// G-1: wrap the bridge's actual file-write call in
+    /// `NSFileCoordinator.coordinate(writingItemAt:options:error:byAccessor:)`
+    /// so concurrent Files-app / iCloud-daemon activity can't
+    /// corrupt the `.xsq`. Coordinator blocks other file presenters
+    /// (Files.app, `UIDocumentBrowserViewController`, iCloud sync)
+    /// for the duration of the write. If `path` is empty (new
+    /// unsaved sequence) we skip the coordinator — there's nothing
+    /// to coordinate against.
+    private func coordinatedWrite(at path: String,
+                                   _ body: () -> Bool) -> Bool {
+        guard !path.isEmpty else {
+            return body()
+        }
+        let url = URL(fileURLWithPath: path)
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinatorError: NSError?
+        var writeResult = false
+        coordinator.coordinate(writingItemAt: url,
+                                options: .forReplacing,
+                                error: &coordinatorError) { _ in
+            writeResult = body()
+        }
+        if let err = coordinatorError {
+            print("NSFileCoordinator write failed: \(err)")
+            return false
+        }
+        return writeResult
     }
 
     /// Present-time dirty-state check from SwiftUI views that
@@ -594,7 +628,11 @@ class SequencerViewModel {
         // matches desktop's "skip autosave when no changes since
         // last save" branch.
         if !document.isSequenceDirty() { return }
-        _ = document.writeAutosaveBackup()
+        // G-1: coordinate the .xbkp write too; same concurrency
+        // risk as the main sequence path.
+        _ = coordinatedWrite(at: autosaveBackupPath) {
+            document.writeAutosaveBackup()
+        }
     }
 
     /// Path of the `.xbkp` that sits alongside the current
@@ -680,6 +718,15 @@ class SequencerViewModel {
     /// if the user returns without the app being killed.
     func shutdownForBackground() {
         quiesceForInactive()
+        // G-4: stop controller output cleanly. iOS throttles
+        // backgrounded apps' network traffic, so an active
+        // sACN/ArtNet/DDP stream becomes unreliable; better to
+        // halt it than send partial frames. User re-enables on
+        // foreground via the existing output toggle.
+        if isOutputting {
+            document.stopOutput()
+            isOutputting = false
+        }
         guard isSequenceLoaded else { return }
         cancelBackgroundRender()
         _ = document.abortRenderAndWait(3.0)
