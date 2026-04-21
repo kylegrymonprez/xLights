@@ -1298,6 +1298,227 @@ class SequencerViewModel {
         undoManager.setActionName(targetLocked ? "Lock Effects" : "Unlock Effects")
     }
 
+    // MARK: - Timing tracks & marks (B67 / B69 / B73)
+
+    /// B73: add a new variable timing track. On success the new track
+    /// is made active and the rows are reloaded. Undo-able.
+    @discardableResult
+    func addTimingTrack(name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        if !document.addTimingTrackNamed(trimmed) { return false }
+        reloadRows()
+        undoManager.registerUndo(withTarget: self) { vm in
+            // On undo, find the most-recently-added timing track by
+            // its name and delete it. Names are uniquified by the
+            // bridge on creation, so this reverses reliably.
+            let idxSet: Set<Int> = Set(
+                (vm.document.timingRowIndices() as [NSNumber]).map { $0.intValue }
+            )
+            for i in idxSet {
+                if i < vm.rows.count, vm.rows[i].timing?.elementName == trimmed {
+                    _ = vm.document.deleteTimingTrack(at: Int32(i))
+                    vm.reloadRows()
+                    return
+                }
+            }
+        }
+        undoManager.setActionName("Add Timing Track")
+        return true
+    }
+
+    /// B67: add a timing mark to the given timing row. `startMS` /
+    /// `endMS` must be a non-zero range that doesn't overlap an
+    /// existing mark on the same layer. Returns true on success.
+    @discardableResult
+    func addTimingMark(rowIndex: Int, startMS: Int, endMS: Int, label: String = "") -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        guard rows[rowIndex].timing != nil else { return false }
+        let idx = Int(document.addTimingMark(atRow: Int32(rowIndex),
+                                              startMS: Int32(startMS),
+                                              endMS: Int32(endMS),
+                                              label: label))
+        if idx < 0 { return false }
+        reloadRows()
+        undoManager.registerUndo(withTarget: self) { vm in
+            vm.deleteTimingMark(rowIndex: rowIndex, markIndex: idx)
+        }
+        undoManager.setActionName("Add Timing Mark")
+        return true
+    }
+
+    /// B71: split a timing mark at `atMS`. The left half keeps the
+    /// original label and runs `[origStart, atMS]`; the right half
+    /// is a fresh mark with an empty label running `[atMS, origEnd]`.
+    /// No-op if `atMS` isn't strictly inside the mark. Single undo
+    /// group rolls up the delete + two adds.
+    @discardableResult
+    func splitTimingMark(rowIndex: Int, markIndex: Int, atMS: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        let row = rows[rowIndex]
+        guard row.timing != nil,
+              markIndex >= 0, markIndex < row.effects.count else { return false }
+        let mark = row.effects[markIndex]
+        guard atMS > mark.startTimeMS, atMS < mark.endTimeMS else { return false }
+        let origStart = mark.startTimeMS
+        let origEnd = mark.endTimeMS
+        let origLabel = mark.name
+        undoManager.beginUndoGrouping()
+        _ = deleteTimingMark(rowIndex: rowIndex, markIndex: markIndex)
+        _ = addTimingMark(rowIndex: rowIndex,
+                           startMS: origStart, endMS: atMS, label: origLabel)
+        _ = addTimingMark(rowIndex: rowIndex,
+                           startMS: atMS, endMS: origEnd, label: "")
+        undoManager.endUndoGrouping()
+        undoManager.setActionName("Split Timing Mark")
+        return true
+    }
+
+    /// B72: merge a timing mark with its right-neighbor on the same
+    /// row. The merged mark spans `[leftStart, rightEnd]` and its
+    /// label joins the two labels with a space (or the left label
+    /// alone if the right was empty). Leaves a gap between the
+    /// original marks intact (merging across a gap is desktop
+    /// behavior too — they just stitch together).
+    @discardableResult
+    func mergeTimingMarkWithNext(rowIndex: Int, markIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        let row = rows[rowIndex]
+        guard row.timing != nil,
+              markIndex >= 0, markIndex + 1 < row.effects.count else { return false }
+        let left = row.effects[markIndex]
+        let right = row.effects[markIndex + 1]
+        let newStart = left.startTimeMS
+        let newEnd = right.endTimeMS
+        let newLabel: String
+        if left.name.isEmpty { newLabel = right.name }
+        else if right.name.isEmpty { newLabel = left.name }
+        else { newLabel = "\(left.name) \(right.name)" }
+        undoManager.beginUndoGrouping()
+        // Delete right first (higher index) so the left index stays
+        // stable for the next delete.
+        _ = deleteTimingMark(rowIndex: rowIndex, markIndex: markIndex + 1)
+        _ = deleteTimingMark(rowIndex: rowIndex, markIndex: markIndex)
+        _ = addTimingMark(rowIndex: rowIndex,
+                           startMS: newStart, endMS: newEnd, label: newLabel)
+        undoManager.endUndoGrouping()
+        undoManager.setActionName("Merge Timing Marks")
+        return true
+    }
+
+    /// B84: break every phrase mark on the given timing row into
+    /// per-word sub-marks on layer 1. The timing element's existing
+    /// word + phoneme layers are discarded first (matches desktop).
+    /// Not currently undo-able: the op mutates layer structure and
+    /// our undo plumbing only registers per-mark adds/deletes —
+    /// adding layer-level undo is follow-up work.
+    @discardableResult
+    func breakdownPhrases(rowIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        guard rows[rowIndex].timing != nil else { return false }
+        if !document.breakdownPhrases(atRow: Int32(rowIndex)) { return false }
+        reloadRows()
+        return true
+    }
+
+    /// Returns true if the given timing row is the phrase layer
+    /// (layer 0) of an element that has at least one mark with a
+    /// non-empty label — gate for the "Breakdown Phrases" menu.
+    func canBreakdownPhrases(rowIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        let row = rows[rowIndex]
+        guard row.timing != nil, row.layerIndex == 0 else { return false }
+        return row.effects.contains(where: { !$0.name.isEmpty })
+    }
+
+    /// Returns true if the mark at the given index on the given row
+    /// strictly contains `playPositionMS` — used to gate the split
+    /// menu entry.
+    func canSplitMarkAtPlayMarker(rowIndex: Int, markIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        let row = rows[rowIndex]
+        guard row.timing != nil,
+              markIndex >= 0, markIndex < row.effects.count else { return false }
+        let m = row.effects[markIndex]
+        return playPositionMS > m.startTimeMS && playPositionMS < m.endTimeMS
+    }
+
+    /// Returns true if the mark has a right-neighbor on the same row
+    /// — used to gate the merge menu entry.
+    func canMergeMarkWithNext(rowIndex: Int, markIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        let row = rows[rowIndex]
+        guard row.timing != nil,
+              markIndex >= 0, markIndex + 1 < row.effects.count else { return false }
+        return true
+    }
+
+    /// B68: move / resize a timing mark. Routes through the same
+    /// `moveEffect` bridge call used for ordinary effects (marks are
+    /// Effects on a timing layer), which already validates overlap.
+    @discardableResult
+    func moveTimingMark(rowIndex: Int, markIndex: Int,
+                         newStartMS: Int, newEndMS: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        let row = rows[rowIndex]
+        guard row.timing != nil,
+              markIndex >= 0, markIndex < row.effects.count else { return false }
+        let prev = row.effects[markIndex]
+        if prev.startTimeMS == newStartMS && prev.endTimeMS == newEndMS { return true }
+        moveEffect(rowIndex: rowIndex, effectIndex: markIndex,
+                    newStartMS: newStartMS, newEndMS: newEndMS)
+        undoManager.setActionName("Move Timing Mark")
+        return true
+    }
+
+    /// B70: set a timing mark's label. Empty string clears it.
+    /// Undo-able.
+    @discardableResult
+    func renameTimingMark(rowIndex: Int, markIndex: Int, label: String) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        let row = rows[rowIndex]
+        guard row.timing != nil,
+              markIndex >= 0, markIndex < row.effects.count else { return false }
+        let origLabel = row.effects[markIndex].name
+        if origLabel == label { return true }
+        if !document.setTimingMarkLabel(atRow: Int32(rowIndex),
+                                         at: Int32(markIndex),
+                                         label: label) {
+            return false
+        }
+        reloadRows()
+        undoManager.registerUndo(withTarget: self) { vm in
+            vm.renameTimingMark(rowIndex: rowIndex, markIndex: markIndex, label: origLabel)
+        }
+        undoManager.setActionName("Rename Timing Mark")
+        return true
+    }
+
+    /// B69: delete a timing mark. Registers an inverse add so ⌘Z
+    /// brings it back with the same start/end/label.
+    @discardableResult
+    func deleteTimingMark(rowIndex: Int, markIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        let row = rows[rowIndex]
+        guard row.timing != nil,
+              markIndex >= 0, markIndex < row.effects.count else { return false }
+        let e = row.effects[markIndex]
+        let origStart = e.startTimeMS
+        let origEnd = e.endTimeMS
+        let origLabel = e.name
+        if !document.deleteTimingMark(atRow: Int32(rowIndex), at: Int32(markIndex)) {
+            return false
+        }
+        reloadRows()
+        undoManager.registerUndo(withTarget: self) { vm in
+            vm.addTimingMark(rowIndex: rowIndex,
+                              startMS: origStart, endMS: origEnd,
+                              label: origLabel)
+        }
+        undoManager.setActionName("Delete Timing Mark")
+        return true
+    }
+
     // MARK: - Select in row / column (B2)
 
     /// Select every effect on the given row. Entry point from

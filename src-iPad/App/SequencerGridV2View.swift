@@ -34,6 +34,25 @@ struct SequencerGridV2View: View {
         var id: String { "\(rowIndex)-\(effectIndex)" }
     }
 
+    /// B67 / B69 timing-mark long-press target. `markIndex == nil`
+    /// means "empty space at `ms`" (→ Add Mark Here menu); non-nil
+    /// points to an existing mark (→ Delete Mark menu).
+    private struct TimingMarkMenuTarget: Identifiable {
+        let rowIndex: Int
+        let markIndex: Int?
+        let ms: Int
+        var id: String { "\(rowIndex)-\(markIndex ?? -1)-\(ms)" }
+    }
+    @State private var timingMarkMenuTarget: TimingMarkMenuTarget?
+
+    /// B73 add-timing-track alert state.
+    @State private var showAddTimingTrackAlert: Bool = false
+    @State private var newTimingTrackName: String = ""
+
+    /// B70 rename-timing-mark alert state.
+    @State private var renameMarkTarget: TimingMarkMenuTarget?
+    @State private var renameMarkText: String = ""
+
     var body: some View {
         GeometryReader { geo in
             // Partition rows into timing band (row 2) vs model band (row 3).
@@ -115,7 +134,16 @@ struct SequencerGridV2View: View {
                                     set: { timingScroll.vScrollOffsetPx = $0 }),
                                 onSeek: { ms in viewModel.seekTo(ms: ms) },
                                 onPinchZoom: pinchZoomAction,
-                                onUserInteraction: { timeline.noteUserInteraction() }
+                                onUserInteraction: { timeline.noteUserInteraction() },
+                                onLongPressMark: { rowId, markIdx, ms in
+                                    timingMarkMenuTarget = TimingMarkMenuTarget(
+                                        rowIndex: rowId, markIndex: markIdx, ms: ms)
+                                },
+                                onMarkDragEnd: { rowId, markIdx, newStart, newEnd in
+                                    _ = viewModel.moveTimingMark(
+                                        rowIndex: rowId, markIndex: markIdx,
+                                        newStartMS: newStart, newEndMS: newEnd)
+                                }
                             )
                             .frame(height: timingBandH)
                         }
@@ -269,6 +297,119 @@ struct SequencerGridV2View: View {
                 Button("Cancel", role: .cancel) {}
             }
         }
+        // B67 / B69 timing-mark long-press menu. Distinct dialog from
+        // the effect context menu so both can coexist without menu
+        // content cross-contamination.
+        .confirmationDialog(
+            "Timing",
+            isPresented: Binding(
+                get: { timingMarkMenuTarget != nil },
+                set: { if !$0 { timingMarkMenuTarget = nil } }
+            ),
+            presenting: timingMarkMenuTarget
+        ) { target in
+            if let markIdx = target.markIndex {
+                Button("Rename Mark") {
+                    let current = viewModel.rows[target.rowIndex].effects[markIdx].name
+                    renameMarkText = current
+                    renameMarkTarget = target
+                }
+                if viewModel.canSplitMarkAtPlayMarker(rowIndex: target.rowIndex,
+                                                      markIndex: markIdx) {
+                    Button("Split at Play Marker") {
+                        _ = viewModel.splitTimingMark(rowIndex: target.rowIndex,
+                                                       markIndex: markIdx,
+                                                       atMS: viewModel.playPositionMS)
+                    }
+                }
+                if viewModel.canMergeMarkWithNext(rowIndex: target.rowIndex,
+                                                   markIndex: markIdx) {
+                    Button("Merge with Next") {
+                        _ = viewModel.mergeTimingMarkWithNext(rowIndex: target.rowIndex,
+                                                               markIndex: markIdx)
+                    }
+                }
+                Button("Delete Mark", role: .destructive) {
+                    _ = viewModel.deleteTimingMark(rowIndex: target.rowIndex,
+                                                    markIndex: markIdx)
+                }
+                Button("Cancel", role: .cancel) {}
+            } else {
+                Button("Add Mark Here") {
+                    addTimingMarkFromTap(rowIndex: target.rowIndex, atMS: target.ms)
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+        }
+        // B73 add-timing-track alert. A simple text-field prompt
+        // sufficient for the initial cut; NewTimingDialog's fixed /
+        // lyric / variable choice can land later.
+        .alert("Add Timing Track",
+               isPresented: $showAddTimingTrackAlert) {
+            TextField("Name", text: $newTimingTrackName)
+            Button("Add") {
+                _ = viewModel.addTimingTrack(name: newTimingTrackName)
+                newTimingTrackName = ""
+            }
+            Button("Cancel", role: .cancel) {
+                newTimingTrackName = ""
+            }
+        } message: {
+            Text("Name for the new variable timing track.")
+        }
+        // B70 rename-timing-mark alert.
+        .alert("Rename Mark",
+               isPresented: Binding(
+                get: { renameMarkTarget != nil },
+                set: { if !$0 { renameMarkTarget = nil } }
+               ),
+               presenting: renameMarkTarget) { target in
+            TextField("Label", text: $renameMarkText)
+            Button("OK") {
+                if let markIdx = target.markIndex {
+                    _ = viewModel.renameTimingMark(rowIndex: target.rowIndex,
+                                                    markIndex: markIdx,
+                                                    label: renameMarkText)
+                }
+                renameMarkText = ""
+                renameMarkTarget = nil
+            }
+            Button("Cancel", role: .cancel) {
+                renameMarkText = ""
+                renameMarkTarget = nil
+            }
+        } message: { _ in
+            Text("Timing-mark label (leave blank to clear).")
+        }
+    }
+
+    /// B67: default add-mark duration is 500 ms, clamped against the
+    /// next existing mark on that row (min 100 ms) and the sequence
+    /// end. Start = tap time (clamped >= previous mark's end).
+    private func addTimingMarkFromTap(rowIndex: Int, atMS: Int) {
+        guard rowIndex >= 0, rowIndex < viewModel.rows.count else { return }
+        let row = viewModel.rows[rowIndex]
+        var startMS = atMS
+        var endMS = atMS + 500
+        var prevEnd = 0
+        var nextStart = viewModel.sequenceDurationMS
+        for e in row.effects {
+            if e.endTimeMS <= startMS { prevEnd = max(prevEnd, e.endTimeMS) }
+            if e.startTimeMS >= startMS && e.startTimeMS < nextStart {
+                nextStart = e.startTimeMS
+            }
+        }
+        startMS = max(prevEnd, startMS)
+        endMS = min(endMS, nextStart)
+        if endMS <= startMS + 50 {
+            // Collapsed window — fall back to 100 ms minimum or skip.
+            endMS = startMS + 100
+            if endMS > nextStart || endMS > viewModel.sequenceDurationMS {
+                return
+            }
+        }
+        _ = viewModel.addTimingMark(rowIndex: rowIndex,
+                                     startMS: startMS, endMS: endMS)
     }
 
     // MARK: - Row 1: view/time corner + top chrome
@@ -294,6 +435,16 @@ struct SequencerGridV2View: View {
                                 Text(name)
                             }
                         }
+                    }
+                    // B73 entry-point lives here (rather than only on
+                    // timing-row headers) so users with zero timing
+                    // tracks still have a path to add one.
+                    Divider()
+                    Button {
+                        newTimingTrackName = ""
+                        showAddTimingTrackAlert = true
+                    } label: {
+                        Label("Add Timing Track…", systemImage: "plus.rectangle")
                     }
                 } label: {
                     HStack(spacing: 2) {
@@ -402,7 +553,11 @@ struct SequencerGridV2View: View {
                     row: row,
                     height: metrics.timingRowHeight,
                     document: viewModel.document,
-                    onRowsChanged: { viewModel.reloadRows() }
+                    onRowsChanged: { viewModel.reloadRows() },
+                    canBreakdownPhrases: viewModel.canBreakdownPhrases(rowIndex: row.id),
+                    onBreakdownPhrases: {
+                        _ = viewModel.breakdownPhrases(rowIndex: row.id)
+                    }
                 )
             }
         }

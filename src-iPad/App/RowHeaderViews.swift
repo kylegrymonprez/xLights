@@ -11,6 +11,13 @@ struct TimingRowHeader: View {
     let height: CGFloat
     let document: XLSequenceDocument
     let onRowsChanged: () -> Void
+    /// B84: surfaced as "Breakdown Phrases" in the context menu. The
+    /// outer view wires this to `SequencerViewModel.breakdownPhrases`;
+    /// nil hides the menu entry. Guarded separately by
+    /// `canBreakdownPhrases` so we don't flash an entry the user
+    /// can't use.
+    var canBreakdownPhrases: Bool = false
+    var onBreakdownPhrases: (() -> Void)?
 
     // Active state is carried on `row.timing?.isActive` so a toggle
     // here flips the struct equality and re-runs the grid body —
@@ -96,6 +103,12 @@ struct TimingRowHeader: View {
                     renameText = row.timing?.elementName ?? row.displayName
                     showRename = true
                 } label: { Label("Rename Timing Track", systemImage: "pencil") }
+                if canBreakdownPhrases, let fire = onBreakdownPhrases {
+                    Button { fire() } label: {
+                        Label("Breakdown Phrases",
+                               systemImage: "text.append")
+                    }
+                }
                 Button(role: .destructive) {
                     showDelete = true
                 } label: { Label("Delete Timing Track", systemImage: "trash") }

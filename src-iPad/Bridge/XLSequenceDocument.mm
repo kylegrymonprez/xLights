@@ -14,6 +14,7 @@
 #include "iPadRenderContext.h"
 
 #include "render/Element.h"
+#include "render/RenderUtils.h"
 #include "render/EffectLayer.h"
 #include "render/Effect.h"
 #include "render/SequenceElements.h"
@@ -481,6 +482,140 @@
     // in-flight render before the element disappears.
     _context->AbortRender(5000);
     _context->GetSequenceElements().DeleteElement(name);
+    return YES;
+}
+
+- (BOOL)addTimingTrackNamed:(NSString*)name {
+    if (!name || name.length == 0) return NO;
+    std::string n([name UTF8String]);
+    TimingElement* e = _context->AddTimingElement(n, "");
+    return e != nullptr;
+}
+
+- (int)addTimingMarkAtRow:(int)rowIndex
+                  startMS:(int)startMS
+                    endMS:(int)endMS
+                    label:(NSString*)label {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return -1;
+    if (row->element->GetType() != ElementType::ELEMENT_TYPE_TIMING) return -1;
+    auto* layer = [self effectLayerForRow:rowIndex];
+    if (!layer) return -1;
+    if (startMS < 0) startMS = 0;
+    if (endMS <= startMS) return -1;
+    // Reject overlap with any existing mark on the same layer.
+    for (int i = 0; i < layer->GetEffectCount(); i++) {
+        Effect* other = layer->GetEffect(i);
+        if (!other) continue;
+        int os = other->GetStartTimeMS();
+        int oe = other->GetEndTimeMS();
+        if (startMS < oe && endMS > os) return -1;
+    }
+    std::string lbl = label ? std::string([label UTF8String]) : std::string();
+    Effect* e = layer->AddEffect(0, lbl, "", "", startMS, endMS, 0, false);
+    if (!e) return -1;
+    for (int i = 0; i < layer->GetEffectCount(); i++) {
+        if (layer->GetEffect(i) == e) return i;
+    }
+    return -1;
+}
+
+- (BOOL)deleteTimingMarkAtRow:(int)rowIndex atIndex:(int)markIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    if (row->element->GetType() != ElementType::ELEMENT_TYPE_TIMING) return NO;
+    auto* layer = [self effectLayerForRow:rowIndex];
+    if (!layer || markIndex < 0 || markIndex >= layer->GetEffectCount()) return NO;
+    layer->DeleteEffectByIndex(markIndex);
+    return YES;
+}
+
+- (BOOL)setTimingMarkLabelAtRow:(int)rowIndex
+                        atIndex:(int)markIndex
+                          label:(NSString*)label {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    if (row->element->GetType() != ElementType::ELEMENT_TYPE_TIMING) return NO;
+    auto* layer = [self effectLayerForRow:rowIndex];
+    if (!layer || markIndex < 0 || markIndex >= layer->GetEffectCount()) return NO;
+    Effect* e = layer->GetEffect(markIndex);
+    if (!e) return NO;
+    std::string lbl = label ? std::string([label UTF8String]) : std::string();
+    e->SetEffectName(lbl);
+    return YES;
+}
+
+- (BOOL)breakdownPhrasesAtRow:(int)rowIndex {
+    auto& se = _context->GetSequenceElements();
+    auto* row = se.GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    if (row->element->GetType() != ElementType::ELEMENT_TYPE_TIMING) return NO;
+    if (row->layerIndex != 0) return NO;  // only the phrase layer
+    TimingElement* te = dynamic_cast<TimingElement*>(row->element);
+    if (!te) return NO;
+
+    EffectLayer* phraseLayer = te->GetEffectLayer(0);
+    if (!phraseLayer) return NO;
+    if (phraseLayer->GetEffectCount() == 0) return NO;
+
+    // Lock guard: desktop rejects breakdown when any existing
+    // word/phoneme mark is locked, to avoid silently wiping work
+    // the user pinned. Match that behavior.
+    for (int k = (int)te->GetEffectLayerCount() - 1; k > 0; --k) {
+        EffectLayer* ck = te->GetEffectLayer(k);
+        if (!ck) continue;
+        for (auto&& eff : ck->GetAllEffects()) {
+            if (eff && eff->IsLocked()) return NO;
+        }
+    }
+
+    // Discard any existing word+phoneme layers, then add a fresh
+    // word layer. Mirrors `RowHeading::BreakdownTimingPhrases`.
+    te->SetFixedTiming(0);
+    while (te->GetEffectLayerCount() > 1) {
+        te->RemoveEffectLayer((int)te->GetEffectLayerCount() - 1);
+    }
+    EffectLayer* wordLayer = te->AddEffectLayer();
+    if (!wordLayer) return NO;
+
+    double freq = se.GetFrequency();
+    static const std::string delims = " \t:;,.-_!?{}[]()<>+=|";
+    for (int i = 0; i < phraseLayer->GetEffectCount(); i++) {
+        Effect* pe = phraseLayer->GetEffect(i);
+        if (!pe) continue;
+        std::string phrase = pe->GetEffectName();
+        if (phrase.empty()) continue;
+        std::vector<std::string> words;
+        size_t start = 0;
+        while (start < phrase.size()) {
+            size_t pos = phrase.find_first_of(delims, start);
+            if (pos != start) {
+                std::string w = phrase.substr(start, (pos == std::string::npos ? phrase.size() : pos) - start);
+                if (!w.empty()) words.push_back(std::move(w));
+            }
+            if (pos == std::string::npos) break;
+            start = pos + 1;
+        }
+        if (words.empty()) continue;
+        int phraseStart = pe->GetStartTimeMS();
+        int phraseEnd = pe->GetEndTimeMS();
+        double intervalMS = double(phraseEnd - phraseStart) / double(words.size());
+        int curStart = phraseStart;
+        for (int w = 0; w < (int)words.size(); w++) {
+            int curEnd = RoundToMultipleOfPeriod(
+                phraseStart + int(intervalMS * (w + 1)), freq);
+            if (w == (int)words.size() - 1 || curEnd > phraseEnd) {
+                curEnd = phraseEnd;
+            }
+            if (curEnd > curStart) {
+                wordLayer->AddEffect(0, words[w], "", "",
+                                      curStart, curEnd,
+                                      /*EFFECT_NOT_SELECTED*/ 0, false);
+            }
+            curStart = curEnd;
+        }
+    }
+    se.PopulateRowInformation();
     return YES;
 }
 

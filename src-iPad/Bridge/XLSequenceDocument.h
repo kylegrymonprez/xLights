@@ -153,6 +153,46 @@
 - (BOOL)renameTimingTrackAtIndex:(int)rowIndex newName:(NSString*)newName;
 - (BOOL)deleteTimingTrackAtIndex:(int)rowIndex;
 
+// B73: add a new variable (user-editable) timing track with the given
+// name. The new track is made active (`DeactivateAllTimingElements` +
+// active=true on the new one). Returns NO if `name` is empty; a
+// unique suffix is auto-appended (Timing -> Timing_1) if the name
+// collides with an existing track.
+- (BOOL)addTimingTrackNamed:(NSString*)name;
+
+// B67 / B69: timing-mark primitives. Marks are stored as `Effect`
+// entries on the timing row's `EffectLayer`; these wrap the existing
+// `addEffectToRow:...` / `deleteEffectInRow:atIndex:` but add a
+// rowIsTiming guard and a range-overlap check. `addTimingMark` sets
+// the effect name to `label` (the phrase/word/phoneme text on
+// lyric tracks; empty string for plain timing marks). Returns the
+// new mark's index, or -1 on failure (row isn't a timing row,
+// overlap, or sequence end overlap).
+- (int)addTimingMarkAtRow:(int)rowIndex
+                  startMS:(int)startMS
+                    endMS:(int)endMS
+                    label:(NSString*)label;
+- (BOOL)deleteTimingMarkAtRow:(int)rowIndex atIndex:(int)markIndex;
+
+// B70: rename a timing mark's label in-place. `label` may be empty
+// (clearing the label). Returns NO if the row isn't a timing row
+// or the index is out of range. No overlap/validation — labels are
+// free text.
+- (BOOL)setTimingMarkLabelAtRow:(int)rowIndex
+                        atIndex:(int)markIndex
+                          label:(NSString*)label
+    NS_SWIFT_NAME(setTimingMarkLabel(atRow:at:label:));
+
+// B84: break every phrase mark on a timing element into per-word
+// sub-marks on layer 1. Rejects rows that aren't the phrase layer
+// (layer 0) of a timing element. Discards any existing word + phoneme
+// layers on the element and adds a fresh word layer. Rejects when
+// any existing word/phoneme effect is locked (matches desktop
+// safety check in RowHeading::BreakdownTimingPhrases).
+// Returns NO on rejection.
+- (BOOL)breakdownPhrasesAtRow:(int)rowIndex
+    NS_SWIFT_NAME(breakdownPhrases(atRow:));
+
 // Views (view picker).
 - (NSArray<NSString*>*)availableViews;
 - (int)currentViewIndex;

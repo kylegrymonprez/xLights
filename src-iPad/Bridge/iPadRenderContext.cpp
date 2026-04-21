@@ -587,9 +587,33 @@ Model* iPadRenderContext::GetModel(const std::string& name) const {
     return nullptr;
 }
 
-TimingElement* iPadRenderContext::AddTimingElement(const std::string& /*name*/,
-                                                    const std::string& /*subType*/) {
-    return nullptr;
+TimingElement* iPadRenderContext::AddTimingElement(const std::string& name,
+                                                    const std::string& subType) {
+    // Mirrors xLightsFrame::AddTimingElement (tabSequencer.cpp:3502).
+    // Makes the name unique by appending _N suffixes, deactivates all
+    // existing timing elements so the new one is the only active
+    // track, adds the element + a single default effect layer, and
+    // registers it with the current sequence view.
+    std::string n = name;
+    int nn = 1;
+    while (_sequenceElements.GetElement(n) != nullptr) {
+        n = name + "_" + std::to_string(nn++);
+    }
+    _sequenceElements.DeactivateAllTimingElements();
+    int timingCount = _sequenceElements.GetNumberOfTimingElements();
+    Element* raw = _sequenceElements.AddElement(timingCount, n, "timing",
+                                                 /*visible*/ true,
+                                                 /*collapsed*/ false,
+                                                 /*active*/ true,
+                                                 /*selected*/ false,
+                                                 /*renderDisabled*/ false);
+    TimingElement* e = dynamic_cast<TimingElement*>(raw);
+    if (!e) return nullptr;
+    e->SetSubType(subType);
+    e->AddEffectLayer();
+    _sequenceElements.AddTimingToCurrentView(n);
+    _sequenceElements.PopulateRowInformation();
+    return e;
 }
 
 bool iPadRenderContext::AbortRender(int /*maxTimeMs*/) {

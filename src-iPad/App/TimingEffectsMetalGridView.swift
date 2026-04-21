@@ -15,6 +15,16 @@ struct TimingEffectsMetalGridView: UIViewRepresentable {
     let onSeek: (Int) -> Void
     let onPinchZoom: (CGFloat, CGFloat) -> Void
     var onUserInteraction: (() -> Void)?
+    /// Fired on long-press in the timing band. `rowIndex` is the
+    /// timing row hit (in `rows`), `markIndex` is non-nil when the
+    /// press landed on an existing mark, `ms` is the touch's time
+    /// when it was on empty space. The outer view decides which
+    /// menu (delete-mark vs add-mark) to present.
+    var onLongPressMark: ((_ rowIndex: Int, _ markIndex: Int?, _ ms: Int) -> Void)?
+    /// B68: called when a drag of a timing mark completes. The view
+    /// model should move the mark via its existing `moveEffect` path.
+    var onMarkDragEnd: ((_ rowIndex: Int, _ markIndex: Int,
+                          _ newStartMS: Int, _ newEndMS: Int) -> Void)?
 
     func makeUIView(context: Context) -> TimingEffectsMetalMTKView {
         let v = TimingEffectsMetalMTKView()
@@ -35,6 +45,8 @@ struct TimingEffectsMetalGridView: UIViewRepresentable {
         c.onUpdateScrollX = { scrollOffsetX = $0 }
         c.onUpdateScrollY = { scrollOffsetY = $0 }
         c.onUserInteraction = onUserInteraction
+        c.onLongPressMark = onLongPressMark
+        c.onMarkDragEnd = onMarkDragEnd
         view.setNeedsDisplay()
     }
 
@@ -52,8 +64,28 @@ struct TimingEffectsMetalGridView: UIViewRepresentable {
         var onUpdateScrollX: (CGFloat) -> Void = { _ in }
         var onUpdateScrollY: (CGFloat) -> Void = { _ in }
         var onUserInteraction: (() -> Void)?
+        var onLongPressMark: ((Int, Int?, Int) -> Void)?
+        var onMarkDragEnd: ((Int, Int, Int, Int) -> Void)?
         var panStartScrollX: CGFloat = 0
         var panStartScrollY: CGFloat = 0
+
+        // B68 live drag state for a timing mark. When set, draw
+        // renders the mark at `liveStartMS…liveEndMS` instead of
+        // its stored position.
+        enum MarkDragKind { case move, resizeLeft, resizeRight }
+        struct MarkDrag {
+            let rowIndex: Int      // global row id (into viewModel.rows)
+            let rowLocal: Int      // local index into this canvas's rows
+            let markIndex: Int
+            let kind: MarkDragKind
+            let origStartMS: Int
+            let origEndMS: Int
+            let minStartMS: Int    // clamp: previous mark's end (or 0)
+            let maxEndMS: Int      // clamp: next mark's start (or duration)
+        }
+        var markDrag: MarkDrag?
+        var liveMarkStartMS: Int?
+        var liveMarkEndMS: Int?
     }
 }
 
@@ -198,16 +230,28 @@ final class TimingEffectsMetalMTKView: MTKView, MTKViewDelegate {
             } else {
                 bg = nil
             }
-            for effect in row.effects {
-                let x1 = CGFloat(effect.startTimeMS) * c.pixelsPerMS - c.scrollOffsetX
-                let x2 = CGFloat(effect.endTimeMS) * c.pixelsPerMS - c.scrollOffsetX
+            for (eIdx, effect) in row.effects.enumerated() {
+                let isDragged = (c.markDrag?.rowIndex == row.id
+                                  && c.markDrag?.markIndex == eIdx)
+                let startMS = isDragged ? (c.liveMarkStartMS ?? effect.startTimeMS)
+                                         : effect.startTimeMS
+                let endMS = isDragged ? (c.liveMarkEndMS ?? effect.endTimeMS)
+                                       : effect.endTimeMS
+                let x1 = CGFloat(startMS) * c.pixelsPerMS - c.scrollOffsetX
+                let x2 = CGFloat(endMS) * c.pixelsPerMS - c.scrollOffsetX
                 if x2 < 0 || x1 > viewport.width { continue }
+                // Brighter during drag for live-feedback; otherwise
+                // the usual soft-white stroke.
+                let a: CGFloat = isDragged ? 1.0 : 0.75
+                let rr: CGFloat = isDragged ? 1.0 : 1.0
+                let gg: CGFloat = isDragged ? 0.85 : 1.0
+                let bb: CGFloat = isDragged ? 0.25 : 1.0
                 bridge.appendLineX1(x1 + 0.5, y1: y + 1,
                                      x2: x1 + 0.5, y2: y + c.rowHeight - 1,
-                                     r: 1, g: 1, b: 1, a: 0.75)
+                                     r: rr, g: gg, b: bb, a: a)
                 bridge.appendLineX1(x2 - 0.5, y1: y + 1,
                                      x2: x2 - 0.5, y2: y + c.rowHeight - 1,
-                                     r: 1, g: 1, b: 1, a: 0.75)
+                                     r: rr, g: gg, b: bb, a: a)
                 if !effect.name.isEmpty {
                     let cx = (x1 + x2) / 2
                     labels.append(Label(x: cx,
@@ -283,6 +327,39 @@ final class TimingEffectsMetalMTKView: MTKView, MTKViewDelegate {
         addGestureRecognizer(pan)
         let pinch = UIPinchGestureRecognizer(target: self, action: #selector(onPinch(_:)))
         addGestureRecognizer(pinch)
+        // B67 / B69: long-press brings up the mark context menu.
+        // Resolved hit is either an existing mark (→ Delete) or
+        // empty space (→ Add Mark Here).
+        let lp = UILongPressGestureRecognizer(target: self,
+                                                action: #selector(onLongPress(_:)))
+        lp.minimumPressDuration = 0.5
+        lp.allowableMovement = 6
+        addGestureRecognizer(lp)
+    }
+
+    @objc func onLongPress(_ g: UILongPressGestureRecognizer) {
+        guard g.state == .began, let c = coordinator, c.pixelsPerMS > 0 else { return }
+        let p = g.location(in: self)
+        // Find the row.
+        var y: CGFloat = -c.scrollOffsetY
+        var rowIdx = -1
+        for (i, _) in c.rows.enumerated() {
+            if p.y >= y && p.y < y + c.rowHeight {
+                rowIdx = i; break
+            }
+            y += c.rowHeight
+        }
+        guard rowIdx >= 0 else { return }
+        let row = c.rows[rowIdx]
+        let ms = max(0, Int((p.x + c.scrollOffsetX) / c.pixelsPerMS))
+        var markIdx: Int? = nil
+        for (mi, m) in row.effects.enumerated() {
+            if ms >= m.startTimeMS && ms <= m.endTimeMS { markIdx = mi; break }
+        }
+        // Pass the row's global id (its `viewModel.rows` index) rather
+        // than the local timing-band index, so the view model can
+        // look up via `rows[id]` without reversing any filters.
+        c.onLongPressMark?(row.id, markIdx, ms)
     }
 
     @objc func onTap(_ g: UITapGestureRecognizer) {
@@ -308,17 +385,189 @@ final class TimingEffectsMetalMTKView: MTKView, MTKViewDelegate {
         guard let c = coordinator else { return }
         switch g.state {
         case .began:
-            c.panStartScrollX = c.scrollOffsetX
-            c.panStartScrollY = c.scrollOffsetY
+            let p = g.location(in: self)
+            if let drag = startMarkDrag(at: p, c: c) {
+                c.markDrag = drag
+                c.liveMarkStartMS = drag.origStartMS
+                c.liveMarkEndMS = drag.origEndMS
+                setNeedsDisplay()
+            } else {
+                c.markDrag = nil
+                c.panStartScrollX = c.scrollOffsetX
+                c.panStartScrollY = c.scrollOffsetY
+            }
             c.onUserInteraction?()
         case .changed:
-            let t = g.translation(in: self)
-            c.onUpdateScrollX(max(0, c.panStartScrollX - t.x))
-            c.onUpdateScrollY(max(0, c.panStartScrollY - t.y))
+            if let drag = c.markDrag {
+                updateMarkDrag(g: g, drag: drag, c: c)
+            } else {
+                let t = g.translation(in: self)
+                c.onUpdateScrollX(max(0, c.panStartScrollX - t.x))
+                c.onUpdateScrollY(max(0, c.panStartScrollY - t.y))
+            }
             c.onUserInteraction?()
+        case .ended:
+            if let drag = c.markDrag,
+               let ls = c.liveMarkStartMS, let le = c.liveMarkEndMS {
+                if ls != drag.origStartMS || le != drag.origEndMS {
+                    c.onMarkDragEnd?(drag.rowIndex, drag.markIndex, ls, le)
+                }
+            }
+            c.markDrag = nil
+            c.liveMarkStartMS = nil
+            c.liveMarkEndMS = nil
+            setNeedsDisplay()
+        case .cancelled, .failed:
+            c.markDrag = nil
+            c.liveMarkStartMS = nil
+            c.liveMarkEndMS = nil
+            setNeedsDisplay()
         default:
             break
         }
+    }
+
+    /// Hit-test a touch point against the rendered timing marks.
+    /// Returns a `MarkDrag` whose kind is `.resizeLeft` / `.resizeRight`
+    /// when the press lands within ~10 px of an edge, `.move` when it
+    /// lands in the middle of a mark, or nil when it lands on empty
+    /// space (→ fall through to scroll). Min/max bounds are the
+    /// neighboring marks' positions so the drag can't plow into them.
+    private func startMarkDrag(at p: CGPoint,
+                                c: TimingEffectsMetalGridView.Coordinator)
+        -> TimingEffectsMetalGridView.Coordinator.MarkDrag? {
+        guard c.pixelsPerMS > 0 else { return nil }
+        var y: CGFloat = -c.scrollOffsetY
+        var rowLocal = -1
+        for (i, _) in c.rows.enumerated() {
+            if p.y >= y && p.y < y + c.rowHeight {
+                rowLocal = i; break
+            }
+            y += c.rowHeight
+        }
+        guard rowLocal >= 0 else { return nil }
+        let row = c.rows[rowLocal]
+        let ms = Int((p.x + c.scrollOffsetX) / c.pixelsPerMS)
+        let edgeSlopMS = Int(10 / c.pixelsPerMS)
+        for (mIdx, m) in row.effects.enumerated() {
+            if ms < m.startTimeMS - edgeSlopMS { break }
+            if ms > m.endTimeMS + edgeSlopMS { continue }
+            let prevEnd = mIdx > 0 ? row.effects[mIdx - 1].endTimeMS : 0
+            let nextStart = mIdx + 1 < row.effects.count
+                ? row.effects[mIdx + 1].startTimeMS : Int.max
+            let kind: TimingEffectsMetalGridView.Coordinator.MarkDragKind
+            if abs(ms - m.startTimeMS) <= edgeSlopMS && ms < m.startTimeMS + (m.endTimeMS - m.startTimeMS) / 2 {
+                kind = .resizeLeft
+            } else if abs(ms - m.endTimeMS) <= edgeSlopMS && ms > m.startTimeMS + (m.endTimeMS - m.startTimeMS) / 2 {
+                kind = .resizeRight
+            } else if ms >= m.startTimeMS && ms <= m.endTimeMS {
+                kind = .move
+            } else {
+                return nil
+            }
+            return .init(rowIndex: row.id, rowLocal: rowLocal,
+                          markIndex: mIdx, kind: kind,
+                          origStartMS: m.startTimeMS, origEndMS: m.endTimeMS,
+                          minStartMS: prevEnd, maxEndMS: nextStart)
+        }
+        return nil
+    }
+
+    private func updateMarkDrag(g: UIPanGestureRecognizer,
+                                 drag: TimingEffectsMetalGridView.Coordinator.MarkDrag,
+                                 c: TimingEffectsMetalGridView.Coordinator) {
+        let tx = g.translation(in: self).x
+        let dMS = Int(tx / c.pixelsPerMS)
+        let duration = drag.origEndMS - drag.origStartMS
+        var newStart = drag.origStartMS
+        var newEnd = drag.origEndMS
+        switch drag.kind {
+        case .move:
+            newStart = max(drag.minStartMS,
+                           min(drag.maxEndMS - duration, drag.origStartMS + dMS))
+            newEnd = newStart + duration
+        case .resizeLeft:
+            // Keep the right edge put; min start = prev-mark end; max
+            // start = one ms before current end.
+            newStart = max(drag.minStartMS,
+                           min(drag.origEndMS - 1, drag.origStartMS + dMS))
+            newEnd = drag.origEndMS
+        case .resizeRight:
+            newStart = drag.origStartMS
+            newEnd = min(drag.maxEndMS,
+                         max(drag.origStartMS + 1, drag.origEndMS + dMS))
+        }
+        // Snap to the NEAREST other-mark edge within 10 px, preserving
+        // the drag semantic (move snaps whichever edge is nearer +
+        // preserves duration; resize snaps just the dragged edge).
+        let snapCandidates = markEdgeMSCandidates(skipRowIndex: drag.rowIndex,
+                                                    skipMarkIndex: drag.markIndex,
+                                                    c: c)
+        if let snapStart = snap(value: drag.kind == .resizeRight ? newEnd : newStart,
+                                 candidates: snapCandidates, pxThreshold: 10, c: c) {
+            switch drag.kind {
+            case .move:
+                // Determine which edge is closer
+                let snapEnd = snap(value: newEnd, candidates: snapCandidates,
+                                    pxThreshold: 10, c: c)
+                let dStart = abs(snapStart - newStart)
+                let dEnd = snapEnd.map { abs($0 - newEnd) } ?? Int.max
+                if dStart <= dEnd {
+                    newStart = max(drag.minStartMS,
+                                   min(drag.maxEndMS - duration, snapStart))
+                    newEnd = newStart + duration
+                } else if let se = snapEnd {
+                    newEnd = se
+                    newStart = max(drag.minStartMS,
+                                   min(drag.maxEndMS - duration, se - duration))
+                }
+            case .resizeLeft:
+                newStart = max(drag.minStartMS,
+                               min(drag.origEndMS - 1, snapStart))
+            case .resizeRight:
+                break
+            }
+        }
+        if drag.kind == .resizeRight,
+           let snapEnd = snap(value: newEnd, candidates: snapCandidates,
+                               pxThreshold: 10, c: c) {
+            newEnd = min(drag.maxEndMS,
+                         max(drag.origStartMS + 1, snapEnd))
+        }
+        c.liveMarkStartMS = newStart
+        c.liveMarkEndMS = newEnd
+        setNeedsDisplay()
+    }
+
+    /// Gather every other-mark edge time on every timing row — used
+    /// as the snap source. Skips the mark currently being dragged.
+    private func markEdgeMSCandidates(skipRowIndex: Int,
+                                       skipMarkIndex: Int,
+                                       c: TimingEffectsMetalGridView.Coordinator)
+        -> [Int] {
+        var out: [Int] = []
+        for row in c.rows {
+            for (mi, m) in row.effects.enumerated() {
+                if row.id == skipRowIndex && mi == skipMarkIndex { continue }
+                out.append(m.startTimeMS)
+                out.append(m.endTimeMS)
+            }
+        }
+        return out
+    }
+
+    private func snap(value: Int, candidates: [Int],
+                       pxThreshold: CGFloat,
+                       c: TimingEffectsMetalGridView.Coordinator) -> Int? {
+        guard c.pixelsPerMS > 0, !candidates.isEmpty else { return nil }
+        let thresh = Int(pxThreshold / c.pixelsPerMS)
+        var best: Int?
+        var bestD = thresh + 1
+        for cand in candidates {
+            let d = abs(cand - value)
+            if d < bestD { bestD = d; best = cand }
+        }
+        return best
     }
 
     @objc func onPinch(_ g: UIPinchGestureRecognizer) {

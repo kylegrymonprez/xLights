@@ -485,14 +485,65 @@ gap. Timing tracks are **read-only** on iPad.
 All **P0** for a lyrics / music workflow.
 
 - **Gap B67 — Tap to create timing mark** at play-position on
-  the active track.
+  the active track. **[landed 2026-04-20].** Long-press on
+  empty space in any timing row surfaces an "Add Mark Here"
+  menu entry; default duration 500 ms, clamped against the
+  next existing mark on that row and the sequence end (min
+  100 ms window). Routed through the new
+  `SequencerViewModel.addTimingMark(rowIndex:startMS:endMS:label:)`
+  → `XLSequenceDocument.addTimingMarkAtRow:startMS:endMS:label:`
+  bridge wrapper, which in turn calls `EffectLayer::AddEffect`
+  on the timing layer (marks are Effects with the label as
+  the effect name). Overlap with existing marks is rejected.
+  Undo-able.
 - **Gap B68 — Drag timing mark** edges to adjust start / end,
-  with snap to adjacent marks.
+  with snap to adjacent marks. **[landed 2026-04-20].** The
+  timing canvas's single-finger pan now hit-tests marks on
+  `.began`: within ~10 px of a start/end edge →
+  `resizeLeft` / `resizeRight`; inside the mark's range →
+  `move`; else → scroll (existing behavior). Live drag state
+  on the coordinator (`markDrag`, `liveMarkStartMS`,
+  `liveMarkEndMS`) re-paints the mark at its in-flight
+  position in yellow-tinted brackets while held. On `.ended`,
+  the move routes through
+  `SequencerViewModel.moveTimingMark(rowIndex:...)` → the
+  existing `moveEffect` bridge (marks are `Effect`s on a
+  timing layer). Snap-to-other-mark-edge at 10 px threshold
+  using every other mark's start+end across all timing rows;
+  move snaps whichever of start/end is nearer + preserves
+  duration, resizes snap only the dragged edge. Neighbor
+  overlap clamped via `minStartMS`/`maxEndMS` captured at
+  `.began`.
 - **Gap B69 — Delete timing mark** (long-press menu).
-- **Gap B70 — Rename timing mark label** (double-tap → text
-  field; desktop's Shift+double-click).
+  **[landed 2026-04-20].** Long-press on an existing mark
+  surfaces a "Delete Mark" destructive button in the same
+  timing long-press menu. Undo restores the original
+  start/end/label.
+- **Gap B70 — Rename timing mark label.** **[landed
+  2026-04-20].** "Rename Mark" entry on the existing timing
+  long-press menu (alongside Delete) opens a text-field alert;
+  commit calls
+  `SequencerViewModel.renameTimingMark(rowIndex:markIndex:label:)`
+  which wraps new bridge
+  `-setTimingMarkLabelAtRow:atIndex:label:` →
+  `Effect::SetEffectName`. Empty string clears the label.
+  Undo-able. (Desktop's in-place double-tap editor is a
+  follow-up polish.)
 - **Gap B71 — Split timing mark at play position.**
+  **[landed 2026-04-20].** "Split at Play Marker" entry on the
+  mark long-press menu (gated by `canSplitMarkAtPlayMarker`).
+  `splitTimingMark(rowIndex:markIndex:atMS:)` deletes original,
+  adds left half with original label + right half with empty
+  label, as one undo group.
 - **Gap B72 — Combine / merge adjacent timing marks.**
+  **[landed 2026-04-20].** "Merge with Next" entry on the mark
+  long-press menu (gated by `canMergeMarkWithNext`, which
+  requires a right-neighbor on the same row). The merged mark
+  spans `[left.start, right.end]`; labels join with a space
+  (or the non-empty one wins if only one side has a label).
+  Merges across a gap stitch the two ranges together —
+  desktop parity. One undo group rolls up the two deletes +
+  one add.
 
 ### 5.2 Track management
 
@@ -500,7 +551,18 @@ Long-press on a timing-row header on iPad today: Rename Timing Track,
 Delete Timing Track. That's it. Missing:
 
 - **Gap B73 — Add Timing Track** (new variable timing track).
-  Desktop has `NewTimingDialog`. **P0.**
+  **[landed 2026-04-20].** View-picker menu (top-left corner)
+  now has "Add Timing Track…" below the view list; opens a
+  name-prompt alert that calls
+  `SequencerViewModel.addTimingTrack(name:)`. The new track is
+  a plain variable timing track (fixed / lyric type choice
+  deferred; revisit if beat-detection import or Papagayo
+  import lands). `iPadRenderContext::AddTimingElement` is now
+  a real implementation (was a stub) that mirrors
+  `xLightsFrame::AddTimingElement`: uniquifies the name,
+  deactivates other timing elements, adds a default effect
+  layer, and registers the new track with the current view.
+  Undo-able.
 - **Gap B74 — Import Timing Track** from `.xtiming`. **P1.**
 - **Gap B75 — Export Timing Track** to `.xtiming`. **P1.**
 - **Gap B76 — Make Timing Track Variable** (convert fixed →
@@ -526,11 +588,39 @@ Delete Timing Track. That's it. Missing:
 
 These are how lyric videos get built. All **P0** for that workflow.
 
-- **Gap B84 — Breakdown Phrase / Phrases.** Split the selected
-  timing mark (or all timing marks) at phrase boundaries.
-- **Gap B85 — Breakdown Word / Words.** Same at word granularity.
-- **Gap B86 — Breakdown Phoneme.** Character-level splitting;
-  drives the face / mouth-shape rendering.
+- **Gap B84 — Breakdown Phrase / Phrases.** **[landed
+  2026-04-20 — row-level variant].** "Breakdown Phrases" entry
+  on a phrase (layer-0) timing row's header long-press menu
+  splits every non-empty phrase label into words on a fresh
+  layer-1 word track. Delimiter set matches desktop
+  (`LyricBreakdown.cpp:28`: `" \t:;,.-_!?{}[]()<>+=|"`); word
+  durations spaced equally across the phrase range and snapped
+  to the sequence frame period via `RoundToMultipleOfPeriod`.
+  Existing word + phoneme layers are discarded first (desktop
+  parity). Lock-guard: rejected if any existing word/phoneme
+  mark is locked. Not undo-able for now (mutates layer
+  structure; layer-level undo is follow-up work). Gated via
+  `canBreakdownPhrases(rowIndex:)` so the entry only appears
+  when the row has at least one mark with a non-empty label.
+  Per-mark variant ("Breakdown Phrase" on a single mark) and
+  the "Breakdown Selected Phrases" (multi-select) variants
+  are deferred.
+- **Gap B85 — Breakdown Word / Words.** **Deferred —
+  requires the phoneme dictionary port.** Desktop's
+  `BreakdownWord` depends on `PhonemeDictionary` (CMU-dict-
+  style loader + lookup) in `src-ui-wx/sequencer/PhonemeDictionary.{h,cpp}`.
+  That class is wx-based (wxString, wxArrayString,
+  wxFontEncoding) so shipping on iPad requires a wx-free
+  port, plus bundling the dictionary file(s). Track as
+  follow-up work after the phase-B sweep — existing
+  Papagayo-authored sequences still render correctly (B88),
+  so this only blocks iPad-authored lyric tracks.
+- **Gap B86 — Breakdown Phoneme.** Not a real desktop
+  feature — plan-writer artifact from scanning plan-scoped
+  gaps rather than the desktop menu. Desktop has exactly two
+  breakdown ops (phrases, words); phoneme marks are a product
+  of the Word breakdown, not a separate op. **Removed from
+  scope.**
 - **Gap B87 — Remove Words / Phonemes / Words-and-Phonemes.**
   Bulk clear of sub-layer labels.
 - **Gap B88 — Phoneme / word / phrase sub-layer rendering.**
@@ -711,13 +801,13 @@ Severity key:
 | B64 | Layer-count [N] indicator | Row heading | P2 |
 | B65 | Tooltip on truncated row name | Row heading | P2 |
 | B66 | Muted / hidden row visual state | Row heading | P2 |
-| B67 | Tap to create timing mark | Timing | P0 |
-| B68 | Drag timing mark edges | Timing | P0 |
-| B69 | Delete timing mark | Timing | P0 |
-| B70 | Rename timing mark label | Timing | P0 |
-| B71 | Split timing mark at play marker | Timing | P1 |
-| B72 | Combine / merge timing marks | Timing | P1 |
-| B73 | Add Timing Track | Timing | P0 |
+| B67 | Long-press create timing mark | Timing | ✓ landed |
+| B68 | Drag timing mark edges | Timing | ✓ landed |
+| B69 | Delete timing mark | Timing | ✓ landed |
+| B70 | Rename timing mark label | Timing | ✓ landed |
+| B71 | Split timing mark at play marker | Timing | ✓ landed |
+| B72 | Combine / merge timing marks | Timing | ✓ landed |
+| B73 | Add Timing Track | Timing | ✓ landed |
 | B74 | Import Timing Track (.xtiming) | Timing | P1 |
 | B75 | Export Timing Track (.xtiming) | Timing | P1 |
 | B76 | Make fixed timing track variable | Timing | P1 |
@@ -728,9 +818,9 @@ Severity key:
 | B81 | Hide All / Show All Timing | Timing | P2 |
 | B82 | Add Timing Tracks to All Views | Timing | P2 |
 | B83 | Create Timing From Effects | Timing | P2 |
-| B84 | Breakdown Phrase / Phrases | Timing | P0 |
-| B85 | Breakdown Word / Words | Timing | P0 |
-| B86 | Breakdown Phoneme | Timing | P0 |
+| B84 | Breakdown Phrase / Phrases | Timing | ✓ landed (row-level) |
+| B85 | Breakdown Word / Words | Timing | Deferred (needs phoneme dict) |
+| B86 | Breakdown Phoneme | Timing | Removed (not a real desktop feature) |
 | B87 | Remove Words / Phonemes | Timing | P1 |
 | B88 | Phoneme / word / phrase sub-layer **rendering** | Timing | ✓ landed |
 | B89 | Auto Label Timings (from lyrics) | Timing | P1 |
