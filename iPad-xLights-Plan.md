@@ -82,19 +82,16 @@ variants in `libdbg-ios/`.
 | B-Metal | Grid render pipeline migration (CG → Metal) | ✓ complete | — |
 | C | Effect settings inspector | ✓ complete — two polish follow-ups (MH colour/path authoring, DMX state persistence) tracked in [`plans/followups.md`](plans/followups.md) | — |
 | D | Model Preview + preview polish | ✓ complete — layout-editor overlays parked in [`plans/future-layout-editing.md`](plans/future-layout-editing.md) | [`plans/phase-d-preview.md`](plans/phase-d-preview.md) |
-| E | Sequence management (open / save / new / settings) | Partial — save / dirty / close-with-prompt, missing-media detection, and per-row replace-from-disk landed; New wizard, Sequence Settings dialog, recent docs, autosave still open | [`plans/phase-e-sequence-management.md`](plans/phase-e-sequence-management.md) |
+| E | Sequence management (open / save / new / settings) | ✓ complete — E-1 through E-6 shipped 2026-04-21. Deferred tabs (Timings import/export, Audio Tracks, Data Layers) + `.fseq` emission tracked in [`plans/followups.md`](plans/followups.md) | — |
 | F | Window system + Display Elements | Not started | [`plans/phase-f-window-system.md`](plans/phase-f-window-system.md) |
 | G | Document / iCloud polish | Not started | [`plans/phase-g-document.md`](plans/phase-g-document.md) |
 | H | App Store readiness | Not started | [`plans/phase-h-app-store.md`](plans/phase-h-app-store.md) |
 
-**Parallelism.** Phases B and E are the remaining pre-Phase-F
-work and can run in parallel. B works against the Metal grid +
-`SequencerViewModel` + row headers; E works against
-`XLSequenceDocument` + `SequencerViewModel` save/new paths. Phase
-F depends on the others — it composes the finished pieces
-(previews, inspector, grid) plus the File-menu commands (E) into
-the final window / menu-bar layout. G and H are sequential at
-the end.
+**Parallelism.** Phase B is the only remaining pre-Phase-F work;
+it runs against the Metal grid + `SequencerViewModel` + row
+headers. Phase F composes the finished pieces (previews,
+inspector, grid) plus the File-menu commands (E) into the final
+window / menu-bar layout. G and H are sequential at the end.
 
 **Preview scope.** Phase D is preview *viewing and appearance*: camera,
 overlays, background, labels, transport, export. Desktop `ModelPreview`

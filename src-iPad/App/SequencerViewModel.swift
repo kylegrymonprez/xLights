@@ -165,6 +165,14 @@ class SequencerViewModel {
     private var scrubEndMS: Int = 0
     private var renderPollTimer: Timer?
     private var dirtyPollTimer: Timer?
+    private var autosaveTimer: Timer?
+    /// Change-count snapshot at the last autosave write. Skips
+    /// repeat writes when nothing changed between ticks.
+    private var lastAutosaveChangeCount: UInt64 = 0
+    /// Autosave interval in minutes. 0 disables autosave.
+    /// Persisted via `@AppStorage` on the view that owns the
+    /// settings UI; the view model reads it on open.
+    var autosaveIntervalMinutes: Int = 5
     private var playbackStartTime: CFAbsoluteTime = 0  // wall clock when play started
     private var playbackStartMS: Int = 0                // sequence position when play started
 
@@ -247,6 +255,40 @@ class SequencerViewModel {
 
     // MARK: - Sequence
 
+    /// Create a fresh sequence on disk and load it as the active
+    /// document (E-2). Matches the desktop New wizard's output —
+    /// `type` is one of "Media" / "Animation" / "Effect";
+    /// `mediaPath` is used for Media sequences only.
+    @discardableResult
+    func newSequence(type: String,
+                      mediaPath: String,
+                      durationMS: Int,
+                      frameMS: Int,
+                      savePath: String) -> Bool {
+        let ok = document.newSequence(
+            atPath: savePath,
+            type: type,
+            mediaPath: mediaPath,
+            durationMS: Int32(durationMS),
+            frameMS: Int32(frameMS))
+        if ok {
+            isSequenceLoaded = true
+            isDirty = false
+            sequenceName = document.sequenceName()
+            sequenceDurationMS = Int(document.sequenceDurationMS())
+            frameIntervalMS = Int(document.frameIntervalMS())
+            hasAudio = document.hasAudio()
+            reloadRows()
+            loadAvailableEffects()
+            loadWaveform(startMS: 0, endMS: sequenceDurationMS)
+            startBackgroundRender()
+            startDirtyPolling()
+            scheduleBrokenMediaScan()
+            RecentSequences.record(path: savePath)
+        }
+        return ok
+    }
+
     func openSequence(path: String) {
         if document.openSequence(path) {
             isSequenceLoaded = true
@@ -270,6 +312,13 @@ class SequencerViewModel {
             // cache has settled, then hop back to main to update the
             // banner count. Keeps the open path from blocking on I/O.
             scheduleBrokenMediaScan()
+            // E-5 — push to the Recent list so the next cold launch
+            // surfaces it on the empty-state screen.
+            RecentSequences.record(path: path)
+            // E-6 — begin autosave writes for this session. The
+            // recovery prompt (when the `.xbkp` is newer than the
+            // `.xsq`) is presented by the UI shell after open.
+            startAutosaveTimer()
         }
     }
 
@@ -366,6 +415,113 @@ class SequencerViewModel {
         dirtyPollTimer = nil
     }
 
+    // MARK: - Autosave (E-6)
+
+    /// Start the `.xbkp` autosave timer. Fires every
+    /// `autosaveIntervalMinutes`; each tick asks the bridge to
+    /// serialise the current in-memory sequence to
+    /// `<basename>.xbkp` alongside the `.xsq`. Skips writes when
+    /// playback / scrub is active (consumer of CPU) or when the
+    /// dirty count hasn't advanced since the last successful
+    /// autosave — matches desktop's `OnTimer_AutoSaveTrigger`
+    /// gate behaviour in `xLightsMain.cpp:4635-4682`.
+    func startAutosaveTimer() {
+        stopAutosaveTimer()
+        guard autosaveIntervalMinutes > 0 else { return }
+        let interval = TimeInterval(autosaveIntervalMinutes * 60)
+        autosaveTimer = Timer.scheduledTimer(withTimeInterval: interval,
+                                              repeats: true) { [weak self] _ in
+            self?.tickAutosave()
+        }
+    }
+
+    func stopAutosaveTimer() {
+        autosaveTimer?.invalidate()
+        autosaveTimer = nil
+    }
+
+    private func tickAutosave() {
+        guard isSequenceLoaded else { return }
+        if isPlaying || isScrubbing { return }
+        // Only write when there's something dirty to protect —
+        // matches desktop's "skip autosave when no changes since
+        // last save" branch.
+        if !document.isSequenceDirty() { return }
+        _ = document.writeAutosaveBackup()
+    }
+
+    /// Path of the `.xbkp` that sits alongside the current
+    /// sequence. Empty when no sequence is open.
+    var autosaveBackupPath: String {
+        let p = document.currentSequencePath() ?? ""
+        if p.isEmpty { return "" }
+        return (p as NSString).deletingPathExtension + ".xbkp"
+    }
+
+    /// True when an autosave backup sits next to the current
+    /// sequence AND is newer than the `.xsq` by more than a few
+    /// seconds. Used by the open-time recovery sheet to decide
+    /// whether the user needs to be offered the backup.
+    func hasRecoverableBackup() -> (has: Bool, when: Date?) {
+        let xsqPath = document.currentSequencePath() ?? ""
+        if xsqPath.isEmpty { return (false, nil) }
+        let bkpPath = (xsqPath as NSString).deletingPathExtension + ".xbkp"
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: bkpPath) else { return (false, nil) }
+        guard let bkpAttrs = try? fm.attributesOfItem(atPath: bkpPath),
+              let bkpDate = bkpAttrs[.modificationDate] as? Date
+        else { return (false, nil) }
+        if fm.fileExists(atPath: xsqPath) {
+            if let xsqAttrs = try? fm.attributesOfItem(atPath: xsqPath),
+               let xsqDate = xsqAttrs[.modificationDate] as? Date,
+               bkpDate <= xsqDate.addingTimeInterval(2) {
+                return (false, nil)
+            }
+        }
+        return (true, bkpDate)
+    }
+
+    /// Replace the canonical `.xsq` with the `.xbkp` contents by
+    /// swapping filenames on disk, then reloading. Desktop's
+    /// recovery flow renames `foo.xbkp` → `foo.xsq` to claim the
+    /// backup; we do the same through FileManager.
+    func applyAutosaveBackup() -> Bool {
+        let xsqPath = document.currentSequencePath() ?? ""
+        if xsqPath.isEmpty { return false }
+        let bkpPath = (xsqPath as NSString).deletingPathExtension + ".xbkp"
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: bkpPath) else { return false }
+        // Move xsq aside (just in case) and promote the backup.
+        let archived = xsqPath + ".pre-xbkp-recovery"
+        _ = try? fm.removeItem(atPath: archived)
+        try? fm.moveItem(atPath: xsqPath, toPath: archived)
+        do {
+            try fm.moveItem(atPath: bkpPath, toPath: xsqPath)
+        } catch {
+            // Rollback: put the original back.
+            try? fm.moveItem(atPath: archived, toPath: xsqPath)
+            return false
+        }
+        try? fm.removeItem(atPath: archived)
+        // Re-open so in-memory state matches the promoted file.
+        closeSequence()
+        openSequence(path: xsqPath)
+        return true
+    }
+
+    /// Touch the `.xbkp`'s mtime so it's older than the `.xsq`
+    /// (or nearly equal), suppressing the recovery offer next
+    /// time the sequence opens. Called from the "Discard
+    /// Recovery" button and from the close-with-save path.
+    func suppressAutosaveBackup() {
+        let xsqPath = document.currentSequencePath() ?? ""
+        if xsqPath.isEmpty { return }
+        let bkpPath = (xsqPath as NSString).deletingPathExtension + ".xbkp"
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: bkpPath) else { return }
+        try? fm.removeItem(atPath: bkpPath)
+    }
+
     /// Called when the app scene moves to `.background` — iOS may kill
     /// the process at any time from that point. Abort all in-flight
     /// render jobs and wait briefly so the workers unwind before we
@@ -401,6 +557,7 @@ class SequencerViewModel {
         if isOutputting { toggleOutput() }
         stopPlayback()
         stopDirtyPolling()
+        stopAutosaveTimer()
         cancelBackgroundRender()
         // Wait for any background render jobs to exit before tearing
         // down SequenceElements / SequenceData — the render workers

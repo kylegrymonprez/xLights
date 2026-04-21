@@ -14,6 +14,34 @@ phase home; catalogued here so they don't fall off.
   to `FileUtils`. Full re-prompt UX needs a Swift callback +
   `UIDocumentPickerViewController` hook.
 
+## Phase E — Sequence management polish
+
+Phase E closed 2026-04-21. Deferred items:
+
+- **`.fseq` emission alongside save.** Desktop writes a
+  compiled `.fseq` to the FSEQ directory so Falcon Player /
+  downstream playback can consume it. iPad has no consumer
+  today (controller output is out of MVP). Revisit when a
+  real need surfaces — the `FSEQFile::createFSEQFile` path is
+  straightforward to plumb. P2.
+
+- **Sequence Settings → Timings import/export tab.** E-3
+  shipped without Timings. Row-header long-press already
+  covers rename / delete; the Settings dialog should
+  centralise those + add import (`.xtiming`, `.lms`, `.pgo`)
+  and export (`.xtiming`) flows matching desktop's
+  `SeqFileUtilities::ProcessXTiming` / `ProcessLorTiming` /
+  etc. P2.
+
+- **Sequence Settings → Audio Tracks tab.** Alt-audio tracks
+  round-trip through XML untouched today; no authoring UI.
+  Sheet with add / remove / rename / file-pick; routes picked
+  files through `MediaRelocation`. P2.
+
+- **Sequence Settings → Data Layers tab.** Image-data layers
+  authoring. Lowest priority — deferred until someone
+  actually uses them on iPad.
+
 ## Phase C — Effect Settings Inspector polish
 
 Phase C closed 2026-04-21. Small deferred items:

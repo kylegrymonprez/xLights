@@ -1,4 +1,39 @@
 import SwiftUI
+import UniformTypeIdentifiers
+
+/// Dynamic UTType for `.xsq` files. Declared here (not via
+/// UTExportedTypeDeclarations in the Info.plist) because Save-As
+/// needs a content type for the file exporter but iPad doesn't
+/// yet own the `.xsq` document type — desktop does. `.xml` is
+/// the fallback so the file exporter never no-ops.
+let kXSQFileType: UTType =
+    UTType(filenameExtension: "xsq") ?? .xml
+
+/// `FileDocument` for the Save-As flow. Wraps the on-disk bytes
+/// of an already-saved sequence so iOS's `.fileExporter` can
+/// copy them to the user-picked destination. The sequence must
+/// have been written to `sourcePath` before the exporter
+/// presents; for new-but-unsaved sequences the caller saves to
+/// the current path first (or falls back to empty XML so the
+/// exporter still produces a file).
+struct XLSequenceExportDoc: FileDocument {
+    static var readableContentTypes: [UTType] { [kXSQFileType] }
+    static var writableContentTypes: [UTType] { [kXSQFileType] }
+
+    let sourcePath: String
+
+    init(sourcePath: String) { self.sourcePath = sourcePath }
+
+    init(configuration: ReadConfiguration) throws { sourcePath = "" }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        if !sourcePath.isEmpty,
+           let data = try? Data(contentsOf: URL(fileURLWithPath: sourcePath)) {
+            return FileWrapper(regularFileWithContents: data)
+        }
+        return FileWrapper(regularFileWithContents: Data())
+    }
+}
 
 struct SequencerView: View {
     @Environment(SequencerViewModel.self) var viewModel
@@ -70,6 +105,68 @@ struct SequencerView: View {
         } message: {
             Text("This sequence has unsaved changes.")
         }
+        .fileExporter(
+            isPresented: $showingSaveAsExporter,
+            document: saveAsDoc,
+            contentType: kXSQFileType,
+            defaultFilename: saveAsDefaultName
+        ) { result in
+            if case .success(let url) = result {
+                _ = viewModel.saveSequenceAs(path: url.path)
+            }
+            saveAsDoc = nil
+        }
+        .alert("Save-As Failed",
+               isPresented: Binding(
+                get: { saveAsError != nil },
+                set: { if !$0 { saveAsError = nil } }
+               )) {
+            Button("OK", role: .cancel) { saveAsError = nil }
+        } message: {
+            Text(saveAsError ?? "")
+        }
+        .sheet(isPresented: $showingSequenceSettings) {
+            SequenceSettingsSheet()
+                .environment(viewModel)
+        }
+    }
+
+    // MARK: - Save As (E-1)
+
+    @State private var showingSaveAsExporter = false
+    @State private var saveAsDoc: XLSequenceExportDoc? = nil
+    @State private var saveAsDefaultName: String = "Sequence.xsq"
+    @State private var saveAsError: String? = nil
+
+    // MARK: - Sequence Settings (E-3)
+
+    @State private var showingSequenceSettings = false
+
+    /// Persist the current in-memory state to the existing path
+    /// (so the bytes are up-to-date), then present the system
+    /// file exporter. The exporter copies those bytes to the
+    /// user-picked URL, and the completion handler updates the
+    /// internal sequence path via `saveSequenceAs` so subsequent
+    /// saves write to the new location.
+    private func startSaveAs() {
+        guard viewModel.isSequenceLoaded else {
+            saveAsError = "No sequence is open."
+            return
+        }
+        if viewModel.isDirty {
+            _ = viewModel.saveSequence()
+        }
+        let path = viewModel.document.currentSequencePath() ?? ""
+        if path.isEmpty {
+            saveAsError = "Cannot Save As — the sequence hasn't been saved yet. Use the New wizard to establish a first location."
+            return
+        }
+        saveAsDoc = XLSequenceExportDoc(sourcePath: path)
+        // Seed the exporter's default filename from the current
+        // basename so the system picker opens on a sensible name.
+        let base = (path as NSString).lastPathComponent
+        saveAsDefaultName = base.isEmpty ? "Sequence.xsq" : base
+        showingSaveAsExporter = true
     }
 
     /// Draggable divider below the preview pane. Vertical drag
@@ -104,8 +201,24 @@ struct SequencerView: View {
             }
 
             // Save button — enabled when the sequence is dirty.
-            // Users who want Save-As can long-press (below).
-            Button(action: { _ = viewModel.saveSequence() }) {
+            // Long-press or the sibling arrow exposes Save As.
+            Menu {
+                Button {
+                    _ = viewModel.saveSequence()
+                } label: {
+                    Label("Save", systemImage: "square.and.arrow.down")
+                }
+                .keyboardShortcut("s", modifiers: [.command])
+                .disabled(!viewModel.isDirty)
+
+                Button {
+                    startSaveAs()
+                } label: {
+                    Label("Save As…", systemImage: "square.and.arrow.down.on.square")
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(!viewModel.isSequenceLoaded)
+            } label: {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "square.and.arrow.down")
                     if viewModel.isDirty {
@@ -115,9 +228,18 @@ struct SequencerView: View {
                             .offset(x: 3, y: -2)
                     }
                 }
+            } primaryAction: {
+                _ = viewModel.saveSequence()
             }
-            .keyboardShortcut("s", modifiers: [.command])
-            .disabled(!viewModel.isDirty)
+            .disabled(!viewModel.isSequenceLoaded)
+
+            // Sequence Settings (E-3) — gear icon.
+            Button {
+                showingSequenceSettings = true
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .disabled(!viewModel.isSequenceLoaded)
 
             Divider().frame(height: 24)
 

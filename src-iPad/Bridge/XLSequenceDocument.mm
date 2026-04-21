@@ -33,6 +33,7 @@
 #include "utils/FileUtils.h"
 #include "utils/ExternalHooks.h"
 #include "utils/xlImage.h"
+#include "xLightsVersion.h"
 
 #include <nlohmann/json.hpp>
 
@@ -144,6 +145,54 @@
     return ok;
 }
 
+- (BOOL)newSequenceAtPath:(NSString*)savePath
+                       type:(NSString*)type
+                  mediaPath:(NSString*)mediaPath
+                 durationMS:(int)durationMS
+                    frameMS:(int)frameMS {
+    if (!_context) return NO;
+    if (savePath.length == 0) return NO;
+    if (durationMS <= 0 || frameMS <= 0) return NO;
+    std::string typeStr([type UTF8String]);
+    if (typeStr != "Media" && typeStr != "Animation" && typeStr != "Effect") {
+        return NO;
+    }
+
+    // Drop any current sequence state before we start. CloseSequence
+    // clears SequenceElements and releases the SequenceFile unique_ptr
+    // so the fresh save below starts from a clean slate.
+    _context->CloseSequence();
+
+    std::string pathStr([savePath UTF8String]);
+    ObtainAccessToURL(pathStr, /*enforceWritable=*/true);
+
+    // Configure the new SequenceFile. The two-arg constructor seeds
+    // `seq_timing` from `frameMS`; the rest of the properties are set
+    // via the public mutators, matching the desktop wizard flow
+    // (`SeqFileUtilities.cpp:114`, `SeqSettingsDialog.cpp:1794-1828`).
+    SequenceFile sf(pathStr, (uint32_t)frameMS);
+    sf.SetSequenceType(typeStr);
+    sf.SetSequenceDurationMS(durationMS);
+    sf.SetSequenceTiming(std::to_string(frameMS) + " ms");
+    if (typeStr == "Media" && mediaPath.length > 0) {
+        sf.SetMediaFile(_context->GetShowDirectory(),
+                        std::string([mediaPath UTF8String]),
+                        /*overwrite_tags=*/false);
+    }
+
+    // Save via the context's (just-cleared) SequenceElements.
+    // `Save` only reads the elements to emit XML — no live model
+    // wiring required, and CloseSequence above left them empty.
+    if (!sf.Save(_context->GetSequenceElements())) {
+        return NO;
+    }
+
+    // Fall through to the normal open path so SequenceElements,
+    // render engine, row info, and audio all wire up through the
+    // same code that open-existing uses.
+    return [self openSequence:savePath];
+}
+
 - (void)closeSequence {
     _context->CloseSequence();
     _lastSavedChangeCount = 0;
@@ -201,6 +250,168 @@
     if (!sf) return @"";
     const std::string& p = sf->GetFullPath();
     return [NSString stringWithUTF8String:p.c_str()];
+}
+
+- (NSString*)sequenceFileVersion {
+    if (!_context || !_context->IsSequenceLoaded()) return @"";
+    auto* sf = _context->GetSequenceFile();
+    if (!sf) return @"";
+    const std::string& v = sf->GetVersion();
+    return [NSString stringWithUTF8String:v.c_str()];
+}
+
+- (NSString*)currentAppVersion {
+    return [NSString stringWithUTF8String:xlights_version_string.c_str()];
+}
+
+// MARK: - Sequence Settings (E-3)
+
+namespace {
+
+/// Map iPad string keys to `HEADER_INFO_TYPES`. Returns nullopt
+/// on unknown keys so callers can no-op / return empty.
+static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
+    if ([key isEqualToString:@"song"])    return HEADER_INFO_TYPES::SONG;
+    if ([key isEqualToString:@"artist"])  return HEADER_INFO_TYPES::ARTIST;
+    if ([key isEqualToString:@"album"])   return HEADER_INFO_TYPES::ALBUM;
+    if ([key isEqualToString:@"author"])  return HEADER_INFO_TYPES::AUTHOR;
+    if ([key isEqualToString:@"email"])   return HEADER_INFO_TYPES::AUTHOR_EMAIL;
+    if ([key isEqualToString:@"website"]) return HEADER_INFO_TYPES::WEBSITE;
+    if ([key isEqualToString:@"url"])     return HEADER_INFO_TYPES::URL;
+    if ([key isEqualToString:@"comment"]) return HEADER_INFO_TYPES::COMMENT;
+    return std::nullopt;
+}
+
+} // namespace
+
+- (NSString*)headerInfoForKey:(NSString*)key {
+    if (!_context || !_context->IsSequenceLoaded()) return @"";
+    auto* sf = _context->GetSequenceFile();
+    if (!sf) return @"";
+    auto t = headerTypeFromString(key);
+    if (!t) return @"";
+    const std::string& v = sf->GetHeaderInfo(*t);
+    return [NSString stringWithUTF8String:v.c_str()];
+}
+
+- (BOOL)setHeaderInfo:(NSString*)value forKey:(NSString*)key {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    auto* sf = _context->GetSequenceFile();
+    if (!sf) return NO;
+    auto t = headerTypeFromString(key);
+    if (!t) return NO;
+    std::string v = value ? std::string([value UTF8String]) : std::string();
+    if (sf->GetHeaderInfo(*t) == v) return NO;
+    sf->SetHeaderInfo(*t, v);
+    _context->GetSequenceElements().IncrementChangeCount(nullptr);
+    return YES;
+}
+
+- (NSString*)currentMediaFilePath {
+    if (!_context || !_context->IsSequenceLoaded()) return @"";
+    auto* sf = _context->GetSequenceFile();
+    if (!sf) return @"";
+    const std::string& v = sf->GetMediaFile();
+    return [NSString stringWithUTF8String:v.c_str()];
+}
+
+- (BOOL)setMediaFilePath:(NSString*)path {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    auto* sf = _context->GetSequenceFile();
+    if (!sf) return NO;
+    std::string p = path ? std::string([path UTF8String]) : std::string();
+    if (sf->GetMediaFile() == p) return NO;
+    // Preserve any existing header metadata — user is swapping
+    // the file, not re-tagging from the new one.
+    sf->SetMediaFile(_context->GetShowDirectory(), p, /*overwrite_tags=*/false);
+    _context->GetSequenceElements().IncrementChangeCount(nullptr);
+    return YES;
+}
+
+- (NSString*)sequenceType {
+    if (!_context || !_context->IsSequenceLoaded()) return @"";
+    auto* sf = _context->GetSequenceFile();
+    if (!sf) return @"";
+    return [NSString stringWithUTF8String:sf->GetSequenceType().c_str()];
+}
+
+- (BOOL)setSequenceType:(NSString*)type {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    auto* sf = _context->GetSequenceFile();
+    if (!sf || type.length == 0) return NO;
+    std::string t([type UTF8String]);
+    if (t != "Media" && t != "Animation" && t != "Effect") return NO;
+    if (sf->GetSequenceType() == t) return NO;
+    sf->SetSequenceType(t);  // auto-clears media + audio for Animation/Effect
+    _context->GetSequenceElements().IncrementChangeCount(nullptr);
+    return YES;
+}
+
+- (BOOL)setFrameIntervalMS:(int)frameMS {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    auto* sf = _context->GetSequenceFile();
+    if (!sf || frameMS <= 0) return NO;
+    if (sf->GetFrameMS() == frameMS) return NO;
+    sf->SetSequenceTiming(std::to_string(frameMS) + " ms");
+    _context->GetSequenceElements().IncrementChangeCount(nullptr);
+    return YES;
+}
+
+- (BOOL)sequenceSupportsModelBlending {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    return _context->GetSequenceElements().SupportsModelBlending() ? YES : NO;
+}
+
+- (BOOL)setSequenceSupportsModelBlending:(BOOL)enabled {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    auto& elements = _context->GetSequenceElements();
+    if (elements.SupportsModelBlending() == (bool)enabled) return NO;
+    elements.SetSupportsModelBlending(enabled ? true : false);
+    elements.IncrementChangeCount(nullptr);
+    return YES;
+}
+
+- (int)sequenceModelCount {
+    if (!_context || !_context->IsSequenceLoaded()) return 0;
+    int count = 0;
+    auto& se = _context->GetSequenceElements();
+    for (size_t i = 0; i < se.GetElementCount(); ++i) {
+        Element* e = se.GetElement(i);
+        if (e && (e->GetType() == ElementType::ELEMENT_TYPE_MODEL
+                  || e->GetType() == ElementType::ELEMENT_TYPE_SUBMODEL)) {
+            count++;
+        }
+    }
+    return count;
+}
+
+- (BOOL)writeAutosaveBackup {
+    if (!_context || !_context->IsSequenceLoaded()) return NO;
+    auto* sf = _context->GetSequenceFile();
+    if (!sf) return NO;
+
+    const std::string origPath = sf->GetFullPath();
+    if (origPath.empty()) return NO;
+
+    // Derive <basename>.xbkp alongside the current sequence.
+    // Matches desktop's SaveWorking (`xLightsMain.cpp:4610-4614`).
+    std::filesystem::path p(origPath);
+    std::filesystem::path backup = p;
+    backup.replace_extension("xbkp");
+    const std::string backupPath = backup.string();
+
+    ObtainAccessToURL(backupPath, /*enforceWritable=*/true);
+
+    // Desktop's mFilePath-swap pattern: change the path, Save,
+    // restore. Save only dereferences mFilePath in its final
+    // `doc.save_file` call so the swap is safe.
+    sf->SetFullPath(backupPath);
+    const bool ok = sf->Save(_context->GetSequenceElements());
+    sf->SetFullPath(origPath);
+
+    // Writing the .xbkp doesn't count as a user save — leave
+    // _lastSavedChangeCount untouched so the dirty dot stays lit.
+    return ok ? YES : NO;
 }
 
 - (BOOL)isSequenceDirty {

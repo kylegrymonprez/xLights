@@ -57,6 +57,22 @@ struct ContentView: View {
 
     @State private var showMediaManager = false
 
+    /// Session-scoped dismissals for the migration banner. Keyed by
+    /// "<file version> → <app version>" so opening a different
+    /// older sequence shows its own banner even after dismissal.
+    /// Re-appears on app relaunch — stored in memory only, matching
+    /// desktop's banner behaviour.
+    @State private var dismissedMigrationKeys: Set<String> = []
+
+    /// Autosave recovery state. When a sequence opens with a
+    /// newer `.xbkp` alongside its `.xsq`, we sheet the user:
+    /// Recover (promote .xbkp → .xsq + reopen) or Discard
+    /// (delete .xbkp). Checked once per open; the
+    /// `lastCheckedSequencePath` guard prevents re-offering on
+    /// every re-render of the shell.
+    @State private var autosaveRecoveryDate: Date? = nil
+    @State private var lastCheckedSequencePath: String = ""
+
     var body: some View {
         VStack(spacing: 0) {
             if viewModel.memoryWarning {
@@ -66,6 +82,16 @@ struct ContentView: View {
                 MissingMediaBanner(
                     count: viewModel.brokenMediaCount,
                     onReview: { showMediaManager = true })
+            }
+            if viewModel.isSequenceLoaded,
+               let migration = migrationInfo(),
+               !dismissedMigrationKeys.contains(migration.key) {
+                MigrationBanner(
+                    fileVersion: migration.file,
+                    appVersion: migration.app,
+                    onDismiss: {
+                        dismissedMigrationKeys.insert(migration.key)
+                    })
             }
             Group {
                 if !viewModel.isShowFolderLoaded {
@@ -91,6 +117,59 @@ struct ContentView: View {
                 showFolderConfig = true
             }
         }
+        .onChange(of: viewModel.isSequenceLoaded) { _, loaded in
+            if loaded {
+                checkAutosaveRecovery()
+            } else {
+                autosaveRecoveryDate = nil
+                lastCheckedSequencePath = ""
+            }
+        }
+        .alert("Recover Autosave Backup?",
+               isPresented: Binding(
+                get: { autosaveRecoveryDate != nil },
+                set: { if !$0 { autosaveRecoveryDate = nil } }
+               )) {
+            Button("Recover") {
+                _ = viewModel.applyAutosaveBackup()
+                autosaveRecoveryDate = nil
+            }
+            Button("Discard Backup", role: .destructive) {
+                viewModel.suppressAutosaveBackup()
+                autosaveRecoveryDate = nil
+            }
+            Button("Keep for Later", role: .cancel) {
+                autosaveRecoveryDate = nil
+            }
+        } message: {
+            if let date = autosaveRecoveryDate {
+                Text("An autosave backup newer than the sequence file was found (saved \(date.formatted(date: .abbreviated, time: .shortened))). Recover changes from the backup, or discard it?")
+            } else {
+                Text("")
+            }
+        }
+    }
+
+    /// Run once per open: compare `.xbkp` mtime vs. `.xsq` and
+    /// surface the recovery alert when the backup is newer.
+    private func checkAutosaveRecovery() {
+        let path = viewModel.document.currentSequencePath() ?? ""
+        guard !path.isEmpty, path != lastCheckedSequencePath else { return }
+        lastCheckedSequencePath = path
+        let (has, when) = viewModel.hasRecoverableBackup()
+        if has { autosaveRecoveryDate = when }
+    }
+
+    /// Returns the file / app version pair when they disagree.
+    /// An empty file version means the sequence hasn't been opened
+    /// yet or was loaded before the field existed — suppress the
+    /// banner either way.
+    private func migrationInfo() -> (file: String, app: String, key: String)? {
+        let file = viewModel.document.sequenceFileVersion() ?? ""
+        let app = viewModel.document.currentAppVersion() ?? ""
+        if file.isEmpty || app.isEmpty { return nil }
+        if file == app { return nil }
+        return (file, app, "\(file)→\(app)")
     }
 }
 
@@ -138,6 +217,39 @@ struct MissingMediaBanner: View {
     }
 }
 
+/// Yellow banner shown when the open sequence's saved xLights
+/// version differs from the current build. E-4 migration in
+/// `SequenceFile::AdjustEffectSettingsForVersion` has already
+/// run by the time we reach this banner; the banner just tells
+/// the user the sequence has been upgraded in-memory and a save
+/// will persist the new form.
+struct MigrationBanner: View {
+    let fileVersion: String
+    let appVersion: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrow.triangle.2.circlepath")
+            Text("Sequence was created in xLights \(fileVersion). Migrated to \(appVersion) — save to update.")
+                .font(.caption)
+                .lineLimit(2)
+            Spacer()
+            Button {
+                onDismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.caption)
+            }
+            .foregroundStyle(.white)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .foregroundStyle(.white)
+        .background(Color.yellow.opacity(0.9).overlay(Color.orange.opacity(0.3)))
+    }
+}
+
 struct ShowFolderSetupView: View {
     @Binding var showFolderConfig: Bool
 
@@ -160,21 +272,89 @@ struct SequencePickerView: View {
     @Environment(SequencerViewModel.self) var viewModel
     @Binding var showFolderConfig: Bool
 
+    @State private var recent: [RecentSequences.Entry] = RecentSequences.load()
+    @State private var showingNewWizard: Bool = false
+
     var body: some View {
         NavigationStack {
-            List(viewModel.sequenceFiles, id: \.self) { file in
-                Button(file) {
-                    let path = (viewModel.showFolderPath ?? "") + "/" + file
-                    viewModel.openSequence(path: path)
+            List {
+                if !recent.isEmpty {
+                    Section("Recent") {
+                        ForEach(recent) { entry in
+                            Button {
+                                viewModel.openSequence(path: entry.path)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.displayName)
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                    Text(entry.parentFolder)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
+                            }
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    RecentSequences.remove(path: entry.path)
+                                    recent = RecentSequences.load()
+                                } label: {
+                                    Label("Remove", systemImage: "xmark.bin")
+                                }
+                            }
+                        }
+                    }
+                }
+                Section(recent.isEmpty ? "Sequences" : "In This Show Folder") {
+                    ForEach(viewModel.sequenceFiles, id: \.self) { file in
+                        Button(file) {
+                            let path = (viewModel.showFolderPath ?? "") + "/" + file
+                            viewModel.openSequence(path: path)
+                        }
+                    }
                 }
             }
             .navigationTitle("Sequences")
             .toolbar {
-                Button {
-                    showFolderConfig = true
-                } label: {
-                    Image(systemName: "folder.badge.gearshape")
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: 10) {
+                        Button {
+                            showingNewWizard = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                        Button {
+                            showFolderConfig = true
+                        } label: {
+                            Image(systemName: "folder.badge.gearshape")
+                        }
+                    }
                 }
+                if !recent.isEmpty {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Menu {
+                            Button(role: .destructive) {
+                                RecentSequences.clear()
+                                recent = []
+                            } label: {
+                                Label("Clear Recent", systemImage: "clock.badge.xmark")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                    }
+                }
+            }
+            .onAppear {
+                recent = RecentSequences.load()
+            }
+            .sheet(isPresented: $showingNewWizard) {
+                NewSequenceWizardView()
+                    .environment(viewModel)
+                    .onDisappear {
+                        recent = RecentSequences.load()
+                    }
             }
         }
     }

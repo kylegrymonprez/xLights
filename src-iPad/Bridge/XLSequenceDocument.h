@@ -50,6 +50,20 @@
 - (void)closeSequence;
 - (BOOL)isSequenceLoaded;
 
+// E-2 — create a fresh sequence on disk at `savePath` and
+// immediately open it as the active document. `type` is one of
+// "Media" / "Animation" / "Effect"; `mediaPath` is required for
+// Media and ignored otherwise (paths are resolved through the
+// show folder). `durationMS` and `frameMS` write the XML head
+// attributes matching the desktop wizard's output. Returns NO
+// on failure; closes any previously-open sequence before
+// starting.
+- (BOOL)newSequenceAtPath:(NSString*)savePath
+                       type:(NSString*)type
+                  mediaPath:(NSString*)mediaPath
+                 durationMS:(int)durationMS
+                    frameMS:(int)frameMS;
+
 // Save the currently-open sequence back to its on-disk path. Returns
 // NO if there's no sequence loaded, the path is empty, or the XML
 // write fails. Marks the sequence clean on success.
@@ -74,6 +88,66 @@
 // that writes out-of-band).
 - (BOOL)isSequenceDirty;
 - (void)markSequenceClean;
+
+// E-4 — version metadata. `sequenceFileVersion` is the xLights
+// version string recorded in the on-disk `.xsq` at the time it
+// was last saved; `currentAppVersion` is the running build's
+// `xlights_version_string`. Differ → the sequence was authored
+// in a different build, so the inspector shows the migration
+// banner. Both are empty when no sequence is loaded.
+- (NSString*)sequenceFileVersion;
+- (NSString*)currentAppVersion;
+
+// E-6 — autosave / `.xbkp` recovery. Write the current in-memory
+// sequence to `<basename>.xbkp` alongside the `.xsq` without
+// touching the canonical file or the dirty flag. Temporarily
+// swaps the SequenceFile's `mFilePath` (matching desktop's
+// `SaveWorking` pattern in `xLightsMain.cpp:4588-4632`), writes,
+// then restores. Returns NO if no sequence is open or the
+// current path is empty (new-unsaved sequences have nowhere to
+// put the backup yet).
+- (BOOL)writeAutosaveBackup;
+
+// E-3 — Sequence Settings. Info tab (read-only) + Metadata tab
+// (header text fields) + Media file swap + Render Mode /
+// blending toggle. All setters mark the sequence dirty via the
+// normal `SequenceElements::IncrementChangeCount` path.
+//
+// Metadata keys accepted by `headerInfoForKey:` /
+// `setHeaderInfo:forKey:`: "song", "artist", "album", "author",
+// "email", "website", "url", "comment". Other keys return
+// empty / no-op.
+- (NSString*)headerInfoForKey:(NSString*)key;
+- (BOOL)setHeaderInfo:(NSString*)value forKey:(NSString*)key;
+
+// Media file getters/setters. `setMediaFilePath:` routes
+// through `SequenceFile::SetMediaFile` with `overwrite_tags=NO`
+// so existing song / artist metadata isn't clobbered when the
+// user is swapping the audio track on a sequence that already
+// has populated header fields. Pass empty to clear the media
+// file (turns a Musical sequence into an Animation — matches
+// desktop behaviour).
+- (NSString*)currentMediaFilePath;
+- (BOOL)setMediaFilePath:(NSString*)path;
+
+// Sequence type (see `newSequenceAtPath:…`): "Media" /
+// "Animation" / "Effect". Writes flow through
+// `SequenceFile::SetSequenceType` which clears media file +
+// audio when switching to Animation / Effect.
+- (NSString*)sequenceType;
+- (BOOL)setSequenceType:(NSString*)type;
+
+// Per-frame interval in ms (the sequence's tick). Changes to
+// this require a full re-render; callers should abort any
+// in-flight render before calling.
+- (BOOL)setFrameIntervalMS:(int)frameMS;
+
+// Model-blending toggle (global blend mode).
+- (BOOL)sequenceSupportsModelBlending;
+- (BOOL)setSequenceSupportsModelBlending:(BOOL)enabled;
+
+// Read-only summary for the Info tab.
+- (int)sequenceModelCount;
 
 // Sequence metadata
 - (int)sequenceDurationMS;
