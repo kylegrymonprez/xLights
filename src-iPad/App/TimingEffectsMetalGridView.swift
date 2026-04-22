@@ -69,6 +69,12 @@ struct TimingEffectsMetalGridView: UIViewRepresentable {
         var panStartScrollX: CGFloat = 0
         var panStartScrollY: CGFloat = 0
 
+        // Apple Pencil precision flag — set by the MTKView's
+        // `touchesBegan` override. When true, mark-edge hit slop
+        // halves so the Pencil can grab narrow timing-mark edges
+        // directly without the finger's forgiveness budget.
+        var pencilActive: Bool = false
+
         // B68 live drag state for a timing mark. When set, draw
         // renders the mark at `liveStartMS…liveEndMS` instead of
         // its stored position.
@@ -121,6 +127,28 @@ final class TimingEffectsMetalMTKView: MTKView, MTKViewDelegate {
             layerAttached = true
         }
         c.bridge.setDrawableSize(drawableSize, scale: contentScaleFactor)
+    }
+
+    // Apple Pencil tracking — mirrors the effect grid. Sets
+    // `coordinator.pencilActive` so hit tests in
+    // `startMarkDrag` / `onLongPress` tighten their slop.
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if touches.contains(where: { $0.type == .pencil }) {
+            coordinator?.pencilActive = true
+        }
+        super.touchesBegan(touches, with: event)
+    }
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if touches.contains(where: { $0.type == .pencil }) {
+            coordinator?.pencilActive = false
+        }
+        super.touchesEnded(touches, with: event)
+    }
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if touches.contains(where: { $0.type == .pencil }) {
+            coordinator?.pencilActive = false
+        }
+        super.touchesCancelled(touches, with: event)
     }
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
@@ -448,6 +476,8 @@ final class TimingEffectsMetalMTKView: MTKView, MTKViewDelegate {
         guard rowLocal >= 0 else { return nil }
         let row = c.rows[rowLocal]
         let ms = Int((p.x + c.scrollOffsetX) / c.pixelsPerMS)
+        // Keep 10 px slop for both finger and Pencil — narrower
+        // values broke edge hit detection in practice.
         let edgeSlopMS = Int(10 / c.pixelsPerMS)
         for (mIdx, m) in row.effects.enumerated() {
             if ms < m.startTimeMS - edgeSlopMS { break }

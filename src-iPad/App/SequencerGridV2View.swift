@@ -1302,6 +1302,13 @@ struct SequencerGridV2View: View {
             viewModel.resizeEffectEdge(rowIndex: rowIdx, effectIndex: effIdx,
                                        edge: edge, newMS: newMS)
         }
+        actions.onResizeSharedEdge = { rowIdx, lIdx, lStart, lEnd, rIdx, rStart, rEnd in
+            viewModel.resizeSharedEdge(rowIndex: rowIdx,
+                                        leftIndex: lIdx,
+                                        leftStartMS: lStart, leftEndMS: lEnd,
+                                        rightIndex: rIdx,
+                                        rightStartMS: rStart, rightEndMS: rEnd)
+        }
         actions.onAdjustFade = { rowIdx, effIdx, edge, seconds in
             viewModel.adjustFade(rowIndex: rowIdx, effectIndex: effIdx,
                                  fadeInSec:  edge == 0 ? seconds : -1,
@@ -1356,7 +1363,8 @@ struct SequencerGridV2View: View {
             },
             document: viewModel.document,
             onUserInteraction: { timeline.noteUserInteraction() },
-            onMarqueeSelect: { hits in viewModel.setMultiSelection(hits) }
+            onMarqueeSelect: { hits in viewModel.setMultiSelection(hits) },
+            onPencilTapAction: { viewModel.undo() }
         )
     }
 

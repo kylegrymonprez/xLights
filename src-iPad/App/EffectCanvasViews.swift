@@ -19,6 +19,15 @@ struct EffectCanvasActions {
     var onMoveEffectToRow: (_ srcRow: Int, _ effect: Int, _ dstRow: Int,
                              _ newStartMS: Int, _ newEndMS: Int) -> Void = { _,_,_,_,_ in }
     var onResizeEdge: (_ row: Int, _ effect: Int, _ edge: Int, _ newMS: Int) -> Void = { _,_,_,_ in }
+    /// Shared-edge resize commit (Pencil Pro squeeze + edge drag).
+    /// Two butted effects on the same row have their shared
+    /// boundary moved together — one grows while the other shrinks.
+    /// Arg order: `(row, leftEffectIdx, leftStartMS, leftEndMS,
+    /// rightEffectIdx, rightStartMS, rightEndMS)`. The view model
+    /// commits both moves inside one undo group.
+    var onResizeSharedEdge: ((_ row: Int,
+                               _ leftIdx: Int, _ leftStart: Int, _ leftEnd: Int,
+                               _ rightIdx: Int, _ rightStart: Int, _ rightEnd: Int) -> Void)?
     /// Fires when a fade-in or fade-out drag ends. `edge`: 0 = fade-in,
     /// 1 = fade-out. `seconds` is the new committed fade duration.
     var onAdjustFade: (_ row: Int, _ effect: Int, _ edge: Int, _ seconds: Float) -> Void = { _,_,_,_ in }

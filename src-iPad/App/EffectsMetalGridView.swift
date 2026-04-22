@@ -59,6 +59,9 @@ struct EffectsMetalGridView: UIViewRepresentable {
     /// selections that fall inside the rectangle. Wired to
     /// `SequencerViewModel.setMultiSelection`.
     var onMarqueeSelect: ((Set<SequencerViewModel.EffectSelection>) -> Void)?
+    /// Pencil 2 double-tap / Pencil Pro squeeze → action. Outer
+    /// view wires to `viewModel.undo()`.
+    var onPencilTapAction: (() -> Void)?
 
     func makeUIView(context: Context) -> EffectsMetalGridMTKView {
         let v = EffectsMetalGridMTKView()
@@ -92,6 +95,7 @@ struct EffectsMetalGridView: UIViewRepresentable {
         ctx.onUpdateScrollY = { newY in scrollOffsetY = newY }
         ctx.onUserInteraction = onUserInteraction
         ctx.onMarqueeSelect = onMarqueeSelect
+        ctx.onPencilTapAction = onPencilTapAction
         view.setNeedsDisplay()
     }
 
@@ -156,6 +160,15 @@ struct EffectsMetalGridView: UIViewRepresentable {
             let minStartMS: Int
             let maxEndMS: Int
             let kind: Kind
+            // Pencil-Pro-squeeze-shared-edge (see pencilSqueezeActive).
+            // When a resize drag starts with the Pencil squeeze held
+            // AND there's a neighbouring effect butted against the
+            // dragged edge (zero-gap), this captures the neighbour
+            // so `updateEffectDrag` can grow one while shrinking the
+            // other — the shared boundary slides for both effects.
+            var pairedEffectIndex: Int?
+            var pairedOrigStartMS: Int = 0
+            var pairedOrigEndMS: Int = 0
         }
         var drag: DragLocal?
         var liveStartMS: Int?
@@ -164,6 +177,20 @@ struct EffectsMetalGridView: UIViewRepresentable {
         var liveFadeOutSec: Float?
         var liveRowId: Int?
         var liveDropInvalid: Bool = false
+        // Shared-edge live state for the paired neighbour during a
+        // squeeze+resize drag. Drawing substitutes these for the
+        // neighbour's stored range while the drag is in flight.
+        var pairedLiveStartMS: Int?
+        var pairedLiveEndMS: Int?
+
+        // Pencil Pro squeeze state. `.began` flips this true;
+        // `.ended` flips it false. `beginEffectDrag` samples the
+        // flag to decide whether to enter shared-edge mode.
+        var pencilSqueezeActive: Bool = false
+        // True while a paired drag is in flight consuming the
+        // squeeze. Suppresses the `squeeze → undo` action on
+        // `.ended` so a resize-while-squeezing doesn't also undo.
+        var pencilSqueezeConsumedByDrag: Bool = false
 
         // Pan origin in world coords for delta math that stays
         // consistent when we scroll the content during the drag.
@@ -175,6 +202,22 @@ struct EffectsMetalGridView: UIViewRepresentable {
         var autoScrollSpeedX: CGFloat = 0
         var autoScrollSpeedY: CGFloat = 0
         var lastTouchInSelf: CGPoint = .zero
+
+        // Apple Pencil precision. Set by the MTKView's `touchesBegan`
+        // override; cleared on `touchesEnded`/`touchesCancelled`.
+        // When true, hit-test code uses a narrower slop on edge +
+        // fade handles (Pencil input is precise enough to aim
+        // inside those tiny zones without the finger's forgiveness
+        // budget). Never fires for trackpad / Magic Keyboard because
+        // those don't produce UITouches.
+        var pencilActive: Bool = false
+
+        // UIPencilInteraction routes Pencil 2 double-tap / Pencil
+        // Pro squeeze to a handler callback. The handler calls
+        // `viewModel.undo()` — the most universally useful reactive
+        // action for this grid. The user can still override the
+        // system-wide Pencil tap action in Settings ▸ Apple Pencil.
+        var onPencilTapAction: (() -> Void)?
 
         // Reference to the document is needed for icon lookups
         // (width/height of the texture) outside the provider.
@@ -190,12 +233,13 @@ struct EffectsMetalGridView: UIViewRepresentable {
 /// The MTKView subclass. Owns gesture recognizers and is the
 /// entry point for `draw(_:)`. Pulls state off the
 /// `EffectsMetalGridView.Coordinator` owned by its Representable.
-final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
+final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate, UIPencilInteractionDelegate {
     weak var coordinator: EffectsMetalGridView.Coordinator?
     private var gestureDelegate: GestureDelegate?
     private weak var ownPan: UIPanGestureRecognizer?
     private let vFadeHitStrip: CGFloat = 7
     private let minIconWidth: CGFloat = 14
+    private var pencilInteraction: UIPencilInteraction?
 
     override init(frame frameRect: CGRect, device: MTLDevice?) {
         super.init(frame: frameRect,
@@ -233,6 +277,94 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
         }
         c.bridge.setDrawableSize(self.drawableSize,
                                   scale: self.contentScaleFactor)
+
+        // Install the pencil interaction on first layout — delaying
+        // until here avoids ordering problems with the window/scene
+        // hierarchy that Pencil interactions are sensitive to.
+        if pencilInteraction == nil {
+            let pi = UIPencilInteraction()
+            pi.delegate = self
+            self.addInteraction(pi)
+            pencilInteraction = pi
+        }
+    }
+
+    // UIPencilInteractionDelegate. Three delegate methods cover the
+    // full matrix of Pencil generations × iOS versions:
+    //
+    //   - `pencilInteractionDidTap(_:)` — iOS 12.1+: Pencil 2
+    //     double-tap on the barrel.
+    //   - `pencilInteraction(_:didReceiveTap:)` — iOS 17.5+ unified
+    //     tap API (Pencil 2 double-tap, newer calls route through
+    //     here instead of the legacy method).
+    //   - `pencilInteraction(_:didReceiveSqueeze:)` — iOS 17.5+
+    //     Pencil Pro squeeze. Has phases (.began / .changed /
+    //     .ended); we fire on `.ended` so a partial squeeze that's
+    //     released doesn't register.
+    //
+    // All three ultimately route to the same `onPencilTapAction`.
+    func pencilInteractionDidTap(_ interaction: UIPencilInteraction) {
+        coordinator?.onPencilTapAction?()
+    }
+
+    func pencilInteraction(_ interaction: UIPencilInteraction,
+                            didReceiveTap tap: UIPencilInteraction.Tap) {
+        coordinator?.onPencilTapAction?()
+    }
+
+    func pencilInteraction(_ interaction: UIPencilInteraction,
+                            didReceiveSqueeze squeeze: UIPencilInteraction.Squeeze) {
+        guard let c = coordinator else { return }
+        switch squeeze.phase {
+        case .began:
+            c.pencilSqueezeActive = true
+            c.pencilSqueezeConsumedByDrag = false
+        case .ended:
+            // Only fire the undo action if the squeeze wasn't
+            // consumed by a shared-edge resize drag — otherwise the
+            // drag committed + squeeze's release would both register
+            // as "the user wants undo now."
+            if !c.pencilSqueezeConsumedByDrag {
+                c.onPencilTapAction?()
+            }
+            c.pencilSqueezeActive = false
+            c.pencilSqueezeConsumedByDrag = false
+        case .cancelled:
+            c.pencilSqueezeActive = false
+            c.pencilSqueezeConsumedByDrag = false
+        default:
+            break
+        }
+    }
+
+    // MARK: - Apple Pencil detection
+    //
+    // Track when the primary incoming touch is a Pencil so
+    // `hitTestEffect` can tighten its slop. UIKit dispatches
+    // `touchesBegan` before gesture recognizers fire, so we get a
+    // chance to stash the flag before hit-testing runs. Finger +
+    // Pencil can be active simultaneously (iPadOS supports both at
+    // once); we only flip `pencilActive` true while a Pencil touch
+    // is down and clear on its own end-of-life event.
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if touches.contains(where: { $0.type == .pencil }) {
+            coordinator?.pencilActive = true
+        }
+        super.touchesBegan(touches, with: event)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if touches.contains(where: { $0.type == .pencil }) {
+            coordinator?.pencilActive = false
+        }
+        super.touchesEnded(touches, with: event)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if touches.contains(where: { $0.type == .pencil }) {
+            coordinator?.pencilActive = false
+        }
+        super.touchesCancelled(touches, with: event)
     }
 
     // MARK: - MTKViewDelegate
@@ -318,8 +450,26 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
                 let isDragged = (c.activeDrag?.srcRowId == row.id
                                   && c.activeDrag?.effectIndex == eIdx)
                 if isDragged, c.activeDrag?.liveRowId != nil { continue }
-                let startMS = isDragged ? (c.activeDrag?.liveStartMS ?? effect.startTimeMS) : effect.startTimeMS
-                let endMS   = isDragged ? (c.activeDrag?.liveEndMS   ?? effect.endTimeMS)   : effect.endTimeMS
+                // Shared-edge mode (Pencil Pro squeeze + edge drag):
+                // the paired neighbour's range also renders at its
+                // live position so both effects visibly animate the
+                // shared boundary.
+                let isPaired = (c.drag?.rowIndex == row.id
+                                 && c.drag?.pairedEffectIndex == eIdx)
+                let startMS: Int
+                let endMS: Int
+                if isDragged {
+                    startMS = c.activeDrag?.liveStartMS ?? effect.startTimeMS
+                    endMS   = c.activeDrag?.liveEndMS   ?? effect.endTimeMS
+                } else if isPaired,
+                          let ps = c.pairedLiveStartMS,
+                          let pe = c.pairedLiveEndMS {
+                    startMS = ps
+                    endMS   = pe
+                } else {
+                    startMS = effect.startTimeMS
+                    endMS   = effect.endTimeMS
+                }
                 let x1 = CGFloat(startMS) * c.pixelsPerMS - c.scrollOffsetX
                 let x2 = CGFloat(endMS)   * c.pixelsPerMS - c.scrollOffsetX
                 if x2 < 0 || x1 > viewport.width { continue }
@@ -844,6 +994,14 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
         guard rowIdx >= 0 else { return nil }
         let row = c.rows[rowIdx]
         let ms = Int((p.x + c.scrollOffsetX) / c.pixelsPerMS)
+        // Hit slop stays at the finger-friendly 24 pt default for
+        // both finger and Pencil. An earlier pass tried narrowing to
+        // 12 pt for Pencil for "precision," but in practice that's
+        // narrower than real Pencil jitter + reach-and-tap wobble,
+        // so edge / fade zones became unreachable. The B30 hover
+        // highlight already guides Pencil users toward the right
+        // zone before they tap; keeping slop generous means the tap
+        // actually lands where the hover promised.
         let slop = c.metrics.edgeHandleHitWidth / c.pixelsPerMS
         let inFadeStrip = (p.y - rowTop) < vFadeHitStrip + 1
         _ = rowH
@@ -1117,19 +1275,56 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
             ? row.effects[hit.effectIndex - 1].endTimeMS : 0
         let nextStart = hit.effectIndex + 1 < row.effects.count
             ? row.effects[hit.effectIndex + 1].startTimeMS : Int.max
-        c.drag = .init(rowIndex: hit.rowIndex,
-                        effectIndex: hit.effectIndex,
-                        origStartMS: effect.startTimeMS,
-                        origEndMS: effect.endTimeMS,
-                        origFadeInSec: curIn, origFadeOutSec: curOut,
-                        minStartMS: prevEnd, maxEndMS: nextStart,
-                        kind: kind)
+
+        // Pencil squeeze + edge resize → shared-edge mode. The
+        // paired neighbour must be butted against the dragged edge
+        // (zero-gap); if there's a gap, shared-edge doesn't apply
+        // and we fall through to normal resize.
+        var pairedIdx: Int? = nil
+        var pairedOrigStart = 0, pairedOrigEnd = 0
+        if c.pencilSqueezeActive {
+            if kind == .resizeLeft,
+               hit.effectIndex > 0 {
+                let prev = row.effects[hit.effectIndex - 1]
+                if prev.endTimeMS == effect.startTimeMS {
+                    pairedIdx = hit.effectIndex - 1
+                    pairedOrigStart = prev.startTimeMS
+                    pairedOrigEnd = prev.endTimeMS
+                }
+            } else if kind == .resizeRight,
+                       hit.effectIndex + 1 < row.effects.count {
+                let next = row.effects[hit.effectIndex + 1]
+                if next.startTimeMS == effect.endTimeMS {
+                    pairedIdx = hit.effectIndex + 1
+                    pairedOrigStart = next.startTimeMS
+                    pairedOrigEnd = next.endTimeMS
+                }
+            }
+        }
+        if pairedIdx != nil {
+            c.pencilSqueezeConsumedByDrag = true
+        }
+
+        var drag = EffectsMetalGridView.Coordinator.DragLocal(
+            rowIndex: hit.rowIndex,
+            effectIndex: hit.effectIndex,
+            origStartMS: effect.startTimeMS,
+            origEndMS: effect.endTimeMS,
+            origFadeInSec: curIn, origFadeOutSec: curOut,
+            minStartMS: prevEnd, maxEndMS: nextStart,
+            kind: kind)
+        drag.pairedEffectIndex = pairedIdx
+        drag.pairedOrigStartMS = pairedOrigStart
+        drag.pairedOrigEndMS = pairedOrigEnd
+        c.drag = drag
         c.liveStartMS = effect.startTimeMS
         c.liveEndMS = effect.endTimeMS
         c.liveFadeInSec = curIn
         c.liveFadeOutSec = curOut
         c.liveRowId = nil
         c.liveDropInvalid = false
+        c.pairedLiveStartMS = pairedIdx != nil ? pairedOrigStart : nil
+        c.pairedLiveEndMS = pairedIdx != nil ? pairedOrigEnd : nil
         publishDrag(c: c)
     }
 
@@ -1233,22 +1428,55 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
             c.liveStartMS = cs
             c.liveEndMS = ce
         case .resizeLeft:
-            let ns = max(d.minStartMS, d.origStartMS + dMS)
-            var liveStart = min(ns, d.origEndMS - 1)
+            // Shared-edge mode (Pencil squeeze + neighbour butted on
+            // the left): the shared boundary is clamped against the
+            // previous neighbour's *start* (so we can't shrink it to
+            // zero) + the dragged effect's own end. The paired live
+            // range mirrors: prev.end follows the boundary.
+            let hardMin: Int
+            let hardMax: Int
+            if d.pairedEffectIndex != nil {
+                hardMin = d.pairedOrigStartMS + 1
+                hardMax = d.origEndMS - 1
+            } else {
+                hardMin = d.minStartMS
+                hardMax = d.origEndMS - 1
+            }
+            let ns = max(hardMin, d.origStartMS + dMS)
+            var liveStart = min(ns, hardMax)
             if let snap = snapMS(liveStart, c: c) {
-                liveStart = max(d.minStartMS, min(d.origEndMS - 1, snap))
+                liveStart = max(hardMin, min(hardMax, snap))
             }
             c.liveStartMS = liveStart
             c.liveEndMS = d.origEndMS
+            if d.pairedEffectIndex != nil {
+                c.pairedLiveStartMS = d.pairedOrigStartMS
+                c.pairedLiveEndMS = liveStart
+            }
         case .resizeRight:
+            // Symmetric shared-edge for the right neighbour: the
+            // boundary can't swallow the neighbour, and the
+            // neighbour's start follows the boundary.
+            let hardMin: Int
+            let hardMax: Int
+            if d.pairedEffectIndex != nil {
+                hardMin = d.origStartMS + 1
+                hardMax = d.pairedOrigEndMS - 1
+            } else {
+                hardMin = d.origStartMS + 1
+                hardMax = d.maxEndMS
+            }
             let raw = d.origEndMS + dMS
-            let capped = min(d.maxEndMS, raw)
-            var liveEnd = max(capped, d.origStartMS + 1)
+            var liveEnd = max(hardMin, min(hardMax, raw))
             if let snap = snapMS(liveEnd, c: c) {
-                liveEnd = min(d.maxEndMS, max(d.origStartMS + 1, snap))
+                liveEnd = min(hardMax, max(hardMin, snap))
             }
             c.liveEndMS = liveEnd
             c.liveStartMS = d.origStartMS
+            if d.pairedEffectIndex != nil {
+                c.pairedLiveStartMS = liveEnd
+                c.pairedLiveEndMS = d.pairedOrigEndMS
+            }
         case .fadeIn, .fadeOut:
             let durMS = max(1, d.origEndMS - d.origStartMS)
             let otherFade = d.kind == .fadeIn ? d.origFadeOutSec : d.origFadeInSec
@@ -1280,11 +1508,29 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
             }
         case .resizeLeft:
             if let ls = c.liveStartMS {
-                c.actions.onResizeEdge(d.rowIndex, d.effectIndex, 0, ls)
+                if let pIdx = d.pairedEffectIndex,
+                   let pe = c.pairedLiveEndMS {
+                    // Shared-edge commit: previous effect's end +
+                    // this effect's start both move to the boundary.
+                    c.actions.onResizeSharedEdge?(
+                        d.rowIndex,
+                        pIdx, d.pairedOrigStartMS, pe,
+                        d.effectIndex, ls, d.origEndMS)
+                } else {
+                    c.actions.onResizeEdge(d.rowIndex, d.effectIndex, 0, ls)
+                }
             }
         case .resizeRight:
             if let le = c.liveEndMS {
-                c.actions.onResizeEdge(d.rowIndex, d.effectIndex, 1, le)
+                if let pIdx = d.pairedEffectIndex,
+                   let ps = c.pairedLiveStartMS {
+                    c.actions.onResizeSharedEdge?(
+                        d.rowIndex,
+                        d.effectIndex, d.origStartMS, le,
+                        pIdx, ps, d.pairedOrigEndMS)
+                } else {
+                    c.actions.onResizeEdge(d.rowIndex, d.effectIndex, 1, le)
+                }
             }
         case .fadeIn:
             if let v = c.liveFadeInSec {
@@ -1302,6 +1548,8 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate {
         c.liveFadeOutSec = nil
         c.liveRowId = nil
         c.liveDropInvalid = false
+        c.pairedLiveStartMS = nil
+        c.pairedLiveEndMS = nil
         c.actions.onActiveDragChanged(nil)
         setNeedsDisplay()
     }

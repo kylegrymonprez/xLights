@@ -2356,16 +2356,20 @@ class SequencerViewModel {
         // its own undo (recreate original); addEffectWithSettings
         // registers its own (delete new). The group rolls them up.
         deleteEffect(rowIndex: rowIndex, effectIndex: effectIndex)
-        _ = addEffectWithSettings(rowIndex: rowIndex, name: name,
-                                    settings: settings, palette: palette,
-                                    startMS: origStart, endMS: marker)
+        let leftIdx = addEffectWithSettings(rowIndex: rowIndex, name: name,
+                                              settings: settings, palette: palette,
+                                              startMS: origStart, endMS: marker)
         _ = addEffectWithSettings(rowIndex: rowIndex, name: name,
                                     settings: settings, palette: palette,
                                     startMS: marker, endMS: origEnd)
         undoManager.endUndoGrouping()
         undoManager.setActionName("Split Effect")
-        // Selection was on the deleted original → cleared. Leave the
-        // user to tap whichever half they want.
+        // Auto-select the left half — saves a tap for the common
+        // "split then edit the first segment" flow. User can Tab /
+        // right-arrow to the right half if needed.
+        if leftIdx >= 0 {
+            selectEffect(rowIndex: rowIndex, effectIndex: leftIdx)
+        }
     }
 
     // MARK: - Align (B8)
@@ -2940,10 +2944,16 @@ class SequencerViewModel {
         guard endMS > startMS + 10 else { return } // too tight to fit
 
         let seed = seedsForNewEffect(ofType: paletteName)
-        addEffectWithSettings(rowIndex: rowIndex,
-                               name: paletteName,
-                               settings: seed.settings, palette: seed.palette,
-                               startMS: startMS, endMS: endMS)
+        let newIdx = addEffectWithSettings(rowIndex: rowIndex,
+                                            name: paletteName,
+                                            settings: seed.settings, palette: seed.palette,
+                                            startMS: startMS, endMS: endMS)
+        // Drop-and-edit: select the freshly-placed effect so the
+        // inspector opens immediately. Saves a round-trip tap the
+        // user was almost certainly going to make.
+        if newIdx >= 0 {
+            selectEffect(rowIndex: rowIndex, effectIndex: newIdx)
+        }
     }
 
     /// Return the timing cell (mark pair) on the active timing track
@@ -2988,6 +2998,51 @@ class SequencerViewModel {
         }
         undoManager.setActionName("Add Effect")
         return idx
+    }
+
+    /// Pencil-Pro-squeeze shared-edge commit. Two adjacent effects
+    /// on the same row, originally butted against each other, have
+    /// their shared boundary moved to a new time. Both moves land
+    /// in one undo group so ⌘Z reverses the whole operation. The
+    /// `moveEffect` bridge call rejects overlaps, so we order the
+    /// two moves so whichever side is shrinking goes first (making
+    /// room for the other to grow).
+    func resizeSharedEdge(rowIndex: Int,
+                          leftIndex: Int, leftStartMS: Int, leftEndMS: Int,
+                          rightIndex: Int, rightStartMS: Int, rightEndMS: Int) {
+        guard rowIndex >= 0, rowIndex < rows.count else { return }
+        let row = rows[rowIndex]
+        guard leftIndex < row.effects.count,
+              rightIndex < row.effects.count else { return }
+        let origLeftStart = row.effects[leftIndex].startTimeMS
+        let origRightEnd = row.effects[rightIndex].endTimeMS
+        let origLeftEnd = row.effects[leftIndex].endTimeMS
+        let boundaryMovingRight = leftEndMS > origLeftEnd
+        undoManager.beginUndoGrouping()
+        if boundaryMovingRight {
+            // Right effect shrinks first, then left grows into the
+            // freed space. Re-find indices after each move since
+            // `moveEffect` reloads rows.
+            moveEffect(rowIndex: rowIndex, effectIndex: rightIndex,
+                       newStartMS: rightStartMS, newEndMS: rightEndMS)
+            if let newLeftIdx = rows[rowIndex].effects.firstIndex(where: {
+                $0.startTimeMS == origLeftStart
+            }) {
+                moveEffect(rowIndex: rowIndex, effectIndex: newLeftIdx,
+                           newStartMS: leftStartMS, newEndMS: leftEndMS)
+            }
+        } else {
+            moveEffect(rowIndex: rowIndex, effectIndex: leftIndex,
+                       newStartMS: leftStartMS, newEndMS: leftEndMS)
+            if let newRightIdx = rows[rowIndex].effects.firstIndex(where: {
+                $0.endTimeMS == origRightEnd
+            }) {
+                moveEffect(rowIndex: rowIndex, effectIndex: newRightIdx,
+                           newStartMS: rightStartMS, newEndMS: rightEndMS)
+            }
+        }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName("Resize Shared Edge")
     }
 
     func moveEffect(rowIndex: Int, effectIndex: Int, newStartMS: Int, newEndMS: Int) {
@@ -3335,17 +3390,29 @@ class SequencerViewModel {
             let targetEnd = min(cell.endMS, sequenceDurationMS)
             if targetEnd > targetStart {
                 undoManager.beginUndoGrouping()
-                _ = addEffectWithSettings(rowIndex: rowIndex, name: entry.name,
-                                            settings: entry.settings,
-                                            palette: entry.palette,
-                                            startMS: targetStart,
-                                            endMS: targetEnd)
+                let newIdx = addEffectWithSettings(rowIndex: rowIndex,
+                                                     name: entry.name,
+                                                     settings: entry.settings,
+                                                     palette: entry.palette,
+                                                     startMS: targetStart,
+                                                     endMS: targetEnd)
                 undoManager.endUndoGrouping()
                 undoManager.setActionName("Paste Effect in Cell")
+                // Auto-select the freshly-pasted effect so the
+                // inspector opens immediately.
+                if newIdx >= 0 {
+                    selectEffect(rowIndex: rowIndex, effectIndex: newIdx)
+                }
                 return
             }
         }
 
+        // Single-paste: select the one effect on commit. Multi-paste:
+        // capture the first successful (row, index) pair and select
+        // that anchor — users almost always paste intending to
+        // continue editing the primary entry.
+        var anchorRow: Int = -1
+        var anchorIdx: Int = -1
         undoManager.beginUndoGrouping()
         for entry in clipboardEntries {
             let targetRow = rowIndex + entry.rowOffset
@@ -3355,15 +3422,22 @@ class SequencerViewModel {
             let targetStart = startMS + entry.startOffsetMS
             let targetEnd = min(startMS + entry.endOffsetMS, sequenceDurationMS)
             guard targetEnd > targetStart else { continue }
-            _ = addEffectWithSettings(rowIndex: targetRow, name: entry.name,
-                                        settings: entry.settings,
-                                        palette: entry.palette,
-                                        startMS: targetStart, endMS: targetEnd)
+            let newIdx = addEffectWithSettings(rowIndex: targetRow, name: entry.name,
+                                                 settings: entry.settings,
+                                                 palette: entry.palette,
+                                                 startMS: targetStart, endMS: targetEnd)
+            if newIdx >= 0, anchorRow < 0 {
+                anchorRow = targetRow
+                anchorIdx = newIdx
+            }
         }
         undoManager.endUndoGrouping()
         undoManager.setActionName(clipboardEntries.count > 1
                                     ? "Paste \(clipboardEntries.count) Effects"
                                     : "Paste Effect")
+        if anchorRow >= 0 {
+            selectEffect(rowIndex: anchorRow, effectIndex: anchorIdx)
+        }
     }
 
     // MARK: - Lock / Disable

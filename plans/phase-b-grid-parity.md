@@ -57,6 +57,33 @@ confirmed already shipping in `RowHeaderViews.swift:352`.)
   Magic Keyboard pointer users.
 - **Scroll polish** — B95 (trackpad / wheel).
 
+- **Apple Pencil support (2026-04-22)** —
+  `UIPencilInteraction` on the effect grid with three delegate
+  methods covering both the legacy 12.1+ API
+  (`pencilInteractionDidTap`) and the iOS 17.5+ unified APIs
+  (`pencilInteraction(_:didReceiveTap:)` + `didReceiveSqueeze:`).
+  Squeeze's `.began` / `.ended` phases are tracked separately so
+  the action only fires on full squeeze-release.
+  - **Plain squeeze / double-tap → `undo()`.**
+  - **Squeeze + edge resize drag → shared-edge mode.** When the
+    Pencil Pro squeeze is held and the user drags the left or
+    right edge of an effect that's butted against a neighbour
+    (zero-gap), the shared boundary moves for *both* effects
+    simultaneously — one grows, the other shrinks. Live render
+    shows both sizes animating. Commit routes through new
+    `SequencerViewModel.resizeSharedEdge(rowIndex:leftIndex:...)`
+    which orders the two `moveEffect` calls so the shrinking
+    side clears space before the growing side advances, and
+    both land in one undo group. The squeeze's
+    `pencilSqueezeConsumedByDrag` flag suppresses the plain
+    squeeze→undo action when the squeeze was used for a drag.
+  Pencil hover uses the existing B30 highlight so edge handles
+  light up before the tap. Hit slop kept at the finger-friendly
+  24 pt default — narrowing to 12 pt for "precision" turned out
+  narrower than real-world Pencil jitter + reach-and-tap wobble
+  and broke edge reachability. `touchesBegan` still tracks
+  `pencilActive` as a hook for future refinements.
+
 ### What's still open
 
 - **One P1 cluster**: Tags (B34 numbered markers + B35 tag context
