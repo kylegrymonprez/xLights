@@ -2840,10 +2840,60 @@ class SequencerViewModel {
 
     func addEffect(rowIndex: Int, startMS: Int, endMS: Int) {
         let name = selectedPaletteEffect ?? "On"
+        let seed = seedsForNewEffect(ofType: name)
         addEffectWithSettings(rowIndex: rowIndex, name: name,
-                               settings: "", palette: "",
+                               settings: seed.settings, palette: seed.palette,
                                startMS: startMS, endMS: endMS)
     }
+
+    /// Pick the settings + palette strings to seed a brand-new effect
+    /// placement with. Mirrors desktop's "the panels you're currently
+    /// looking at become the next drop's starting point":
+    /// - Palette (C_*): always inherit from the currently-selected
+    ///   effect if there is one. Matches the persistent ColorPanel
+    ///   sidebar — set up your colours once and drop several effects
+    ///   against them.
+    /// - Effect settings (E_/B_/T_): inherit only when the selected
+    ///   effect is the same type as the one being dropped. Different
+    ///   type → fall back to the effect's metadata defaults (empty
+    ///   string means "use defaults" at render time).
+    /// With nothing selected we emit a hardcoded 8-slot palette so
+    /// `C_BUTTON_PaletteN` is always populated — otherwise flipping
+    /// a `C_CHECKBOX_PaletteN` toggle on would parse as
+    /// `xlColor("") == black`.
+    private func seedsForNewEffect(ofType name: String) -> (settings: String, palette: String) {
+        guard let sel = selectedEffect else {
+            return ("", Self.defaultPaletteString)
+        }
+        let palette: String = {
+            let pal = document.effectPaletteString(forRow: Int32(sel.rowIndex),
+                                                    at: Int32(sel.effectIndex)) ?? ""
+            return pal.isEmpty ? Self.defaultPaletteString : pal
+        }()
+        let settings: String = (sel.name == name)
+            ? (document.effectSettingsString(forRow: Int32(sel.rowIndex),
+                                              at: Int32(sel.effectIndex)) ?? "")
+            : ""
+        return (settings, palette)
+    }
+
+    /// Fallback palette used when no effect is currently selected at
+    /// drop time. All eight `C_BUTTON_Palette*` entries are populated
+    /// with the hex values the palette UI shows as swatch defaults,
+    /// so flipping a `C_CHECKBOX_PaletteN` toggle on produces the
+    /// expected colour instead of `xlColor("") == black`. Checkboxes
+    /// stay off — matches the desktop ColorPanel-emitted string for
+    /// a fresh effect.
+    static let defaultPaletteString = [
+        "C_BUTTON_Palette1=#FF0000",
+        "C_BUTTON_Palette2=#00FF00",
+        "C_BUTTON_Palette3=#0000FF",
+        "C_BUTTON_Palette4=#FFFF00",
+        "C_BUTTON_Palette5=#FFFFFF",
+        "C_BUTTON_Palette6=#000000",
+        "C_BUTTON_Palette7=#FFA500",
+        "C_BUTTON_Palette8=#800080"
+    ].joined(separator: ",")
 
     /// Tap-to-add flow from the grid: insert a new effect of the
     /// currently armed palette type at `atMS`, spanning to the next
@@ -2889,9 +2939,10 @@ class SequencerViewModel {
         }
         guard endMS > startMS + 10 else { return } // too tight to fit
 
+        let seed = seedsForNewEffect(ofType: paletteName)
         addEffectWithSettings(rowIndex: rowIndex,
                                name: paletteName,
-                               settings: "", palette: "",
+                               settings: seed.settings, palette: seed.palette,
                                startMS: startMS, endMS: endMS)
     }
 
