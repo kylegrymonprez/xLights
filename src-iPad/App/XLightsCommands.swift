@@ -206,6 +206,19 @@ struct XLSequencerCommands: Commands {
 
             Divider()
 
+            // Kick off a fresh full-sequence render. Mirrors the
+            // toolbar render button — useful when the Tier 1
+            // memory-warning handler aborted an in-flight render
+            // and the user wants to restart without reopening
+            // the sequence. ⌘R matches the desktop shortcut.
+            // Remains enabled during a render; the view model
+            // aborts-then-restarts safely.
+            Button("Render All") { viewModel.startBackgroundRender() }
+                .keyboardShortcut("r", modifiers: [.command])
+                .disabled(!viewModel.isSequenceLoaded)
+
+            Divider()
+
             Button("Rewind to Start") { viewModel.seekTo(ms: 0) }
                 .keyboardShortcut(.home, modifiers: [])
                 .disabled(!viewModel.isSequenceLoaded)

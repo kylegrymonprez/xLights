@@ -427,6 +427,15 @@ bool iPadRenderContext::OpenSequence(const std::string& path) {
                  _sequenceElements.GetRowInformationSize(),
                  _sequenceElements.GetNumberOfTimingElements());
 
+    // Pre-allocate SequenceData once per sequence. Previously
+    // RenderAll called init() on every pass, which meant a
+    // Cleanup()+realloc of `_frames` on each render; any concurrent
+    // read from a worker thread would OOB. Allocating here makes
+    // the buffer stable for the sequence's lifetime — render passes
+    // reuse it, and `RenderEngine::Render` already zeros per-frame
+    // data when called with `clear=true`.
+    EnsureSequenceDataSized();
+
     spdlog::info("iPadRenderContext: Opened sequence {} ({} elements, {} ms)",
                  path,
                  _sequenceElements.GetElementCount(),
@@ -436,8 +445,32 @@ bool iPadRenderContext::OpenSequence(const std::string& path) {
 
 void iPadRenderContext::CloseSequence() {
     _sequenceElements.Clear();
+    _sequenceData.Cleanup();
     _sequenceDoc.reset();
     _sequenceFile.reset();
+}
+
+void iPadRenderContext::EnsureSequenceDataSized() {
+    if (!_sequenceFile) return;
+    unsigned int numFrames =
+        (unsigned int)(_sequenceFile->GetSequenceDurationMS() /
+                       _sequenceFile->GetFrameMS());
+    unsigned int numChannels = _outputManager.GetTotalChannels();
+    if (numChannels == 0) numChannels = 1;
+    unsigned int frameTime = (unsigned int)_sequenceFile->GetFrameMS();
+
+    // Only reallocate when the shape has actually changed
+    // (sequence duration, frame rate, or channel count). The
+    // `init()` path does a full Cleanup + reallocate; skipping it
+    // on a matching call saves a full sequence's worth of
+    // allocation churn on every render.
+    if (_sequenceData.IsValidData()
+        && _sequenceData.NumChannels() == numChannels
+        && _sequenceData.NumFrames() == numFrames
+        && _sequenceData.FrameTime() == frameTime) {
+        return;
+    }
+    _sequenceData.init(numChannels, numFrames, frameTime);
 }
 
 bool iPadRenderContext::IsInShowFolder(const std::string& file) const {
@@ -681,11 +714,17 @@ void iPadRenderContext::EnsureRenderEngine() {
 void iPadRenderContext::RenderAll() {
     if (!_sequenceFile || !_modelManager) return;
 
-    int numFrames = _sequenceFile->GetSequenceDurationMS() / _sequenceFile->GetFrameMS();
-    int numChannels = _outputManager.GetTotalChannels();
-    if (numChannels == 0) numChannels = 1;
+    // SequenceData is normally allocated in OpenSequence and reused
+    // across every render pass — avoids the allocation churn (and
+    // the concurrent-render OOB crash) that came from re-`init()`
+    // on every RenderAll. This call only reallocates when something
+    // changed (duration / frame rate / channel count); otherwise
+    // it's a no-op. `RenderEngine::Render(..., clear=true)` zeros
+    // the existing frames per-range so we don't need to ourselves.
+    EnsureSequenceDataSized();
 
-    _sequenceData.init(numChannels, numFrames, _sequenceFile->GetFrameMS());
+    unsigned int numFrames = _sequenceData.NumFrames();
+    unsigned int numChannels = _sequenceData.NumChannels();
 
     EnsureRenderEngine();
 
@@ -696,7 +735,7 @@ void iPadRenderContext::RenderAll() {
 
     _renderEngine->Render(_sequenceElements, _sequenceData,
                            models, empty,
-                           0, numFrames - 1,
+                           0, (int)numFrames - 1,
                            nullptr, true,
                            [](bool) {});
 

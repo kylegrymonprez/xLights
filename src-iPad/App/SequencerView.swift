@@ -345,10 +345,25 @@ struct SequencerView: View {
             // and forced the "Show Preview" label into a second line
             // in narrow / portrait layouts, so it's gone now.
 
-            if viewModel.isRendering {
-                ProgressView()
-                    .controlSize(.small)
+            // Render-all button. Tier 1 memory-pressure handling
+            // aborts in-flight renders, so users need a manual
+            // restart path. Shows a spinner while rendering, the
+            // `paintpalette` icon when idle (mirrors desktop).
+            // Tapping during a render aborts the current pass and
+            // starts a fresh one — `startBackgroundRender` handles
+            // the abort-then-restart chaining safely.
+            Button(action: {
+                viewModel.startBackgroundRender()
+            }) {
+                if viewModel.isRendering {
+                    ProgressView()
+                        .controlSize(.small)
+                } else {
+                    Image(systemName: "paintpalette")
+                }
             }
+            .disabled(!viewModel.isSequenceLoaded)
+            .help("Render all effects")
 
             Spacer()
 

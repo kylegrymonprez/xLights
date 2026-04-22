@@ -300,4 +300,11 @@ private:
     // Ensures the render engine + its pool are ready before using them
     // from a preview render path (before `RenderAll` has been called).
     void EnsureRenderEngine();
+
+    // Re-allocates `_sequenceData` only when the sequence's shape
+    // (numChannels / numFrames / frameTime) has actually changed.
+    // Normally a no-op — OpenSequence pre-allocates once and
+    // subsequent RenderAll passes reuse. Triggers a fresh init
+    // after duration / frame-rate / channel-count mutations.
+    void EnsureSequenceDataSized();
 };

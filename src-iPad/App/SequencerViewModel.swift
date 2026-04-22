@@ -1125,6 +1125,34 @@ class SequencerViewModel {
     // MARK: - Background Rendering
 
     func startBackgroundRender() {
+        guard isSequenceLoaded else { return }
+
+        // Already rendering → abort cleanly before spinning up a
+        // fresh worker. Skipping this would reallocate `SequenceData.
+        // _frames` via `SequenceData::init()` while the current
+        // render's worker threads are still dereferencing it via
+        // `operator[](frame)`, which libc++ catches as an OOB access
+        // assertion. Abort runs off-main so the UI stays responsive
+        // (spinner keeps spinning) while we wait for workers to
+        // unwind; once they're done we chain into the fresh render.
+        if isRendering {
+            renderPollTimer?.invalidate()
+            renderPollTimer = nil
+            let doc = document
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                _ = doc.abortRenderAndWait(3.0)
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.beginFreshRender()
+                }
+            }
+            return
+        }
+
+        beginFreshRender()
+    }
+
+    private func beginFreshRender() {
         isRendering = true
         isRenderDone = false
         let doc = document

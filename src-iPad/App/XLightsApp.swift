@@ -289,16 +289,12 @@ struct ContentView: View {
             if viewModel.isDirty {
                 _ = viewModel.saveSequence()
             }
-            // F-5: snapshot detach state before we auto-dismiss so
-            // the next launch can re-open exactly what the user
-            // had open at close. Snapshot must come BEFORE the
-            // dismissWindow calls below — those clear the live
-            // flags on the view model.
-            houseDetachedOnClose = viewModel.housePreviewDetached
-            modelDetachedOnClose = viewModel.modelPreviewDetached
-            inspectorTabsDetachedCSV = viewModel.detachedInspectorTabs
-                .sorted()
-                .joined(separator: ",")
+            // F-5: snapshot detach state before auto-dismiss so
+            // next launch restores the user's exit layout. Must
+            // come BEFORE the dismissWindow calls below — those
+            // flip the live flags to false as each scene
+            // disappears.
+            snapshotDetachState()
 
             dismissWindow(id: "house-preview")
             dismissWindow(id: "model-preview")
@@ -316,6 +312,21 @@ struct ContentView: View {
                 UIApplication.shared.requestSceneSessionDestruction(
                     scene.session, options: nil, errorHandler: nil)
             }
+        }
+        // F-5 fix: the `.inactive` handler above only fires for
+        // the "pill-close main while detached is alive" case. For
+        // every other exit path (home button, swipe-up from the
+        // app switcher, force-quit from memory pressure), scene
+        // phase eventually reaches `.background` — snapshot there
+        // too so the AppStorage flags reflect the actual exit
+        // state regardless of how the user left the app.
+        //
+        // The snapshot is idempotent: if `.inactive` already ran
+        // it, the flags are already current. If `.inactive` was
+        // skipped (because sibling check failed), this catches it.
+        .onChange(of: scenePhase) { _, newPhase in
+            guard newPhase == .background else { return }
+            snapshotDetachState()
         }
         .alert("Recover Autosave Backup?",
                isPresented: Binding(
@@ -358,6 +369,20 @@ struct ContentView: View {
             return name
         }
         return "xLights"
+    }
+
+    /// F-5 — write the current live detach state (view model
+    /// flags + detached-inspector-tabs set) into AppStorage so the
+    /// next launch can restore the same layout. Called from both
+    /// the `.inactive` handler (pill-close path, before auto-
+    /// dismiss clears the flags) and the `.background` handler
+    /// (home / swipe-up / force-quit path). Idempotent.
+    private func snapshotDetachState() {
+        houseDetachedOnClose = viewModel.housePreviewDetached
+        modelDetachedOnClose = viewModel.modelPreviewDetached
+        inspectorTabsDetachedCSV = viewModel.detachedInspectorTabs
+            .sorted()
+            .joined(separator: ",")
     }
 
     /// G-3 — open a sequence file the system handed us (Files-app
