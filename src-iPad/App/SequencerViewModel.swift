@@ -69,16 +69,29 @@ class SequencerViewModel {
     // sync and a zoom-triggered reload keeps the filter.
     enum WaveformFilter: Int, CaseIterable {
         case raw = 0, bass = 1, treble = 2, alto = 3, nonVocals = 4, custom = 5, lufs = 6, vocals = 7
+        case stemDrums = 8, stemBass = 9, stemOther = 10, stemVocals = 11
         var displayName: String {
             switch self {
-            case .raw:       return "Full Range"
-            case .bass:      return "Bass"
-            case .treble:    return "Treble"
-            case .alto:      return "Alto"
-            case .nonVocals: return "Non-Vocals"
-            case .custom:    return "Custom Band…"
-            case .lufs:      return "Perceptual (LUFS)"
-            case .vocals:    return "Vocals (center-extract)"
+            case .raw:        return "Full Range"
+            case .bass:       return "Bass"
+            case .treble:     return "Treble"
+            case .alto:       return "Alto"
+            case .nonVocals:  return "Non-Vocals"
+            case .custom:     return "Custom Band…"
+            case .lufs:       return "Perceptual (LUFS)"
+            case .vocals:     return "Vocals (center-extract)"
+            case .stemDrums:  return "Stem — Drums"
+            case .stemBass:   return "Stem — Bass"
+            case .stemOther:  return "Stem — Other"
+            case .stemVocals: return "Stem — Vocals (ML)"
+            }
+        }
+        /// True when this filter depends on the HTDemucs stem cache
+        /// being populated.
+        var requiresStems: Bool {
+            switch self {
+            case .stemDrums, .stemBass, .stemOther, .stemVocals: return true
+            default: return false
             }
         }
     }
@@ -135,6 +148,18 @@ class SequencerViewModel {
     // polygons. Compute is lazy + cached in the bridge.
     var showSpectrogram: Bool = false
     @ObservationIgnored var spectrogramReady: Bool = false
+
+    // A8 HTDemucs stem separation state.
+    enum StemPhase { case idle, pickingRoot, downloading, separating, ready }
+    var stemsPhase: StemPhase = .idle
+    var stemsProgressPct: Int = 0
+    var stemsAvailable: Bool = false
+    /// Pending filter that triggered the install flow — switched to
+    /// once `stemsAvailable` becomes true.
+    @ObservationIgnored var stemsPendingFilter: WaveformFilter? = nil
+    /// Root the user picked in the installer sheet. Non-nil while
+    /// the install is running so cancellation can clean up.
+    @ObservationIgnored var stemsInstallRoot: String? = nil
 
     // A7 SoundAnalysis classification. `soundClasses` maps class
     // identifier ("music.drums" etc.) to a per-`soundClassTimeStep`
@@ -790,6 +815,11 @@ class SequencerViewModel {
         isComputingPitch = false
         showSpectrogram = false
         spectrogramReady = false
+        stemsPhase = .idle
+        stemsProgressPct = 0
+        stemsAvailable = false
+        stemsPendingFilter = nil
+        stemsInstallRoot = nil
     }
 
     // MARK: - Memory Pressure
@@ -3439,6 +3469,89 @@ class SequencerViewModel {
         }
         reloadRows()
         return rowIdx
+    }
+
+    /// A8: ensure HTDemucs stem data is cached on the AudioManager
+    /// for the current audio, triggering the first-run install flow
+    /// if needed. `filter` is the filter the user tapped — we stash
+    /// it as `stemsPendingFilter` so the UI can switch to it once
+    /// separation finishes. Returns immediately after phase
+    /// transition; subsequent callbacks drive the rest of the flow.
+    func prepareStems(for filter: WaveformFilter) {
+        guard hasAudio else { return }
+        stemsPendingFilter = filter
+        if stemsAvailable {
+            applyPendingStemFilter()
+            return
+        }
+        if stemsPhase != .idle { return }
+        if let existing = document.findInstalledStemModelPath() {
+            runStemSeparation(with: existing)
+        } else {
+            stemsPhase = .pickingRoot
+        }
+    }
+
+    /// A8: user picked an install root in the sheet — kick off the
+    /// download.
+    func commitStemsInstall(toRoot root: String) {
+        stemsInstallRoot = root
+        stemsPhase = .downloading
+        stemsProgressPct = 0
+        let doc = document
+        doc.installStemModel(toRoot: root,
+                              progress: { [weak self] pct in
+            self?.stemsProgressPct = Int(pct)
+        },
+                              completion: { [weak self] installedPath in
+            guard let self = self else { return }
+            if let path = installedPath, !path.isEmpty {
+                self.runStemSeparation(with: path)
+            } else {
+                self.stemsPhase = .idle
+                self.stemsPendingFilter = nil
+                self.stemsInstallRoot = nil
+            }
+        })
+    }
+
+    /// A8: user cancelled the install picker.
+    func cancelStemsInstall() {
+        stemsPhase = .idle
+        stemsPendingFilter = nil
+        stemsInstallRoot = nil
+        stemsProgressPct = 0
+    }
+
+    /// A8: kicks off stem separation. The bridge dispatches CoreML
+    /// to a background queue internally; all callbacks here fire on
+    /// the main queue, so we stay on the main actor.
+    private func runStemSeparation(with modelPath: String) {
+        stemsPhase = .separating
+        stemsProgressPct = 0
+        document.runStemSeparation(atPath: modelPath,
+                                    progress: { [weak self] pct in
+            self?.stemsProgressPct = Int(pct)
+        },
+                                    completion: { [weak self] ok in
+            guard let self = self else { return }
+            if ok {
+                self.stemsAvailable = true
+                self.stemsPhase = .ready
+                self.applyPendingStemFilter()
+            } else {
+                self.stemsPhase = .idle
+                self.stemsPendingFilter = nil
+            }
+        })
+    }
+
+    private func applyPendingStemFilter() {
+        guard let f = stemsPendingFilter else { return }
+        stemsPendingFilter = nil
+        waveformFilter = f
+        // Reset the phase ribbon once the user sees the stem.
+        stemsPhase = .idle
     }
 
     /// A6: toggle spectrogram view mode. First activation kicks the

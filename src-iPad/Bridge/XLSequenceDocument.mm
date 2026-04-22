@@ -35,6 +35,10 @@
 #include "media/PitchDetector.h"
 #include "media/ChordDetector.h"
 #include "media/Spectrogram.h"
+#include "media/AIModelStore.h"
+#include "media/StemSeparator.h"
+#include "../../dependencies/libxlsxwriter/third_party/minizip/unzip.h"
+#include <filesystem>
 #include "media/MediaCompatibility.h"
 #include "media/VideoReader.h"
 #include "render/ValueCurve.h"
@@ -2828,6 +2832,10 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
             break;
         case 6: type = AUDIOSAMPLETYPE::LUFS; break;
         case 7: type = AUDIOSAMPLETYPE::VOCALS; break;
+        case 8:  type = AUDIOSAMPLETYPE::STEM_DRUMS; break;
+        case 9:  type = AUDIOSAMPLETYPE::STEM_BASS; break;
+        case 10: type = AUDIOSAMPLETYPE::STEM_OTHER; break;
+        case 11: type = AUDIOSAMPLETYPE::STEM_VOCALS; break;
         default: break;
     }
     if (type != AUDIOSAMPLETYPE::RAW) {
@@ -2910,6 +2918,243 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
     std::vector<uint8_t> buf;
     RenderSpectrogramBGRA(_spectrogram, startMS, endMS, outWidth, outHeight, buf);
     return [NSData dataWithBytes:buf.data() length:buf.size()];
+}
+
+#pragma mark - A8 stem separation
+
+- (NSArray<NSString*>*)stemModelCandidateRoots {
+    NSMutableArray<NSString*>* out = [NSMutableArray array];
+    NSString* show = [self showFolderPath];
+    if (show.length > 0) [out addObject:show];
+    for (NSString* m in [self mediaFolderPaths]) {
+        if (m.length > 0) [out addObject:m];
+    }
+    return out;
+}
+
+// Helper: recursively scan `rootDir` for the .mlpackage and lift it
+// to `<rootDir>/<modelName>` so the shallow FindModel succeeds on
+// subsequent runs. Returns the normalised path, or empty on miss.
+static std::string iPadLiftNestedStemModel(const std::string& rootDir) {
+    std::error_code ec;
+    if (!std::filesystem::exists(rootDir, ec)) return {};
+    std::string found;
+    for (auto& entry : std::filesystem::recursive_directory_iterator(rootDir, ec)) {
+        if (ec) break;
+        if (entry.is_directory(ec) &&
+            entry.path().filename().string() == AIModelStore::kDemucsModelName) {
+            found = entry.path().string();
+            break;
+        }
+    }
+    if (found.empty()) return {};
+    std::string target = rootDir + "/" + AIModelStore::kDemucsModelName;
+    if (found == target) return target;
+    std::filesystem::rename(found, target, ec);
+    if (ec) return {};
+    std::filesystem::path p(found);
+    while (p.has_parent_path()) {
+        p = p.parent_path();
+        if (p.string() == rootDir) break;
+        std::error_code rmErr;
+        if (!std::filesystem::remove(p, rmErr)) break;
+    }
+    return target;
+}
+
+- (NSString*)findInstalledStemModelPath {
+    std::vector<std::string> roots;
+    for (NSString* r in [self stemModelCandidateRoots]) {
+        roots.push_back([r UTF8String]);
+    }
+    auto modelDirs = AIModelStore::CandidateModelDirs(roots);
+    std::string hit = AIModelStore::FindModel(AIModelStore::kDemucsModelName, modelDirs);
+    if (hit.empty()) {
+        // Maybe nested from a prior incomplete install — try to lift.
+        for (const auto& d : modelDirs) {
+            hit = iPadLiftNestedStemModel(d);
+            if (!hit.empty()) break;
+        }
+    }
+    if (hit.empty()) return nil;
+    return [NSString stringWithUTF8String:hit.c_str()];
+}
+
+- (void)installStemModelToRoot:(NSString*)root
+                        progress:(void(^)(int pct))progress
+                      completion:(void(^)(NSString* installedPath))completion {
+    if (root.length == 0) {
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); });
+        return;
+    }
+    NSString* destDirNS = [root stringByAppendingPathComponent:
+        [NSString stringWithUTF8String:AIModelStore::kModelsSubdir]];
+    std::string destDir = [destDirNS UTF8String];
+    if (!AIModelStore::EnsureDirectory(destDir)) {
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); });
+        return;
+    }
+    // Security-scoped access for writes.
+    ObtainAccessToURL(destDir, /*enforceWritable=*/true);
+
+    NSURL* url = [NSURL URLWithString:
+        [NSString stringWithUTF8String:AIModelStore::kDemucsDownloadURL]];
+    NSURLSessionConfiguration* cfg = [NSURLSessionConfiguration defaultSessionConfiguration];
+    cfg.allowsCellularAccess = NO; // 65 MB download — stay on Wi-Fi by default.
+    cfg.waitsForConnectivity = YES;
+    __block id progressObserver = nil;
+    NSURLSession* session = [NSURLSession sessionWithConfiguration:cfg];
+    NSURLSessionDownloadTask* task =
+        [session downloadTaskWithURL:url
+                    completionHandler:^(NSURL* tmpLoc, NSURLResponse* resp, NSError* err) {
+        if (progressObserver) {
+            [progressObserver invalidate];
+        }
+        if (err || !tmpLoc) {
+            NSLog(@"Stem model download failed: %@", err);
+            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); });
+            return;
+        }
+        // Move the downloaded tmp file into destDir as the zip.
+        NSString* zipPath = [destDirNS stringByAppendingPathComponent:
+            @"HTDemucs_SourceSeparation_F32.mlpackage.zip"];
+        [[NSFileManager defaultManager] removeItemAtPath:zipPath error:nil];
+        NSError* moveErr = nil;
+        if (![[NSFileManager defaultManager] moveItemAtURL:tmpLoc
+                                                       toURL:[NSURL fileURLWithPath:zipPath]
+                                                       error:&moveErr]) {
+            NSLog(@"Stem model zip move failed: %@", moveErr);
+            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); });
+            return;
+        }
+
+        // Unzip using minizip. Preserves directory structure —
+        // `.mlpackage` is a directory bundle. Progress covers 50..100
+        // so the caller sees activity across download (0..50) + unzip.
+        unzFile uf = unzOpen([zipPath UTF8String]);
+        if (!uf) {
+            NSLog(@"unzOpen failed for %@", zipPath);
+            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); });
+            return;
+        }
+        unz_global_info gi = {};
+        unzGetGlobalInfo(uf, &gi);
+        const uLong totalEntries = gi.number_entry;
+        uLong idx = 0;
+        int ret = unzGoToFirstFile(uf);
+        while (ret == UNZ_OK) {
+            char nameBuf[1024] = {0};
+            unz_file_info fi = {};
+            unzGetCurrentFileInfo(uf, &fi, nameBuf, sizeof(nameBuf), nullptr, 0, nullptr, 0);
+            std::string entryName = nameBuf;
+            std::string outPath = destDir + "/" + entryName;
+            // Directory entries end with `/`.
+            if (!entryName.empty() && entryName.back() == '/') {
+                std::error_code ec;
+                std::filesystem::create_directories(outPath, ec);
+            } else {
+                // Ensure parent dir exists.
+                std::error_code ec;
+                std::filesystem::create_directories(
+                    std::filesystem::path(outPath).parent_path(), ec);
+                if (unzOpenCurrentFile(uf) == UNZ_OK) {
+                    FILE* out = fopen(outPath.c_str(), "wb");
+                    if (out) {
+                        std::vector<uint8_t> buf(64 * 1024);
+                        int n;
+                        while ((n = unzReadCurrentFile(uf, buf.data(), (unsigned)buf.size())) > 0) {
+                            fwrite(buf.data(), 1, (size_t)n, out);
+                        }
+                        fclose(out);
+                    }
+                    unzCloseCurrentFile(uf);
+                }
+            }
+            idx++;
+            if (progress && totalEntries > 0) {
+                int pct = 50 + int((idx * 50) / totalEntries);
+                if (pct > 100) pct = 100;
+                dispatch_async(dispatch_get_main_queue(), ^{ progress(pct); });
+            }
+            ret = unzGoToNextFile(uf);
+        }
+        unzClose(uf);
+        [[NSFileManager defaultManager] removeItemAtPath:zipPath error:nil];
+
+        // Lift the nested .mlpackage to the canonical path.
+        std::string modelPath = iPadLiftNestedStemModel(destDir);
+        if (modelPath.empty()) {
+            if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); });
+            return;
+        }
+        NSString* out = [NSString stringWithUTF8String:modelPath.c_str()];
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(out); });
+    }];
+    // Hook up periodic download progress (0..50).
+    progressObserver = [task.progress addObserverForKeyPath:@"fractionCompleted"
+                                                    options:NSKeyValueObservingOptionNew
+                                                    context:nullptr];
+    // NSKVO-based progress observation is clumsy from ObjC without
+    // a subclass; use a timer-driven poll instead. Keep it simple.
+    (void)progressObserver;
+    if (progress) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            // Immediately report 0 so the UI shows the progress bar.
+            progress(0);
+        });
+    }
+    // Timer-driven progress poll — fires every 250 ms and reports
+    // the download percentage in the 0..50 range (unzip takes 50..100).
+    // The block strongly retains `task`; the timer self-cancels as
+    // soon as the task transitions to Completed / Canceling.
+    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER,
+        0, 0, dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
+    dispatch_source_set_timer(timer,
+        dispatch_time(DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC),
+        250 * NSEC_PER_MSEC, 50 * NSEC_PER_MSEC);
+    dispatch_source_set_event_handler(timer, ^{
+        if (task.state == NSURLSessionTaskStateCompleted ||
+            task.state == NSURLSessionTaskStateCanceling) {
+            dispatch_source_cancel(timer);
+            return;
+        }
+        double frac = task.progress.fractionCompleted;
+        int pct = int(frac * 50.0);
+        if (progress) dispatch_async(dispatch_get_main_queue(), ^{ progress(pct); });
+    });
+    dispatch_resume(timer);
+    [task resume];
+}
+
+- (void)runStemSeparationAtPath:(NSString*)modelPath
+                        progress:(void(^)(int pct))progress
+                      completion:(void(^)(BOOL ok))completion {
+    auto* am = [self audioManager];
+    if (!am || !am->IsOk() || modelPath.length == 0) {
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(NO); });
+        return;
+    }
+    // Copy the path for use inside the background block.
+    NSString* path = [modelPath copy];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        StemOutput stems;
+        bool ok = SeparateStems(am, [path UTF8String], stems,
+                                  StemSeparatorOptions{},
+                                  [progress](int pct) {
+                                      if (progress) {
+                                          dispatch_async(dispatch_get_main_queue(),
+                                                         ^{ progress(pct); });
+                                      }
+                                  });
+        if (ok) {
+            am->SetStemData(
+                stems.drumsL, stems.drumsR,
+                stems.bassL, stems.bassR,
+                stems.otherL, stems.otherR,
+                stems.vocalsL, stems.vocalsR);
+        }
+        if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(ok ? YES : NO); });
+    });
 }
 
 - (NSDictionary*)detectChords {

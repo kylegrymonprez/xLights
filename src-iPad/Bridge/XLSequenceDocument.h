@@ -849,6 +849,43 @@
 - (BOOL)ensureSpectrogramComputed
     NS_SWIFT_NAME(ensureSpectrogramComputed());
 
+// A8 stem separation (macOS 12+ / iOS 15+ only — ML model uses
+// Float16 multi-arrays). All four methods no-op on older OS.
+
+// Roots (show folder + configured media folders) where the model
+// could be installed, in preference order. UI uses this to present
+// a picker.
+- (NSArray<NSString*>*)stemModelCandidateRoots
+    NS_SWIFT_NAME(stemModelCandidateRoots());
+
+// Scans candidate roots for an already-installed
+// `HTDemucs_SourceSeparation_F32.mlpackage` (including nested-from-
+// zip layouts which get lifted to the canonical path). Returns the
+// absolute path, or nil if not present.
+- (NSString*)findInstalledStemModelPath
+    NS_SWIFT_NAME(findInstalledStemModelPath());
+
+// First-run installer. Downloads the model zip to
+// `<root>/ai-models/`, unzips, lifts the nested `.mlpackage` up to
+// the canonical location. `progress` fires on the main queue with
+// 0..100. `completion` fires on the main queue with the final model
+// path (nil on failure / cancel).
+- (void)installStemModelToRoot:(NSString*)root
+                        progress:(void(^)(int pct))progress
+                      completion:(void(^)(NSString* installedPath))completion
+    NS_SWIFT_NAME(installStemModel(toRoot:progress:completion:));
+
+// Asynchronous stem separation. Dispatches CoreML inference to a
+// background queue (required — CoreML warns if called on main) and
+// invokes `progress` / `completion` on the main queue. On success
+// the result is stashed on the underlying AudioManager via
+// `SetStemData` so subsequent `waveformData(...filterType:8..11)`
+// queries serve the stems.
+- (void)runStemSeparationAtPath:(NSString*)modelPath
+                        progress:(void(^)(int pct))progress
+                      completion:(void(^)(BOOL ok))completion
+    NS_SWIFT_NAME(runStemSeparation(atPath:progress:completion:));
+
 // Renders the cached spectrogram at [startMS, endMS] into an
 // `outWidth × outHeight` BGRA buffer (length = w*h*4). Returns nil
 // if the spectrogram hasn't been computed yet.

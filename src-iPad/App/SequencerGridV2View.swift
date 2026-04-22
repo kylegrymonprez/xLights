@@ -110,6 +110,29 @@ struct SequencerGridV2View: View {
     @State private var chordPreviewPresented: Bool = false
     @State private var chordPreview: (key: String, chords: [(Int, Int, String)])? = nil
 
+    /// A8 stem-model install-location picker sheet trigger.
+    private var iOS15Available: Bool {
+        if #available(iOS 15.0, *) { return true }
+        return false
+    }
+
+    /// Binding used by the A8 install-picker sheet's
+    /// `.sheet(isPresented:)`. Setting false routes through the view
+    /// model's cancel path.
+    private var stemsInstallPickerBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.stemsPhase == .pickingRoot },
+            set: { new in if !new { viewModel.cancelStemsInstall() } })
+    }
+
+    /// Binding for the A8 progress sheet — modal, non-cancellable.
+    private var stemsProgressBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.stemsPhase == .downloading ||
+                   viewModel.stemsPhase == .separating },
+            set: { _ in })
+    }
+
     /// B74 import-xtiming file-picker trigger.
     @State private var showingXTimingImporter: Bool = false
     /// B78 import-lyrics sheet state.
@@ -588,21 +611,32 @@ struct SequencerGridV2View: View {
             isPresented: $waveformMenuPresented
         ) {
             ForEach(SequencerViewModel.WaveformFilter.allCases, id: \.rawValue) { filter in
-                Button {
-                    if filter == .custom {
-                        // Opening the custom-band sheet implicitly
-                        // activates the filter so the user can see
-                        // live preview as they drag the sliders.
-                        viewModel.waveformFilter = .custom
-                        customBandSheetPresented = true
-                    } else {
-                        viewModel.waveformFilter = filter
-                    }
-                } label: {
-                    if viewModel.waveformFilter == filter {
-                        Label(filter.displayName, systemImage: "checkmark")
-                    } else {
-                        Text(filter.displayName)
+                // HTDemucs stems require macOS 12 / iOS 15 for the
+                // Float16 MLMultiArray I/O the model uses. Hide the
+                // stem entries on older iOS.
+                if !filter.requiresStems || iOS15Available {
+                    Button {
+                        if filter == .custom {
+                            // Opening the custom-band sheet implicitly
+                            // activates the filter so the user can see
+                            // live preview as they drag the sliders.
+                            viewModel.waveformFilter = .custom
+                            customBandSheetPresented = true
+                        } else if filter.requiresStems {
+                            // First tap kicks off the install / separator
+                            // flow; the view model flips through its
+                            // phases and flips `waveformFilter` when
+                            // stems are ready.
+                            viewModel.prepareStems(for: filter)
+                        } else {
+                            viewModel.waveformFilter = filter
+                        }
+                    } label: {
+                        if viewModel.waveformFilter == filter {
+                            Label(filter.displayName, systemImage: "checkmark")
+                        } else {
+                            Text(filter.displayName)
+                        }
                     }
                 }
             }
@@ -685,6 +719,19 @@ struct SequencerGridV2View: View {
                 Text("No chords detected.")
                     .padding()
             }
+        }
+        // A8 stem install-location picker (first run).
+        .sheet(isPresented: stemsInstallPickerBinding) {
+            StemInstallSheet(
+                roots: (viewModel.document.stemModelCandidateRoots() as [String]),
+                onCommit: { root in viewModel.commitStemsInstall(toRoot: root) },
+                onCancel: { viewModel.cancelStemsInstall() })
+        }
+        // A8 stem download + separation progress sheet.
+        .sheet(isPresented: stemsProgressBinding) {
+            StemProgressSheet(
+                phase: viewModel.stemsPhase,
+                pct: viewModel.stemsProgressPct)
         }
         // A4 tempo-detection preview sheet.
         .sheet(isPresented: $tempoPreviewPresented) {
@@ -1740,6 +1787,116 @@ struct ChordPreviewSheet: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - A8 Stem install sheet
+
+/// Prompts the user to pick an install root (show folder or a
+/// media folder) for the HTDemucs stem-separation model.
+struct StemInstallSheet: View {
+    let roots: [String]
+    let onCommit: (String) -> Void
+    let onCancel: () -> Void
+
+    @State private var selected: Int = 0
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Stem separation uses an on-device ML model (HTDemucs) to split your audio into drums, bass, vocals, and other. The model is about 65 MB to download (expands to ~180 MB on disk) and runs entirely offline once installed.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Install location") {
+                    ForEach(Array(roots.enumerated()), id: \.offset) { idx, root in
+                        Button {
+                            selected = idx
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(idx == 0 ? "Show folder" : "Media folder")
+                                        .font(.body)
+                                    Text(root)
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
+                                Spacer()
+                                if idx == selected {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(.tint)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                Section {
+                    Text("Download runs over Wi-Fi only. You'll need enough free space on the chosen root.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Install Stem Model")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { onCancel() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Download") {
+                        if selected >= 0 && selected < roots.count {
+                            onCommit(roots[selected])
+                        }
+                    }
+                    .disabled(roots.isEmpty)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - A8 Stem progress sheet
+
+/// Non-cancellable modal progress bar shown while the model is
+/// downloading or the separator is running.
+struct StemProgressSheet: View {
+    let phase: SequencerViewModel.StemPhase
+    let pct: Int
+
+    private var title: String {
+        switch phase {
+        case .downloading: return "Downloading Model"
+        case .separating:  return "Separating Stems"
+        default:           return "Preparing Stems"
+        }
+    }
+    private var message: String {
+        switch phase {
+        case .downloading: return "Fetching HTDemucs — stay on Wi-Fi."
+        case .separating:  return "Running HTDemucs — drums, bass, vocals, other…"
+        default:           return ""
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ProgressView(value: Double(pct) / 100.0)
+                .progressViewStyle(.linear)
+            Text(title).font(.headline)
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+            Text("\(pct)%")
+                .font(.title3.monospacedDigit())
+        }
+        .padding(24)
+        .presentationDetents([.medium])
+        .interactiveDismissDisabled(true)
     }
 }
 
