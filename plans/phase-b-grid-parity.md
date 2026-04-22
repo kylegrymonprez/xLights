@@ -14,8 +14,10 @@ All original P0s closed, plus 20+ P1s landed across the 2026-04-20
 and 2026-04-21 sessions. What remains is a short tail of P1 polish
 + a long tail of P2 nice-to-haves.
 
-**Current counts:** 0 × P0, **6 × P1**, ~40 × P2, 1 × Verify,
-1 × Deferred, 1 × Removed.
+**Current counts:** 0 × P0, **6 × P1**, ~39 × P2, 0 × Verify,
+1 × Deferred, 1 × Removed. (B26 ColorCurve gradient confirmed
+landed via BM-6 device verify; B64 layer-count `[N]` indicator
+confirmed already shipping in `RowHeaderViews.swift:352`.)
 
 ### What landed since the 2026-04-20 gap audit
 
@@ -129,12 +131,6 @@ feature.
   desktop sources from `ColorManager::COLOR_EFFECT_DEFAULT /
   _SELECTED / _LOCKED / _DISABLED` so user-customised palettes
   round-trip. Route iPad through the existing bridge. **P2.**
-- **Gap B26 — Colour-curve / gradient preview inside effect bar.**
-  **Verify only** — 14 effects override `DrawEffectBackground`
-  (Color Wash, On, Morph, Galaxy, Shockwave, Fan, Twinkle,
-  Pictures, Fireworks, Ripple, etc.) and BM-6 already runs that
-  pass. Needs a device-side check with a known ColorCurve
-  sequence to close.
 - **Gap B27 — Node-level colour-channel stripes.** Desktop paints
   thin per-channel stripes on node-level effects for multi-channel
   models (RGBW etc.). **P2.**
@@ -205,9 +201,6 @@ feature.
   decorates row names with small icons when the element is a
   Papagayo lyric track, FPP command / effect track, etc. iPad
   shows a folder for ModelGroup only. **P2.**
-- **Gap B64 — Layer-count "[N]" indicator.** Desktop shows `Model
-  Name [3]` when the element has 3 layers; iPad shows the layer
-  toggle button but no count. **P2.**
 - **Gap B66 — Muted visual state.** Desktop has distinct rendering
   for a muted element. **P2.**
 
@@ -347,7 +340,7 @@ feedback.
 | B23 | Duplicate across models | Ctx menu | P2 |
 | B24 | Find possible source effects | Ctx menu | P2 |
 | B25 | Bracket colours sourced from `ColorManager` | Visual | P2 |
-| B26 | ColorCurve gradient preview in effect bar | Visual | Verify |
+| B26 | ColorCurve gradient preview in effect bar | Visual | ✓ landed |
 | B27 | Node-level channel stripes | Visual | P2 |
 | B28 | Reference / previous-selection indicator | Visual | P2 |
 | B29 | Text fade / size stepping | Visual | P2 |
@@ -365,7 +358,7 @@ feedback.
 | B58 | Toggle Strands / Nodes / Models | Row heading | P2 |
 | B60 | Drag row to reorder | Row heading | P2 |
 | B63 | Papagayo / FPP / group icon glyphs | Row heading | P2 |
-| B64 | Layer-count [N] indicator | Row heading | P2 |
+| B64 | Layer-count [N] indicator | Row heading | ✓ landed |
 | B66 | Muted row visual state | Row heading | P2 |
 | B77 | Import Notes (MIDI) | Timing | P2 |
 | B79 | AI Speech 2 Lyrics | Timing | P2 |
@@ -383,5 +376,5 @@ feedback.
 | B99 | System pasteboard (UIPasteboard) integration | Clipboard | P2 |
 | B100 | Paste-replacing-existing with confirmation | Clipboard | P2 |
 
-Counts (2026-04-21): **0 × P0**, **6 × P1**, **40 × P2**, **1 ×
-Verify**, **1 × Deferred**, **1 × Removed**.
+Counts (2026-04-21, post-verify): **0 × P0**, **6 × P1**,
+**39 × P2**, **0 × Verify**, **1 × Deferred**, **1 × Removed**.
