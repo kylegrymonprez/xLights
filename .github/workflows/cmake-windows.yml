@@ -1,0 +1,85 @@
+name: Windows CMake
+
+on:
+  schedule:
+    - cron: '0 5 * * *' # run at 5 AM UTC
+  workflow_dispatch:
+
+jobs:
+  cmake-windows:
+    name: CMake / Windows / MSVC x64
+    runs-on: windows-latest
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false   # handled manually below to skip the macOS submodule
+
+      - name: Init submodules (skip macOS)
+        shell: bash
+        run: |
+          git submodule update --init \
+            dependencies/liquidfun \
+            dependencies/midifile \
+            dependencies/libltc \
+            dependencies/libxlsxwriter \
+            dependencies/lua \
+            dependencies/pybind11 \
+            dependencies/nanosvg \
+            dependencies/pugixml \
+            dependencies/spdlog
+
+      # ── MSVC environment ──────────────────────────────────────────────────
+      - name: Setup msbuild
+        uses: microsoft/setup-msbuild@v3
+
+      # ── wxWidgets (custom fork, built with nmake → lib/vc_x64_lib layout) ─
+      - name: Get wxWidgets HEAD SHA
+        id: wx-sha
+        shell: bash
+        run: |
+          sha=$(git ls-remote https://github.com/xLightsSequencer/wxWidgets.git HEAD \
+                | cut -f1 | head -c 12)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Cache wxWidgets
+        id: cache-wx
+        uses: actions/cache@v4
+        with:
+          path: C:\wxWidgets
+          key: wxwidgets-msvc2022-x64-${{ steps.wx-sha.outputs.sha }}
+
+      - name: Checkout wxWidgets
+        if: steps.cache-wx.outputs.cache-hit != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: xLightsSequencer/wxWidgets
+          path: C:\wxWidgets
+          submodules: recursive
+
+      - name: Build wxWidgets (Release)
+        if: steps.cache-wx.outputs.cache-hit != 'true'
+        shell: cmd
+        working-directory: C:\wxWidgets\build\msw
+        run: nmake /f makefile.vc SHARED=0 UNICODE=1 BUILD=release TARGET_CPU=X64 /J8
+
+      # ── ISPC ──────────────────────────────────────────────────────────────
+      - name: install ISPC
+        uses: ispc/install-ispc-action@main
+        with:
+          version: 1.30.0
+
+      # ── Configure ─────────────────────────────────────────────────────────
+      - name: Configure
+        shell: cmd
+        run: |
+          cmake -S . -B cmake_vs ^
+            -G "Visual Studio 17 2022" -A x64 ^
+            -DwxWidgets_ROOT_DIR=C:\wxWidgets
+
+      # ── Build ─────────────────────────────────────────────────────────────
+      - name: Build
+        shell: cmd
+        run: cmake --build cmake_vs --config Release --parallel 8
