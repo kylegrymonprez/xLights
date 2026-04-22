@@ -835,6 +835,20 @@
 - (NSData*)detectPitchContour
     NS_SWIFT_NAME(detectPitchContour());
 
+// Route the currently-picked waveform filter into the audio engine
+// so playback follows the display. `filterType` matches the int
+// convention of `waveformData(...)` (0 RAW, 1 BASS, …, 5 CUSTOM,
+// 6 LUFS, 7 VOCALS, 8..11 STEM_*). `lowNote` / `highNote` are the
+// MIDI bounds for CUSTOM; ignored otherwise. Internally dispatches
+// through `AudioManager::SwitchTo` which blocks on audio load +
+// filter build, so callers should prefer a background queue (e.g.
+// `Task.detached`) rather than the main actor. No-op when no audio
+// is loaded.
+- (void)applyPlaybackFilterType:(int)filterType
+                          lowNote:(int)lowNote
+                         highNote:(int)highNote
+    NS_SWIFT_NAME(applyPlaybackFilter(type:lowNote:highNote:));
+
 // A9 chord + key detection via chromagram + 24 major/minor templates
 // and Krumhansl–Schmuckler. Returns:
 //   "key"    — NSString (e.g. "C major", "A minor"; empty on failure)

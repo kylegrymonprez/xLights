@@ -121,6 +121,15 @@
                           w:(int)w
                           h:(int)h;
 
+// Like `ensureTextureNamed:` but evicts any existing entry with the
+// same name before (re)uploading. Intended for textures whose
+// content changes frame-to-frame (e.g. a live-updated spectrogram
+// as the user scrolls / zooms).
+- (void)replaceTextureNamed:(NSString*)name
+                    bgraData:(NSData*)data
+                           w:(int)w
+                           h:(int)h;
+
 // Draw the named cached texture at the given rect. Silently skips
 // if `name` isn't in the cache (call `ensureTextureNamed:` first).
 - (void)drawTextureNamed:(NSString*)name

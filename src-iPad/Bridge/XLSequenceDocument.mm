@@ -2920,6 +2920,45 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
     return [NSData dataWithBytes:buf.data() length:buf.size()];
 }
 
+- (void)applyPlaybackFilterType:(int)filterType
+                          lowNote:(int)lowNote
+                         highNote:(int)highNote {
+    auto* am = [self audioManager];
+    if (!am || !am->IsOk()) return;
+    AUDIOSAMPLETYPE type = AUDIOSAMPLETYPE::RAW;
+    // `-1` is the "no note-range filtering" sentinel that
+    // `EnsureFilteredAudioData` expects for types that don't gate on
+    // frequency (RAW, LUFS, NONVOCALS, VOCALS, STEM_*). Only CUSTOM
+    // overrides to real MIDI note values.
+    int lo = -1, hi = -1;
+    switch (filterType) {
+        case 1: type = AUDIOSAMPLETYPE::BASS; break;
+        case 2: type = AUDIOSAMPLETYPE::TREBLE; break;
+        case 3: type = AUDIOSAMPLETYPE::ALTO; break;
+        case 4: type = AUDIOSAMPLETYPE::NONVOCALS; break;
+        case 5:
+            type = AUDIOSAMPLETYPE::CUSTOM;
+            lo = std::clamp(lowNote, 0, 127);
+            hi = std::clamp(highNote, 0, 127);
+            if (hi <= lo) hi = std::min(127, lo + 1);
+            break;
+        case 6: type = AUDIOSAMPLETYPE::LUFS; break;
+        case 7: type = AUDIOSAMPLETYPE::VOCALS; break;
+        case 8:  type = AUDIOSAMPLETYPE::STEM_DRUMS; break;
+        case 9:  type = AUDIOSAMPLETYPE::STEM_BASS; break;
+        case 10: type = AUDIOSAMPLETYPE::STEM_OTHER; break;
+        case 11: type = AUDIOSAMPLETYPE::STEM_VOCALS; break;
+        default: break;
+    }
+    // Dispatch off the caller's queue — SwitchTo blocks on the
+    // filter cache build, which is multi-second for FIR bandpass
+    // filters and longer for stems. Swift callers can fire-and-
+    // forget without stalling the main actor.
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        am->SwitchTo(type, lo, hi);
+    });
+}
+
 #pragma mark - A8 stem separation
 
 - (NSArray<NSString*>*)stemModelCandidateRoots {

@@ -277,6 +277,20 @@
 // iOS's default `CGImage` byteOrder32Little + premultipliedFirst).
 // `xlImage` stores RGBA, so we swizzle R↔B when copying bytes in.
 
+- (void)replaceTextureNamed:(NSString*)name
+                    bgraData:(NSData*)data
+                           w:(int)width
+                           h:(int)height {
+    if (!_ctx || !name) return;
+    std::string key([name UTF8String]);
+    auto it = _textures.find(key);
+    if (it != _textures.end()) {
+        delete it->second;
+        _textures.erase(it);
+    }
+    [self ensureTextureNamed:name bgraData:data w:width h:height];
+}
+
 - (void)ensureTextureNamed:(NSString*)name
                    bgraData:(NSData*)data
                           w:(int)width

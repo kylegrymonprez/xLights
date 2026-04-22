@@ -3743,6 +3743,20 @@ class SequencerViewModel {
         let endMS = waveformEndMS > 0 ? waveformEndMS : sequenceDurationMS
         loadWaveform(startMS: startMS, endMS: endMS,
                       numSamples: waveformSampleCount)
+        syncPlaybackToWaveformFilter()
+    }
+
+    /// Route the current `waveformFilter` through `AudioManager::
+    /// SwitchTo` so playback plays the filtered / stem signal, not
+    /// the raw audio. The bridge internally dispatches SwitchTo to
+    /// a global queue, so this call returns immediately and the
+    /// filter-cache build + PCM memcpy run in the background.
+    private func syncPlaybackToWaveformFilter() {
+        guard hasAudio else { return }
+        document.applyPlaybackFilter(
+            type: Int32(waveformFilter.rawValue),
+            lowNote: Int32(customBandLowNote),
+            highNote: Int32(customBandHighNote))
     }
 
     /// Re-sample the waveform when zoom changes enough that the current

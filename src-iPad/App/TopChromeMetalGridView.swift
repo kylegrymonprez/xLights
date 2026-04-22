@@ -191,19 +191,17 @@ final class TopChromeMetalMTKView: MTKView, MTKViewDelegate {
         let size = bounds.size
         let bridge = c.bridge
 
-        // Backgrounds.
+        // Backgrounds — match the SwiftUI row-header chrome
+        // (`Color(white: 0.12)`) so the ruler + waveform strip reads
+        // as part of the same dark-mode surface instead of a pure-
+        // black cutout.
+        let bgGray: CGFloat = 0.12
         bridge.beginFilledRectBatch()
         bridge.appendFilledRectX(0, y: 0, w: size.width, h: c.rulerHeight,
-                                  r: 0, g: 0, b: 0, a: 0.2)
-        if c.hasAudio {
-            bridge.appendFilledRectX(0, y: c.rulerHeight,
-                                      w: size.width, h: c.waveformHeight,
-                                      r: 0, g: 0, b: 0, a: 0.3)
-        } else {
-            bridge.appendFilledRectX(0, y: c.rulerHeight,
-                                      w: size.width, h: c.waveformHeight,
-                                      r: 0.08, g: 0.08, b: 0.08, a: 1.0)
-        }
+                                  r: bgGray, g: bgGray, b: bgGray, a: 1.0)
+        bridge.appendFilledRectX(0, y: c.rulerHeight,
+                                  w: size.width, h: c.waveformHeight,
+                                  r: bgGray, g: bgGray, b: bgGray, a: 1.0)
         bridge.flushFilledRectBatch()
 
         // B32 loop-region highlight. Draws whichever of the
@@ -256,7 +254,7 @@ final class TopChromeMetalMTKView: MTKView, MTKViewDelegate {
                     let tickH: CGFloat = isMajor ? 15 : 8
                     bridge.appendLineX1(x, y1: c.rulerHeight - tickH,
                                          x2: x, y2: c.rulerHeight,
-                                         r: 0.5, g: 0.5, b: 0.5, a: 1.0)
+                                         r: 0.65, g: 0.65, b: 0.65, a: 1.0)
                     if isMajor {
                         labels.append((x, Self.fmtTime(ms, majorMS: major)))
                     }
@@ -265,8 +263,9 @@ final class TopChromeMetalMTKView: MTKView, MTKViewDelegate {
             }
             bridge.flushLineBatch()
             for lp in labels {
+                // White labels to match the row-header text colour.
                 bridge.drawText(lp.1, atX: lp.0 + 2, y: 2, fontSize: 9,
-                                 r: 0.5, g: 0.5, b: 0.5, a: 1.0)
+                                 r: 1.0, g: 1.0, b: 1.0, a: 1.0)
             }
         }
 
@@ -286,10 +285,16 @@ final class TopChromeMetalMTKView: MTKView, MTKViewDelegate {
                 let key = "\(visStartMS)-\(visEndMS)-\(stripW)x\(stripH)"
                 if key != c.spectrogramCacheKey,
                    let data = fetch(visStartMS, visEndMS, stripW, stripH) {
-                    bridge.ensureTextureNamed("topChromeSpectrogram",
-                                               bgraData: data,
-                                               w: Int32(stripW),
-                                               h: Int32(stripH))
+                    // `replaceTextureNamed:` evicts any cached entry
+                    // with the same name before (re)uploading — needed
+                    // because `ensureTextureNamed:` short-circuits on
+                    // existing keys, so the texture would otherwise
+                    // stick at the first-upload content and never
+                    // scroll / zoom.
+                    bridge.replaceTextureNamed("topChromeSpectrogram",
+                                                bgraData: data,
+                                                w: Int32(stripW),
+                                                h: Int32(stripH))
                     c.spectrogramCacheKey = key
                 }
                 bridge.drawTextureNamed("topChromeSpectrogram",
