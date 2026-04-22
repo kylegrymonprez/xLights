@@ -157,7 +157,6 @@ void MediaCacheEntry::ReloadIfChanged() {
 // ImageCacheEntry Implementation
 // =====================================================================
 
-AnimationLoaderFunc ImageCacheEntry::_gifLoader;
 AnimationLoaderFunc ImageCacheEntry::_webpLoader;
 
 ImageCacheEntry::ImageCacheEntry() : MediaCacheEntry(MediaType::Image) {
@@ -229,7 +228,7 @@ void ImageCacheEntry::ReloadIfChanged() {
 void ImageCacheEntry::LoadFromData(const std::string& data) {
     std::vector<uint8_t> buffer = Base64::Decode(data);
     if (buffer.size() >= 4 && buffer[0] == 'G' && buffer[1] == 'I' && buffer[2] == 'F') {
-        loadAnimated(buffer, _gifLoader);
+        storeAnimated(LoadAnimatedGIFFromMemory(buffer.data(), buffer.size()));
     } else if (buffer.size() >= 12 && buffer[0] == 'R' && buffer[1] == 'I' && buffer[2] == 'F' && buffer[3] == 'F'
                && buffer[8] == 'W' && buffer[9] == 'E' && buffer[10] == 'B' && buffer[11] == 'P') {
         loadAnimated(buffer, _webpLoader);
@@ -332,12 +331,7 @@ int ImageCacheEntry::GetExifOrientation(const uint8_t* data, size_t maxLen) {
     return 1; // default
 }
 
-void ImageCacheEntry::loadAnimated(const std::vector<uint8_t> &data, const AnimationLoaderFunc &loader) {
-    if (!loader) {
-        spdlog::warn("Animation loader not registered, cannot load: {}", _filePath);
-        return;
-    }
-    auto result = loader(data.data(), data.size(), _filePath);
+void ImageCacheEntry::storeAnimated(AnimatedImageData result) {
     if (result.frames.empty()) return;
 
     _imageCount = (int)result.frames.size();
@@ -365,6 +359,14 @@ void ImageCacheEntry::loadAnimated(const std::vector<uint8_t> &data, const Anima
         _frameTimes[0] = 0;
     }
     _frameBasedAnimation = _imageCount <= 1;
+}
+
+void ImageCacheEntry::loadAnimated(const std::vector<uint8_t> &data, const AnimationLoaderFunc &loader) {
+    if (!loader) {
+        spdlog::warn("Animation loader not registered, cannot load: {}", _filePath);
+        return;
+    }
+    storeAnimated(loader(data.data(), data.size(), _filePath));
 }
 
 void ImageCacheEntry::loadImage(const std::vector<uint8_t> &data) {

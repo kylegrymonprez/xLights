@@ -189,16 +189,8 @@ static AnimatedImageData DecodeAnimatedImageIO(const uint8_t* data,
     // Register CoreGraphics-based TextDrawingContext for text/shape effects
     RegisterCoreGraphicsTextDrawingContext();
 
-    // Register GIF and WebP animation loaders using iOS ImageIO.
-    // SequenceMedia's ImageCacheEntry calls these when decoding an
-    // animated asset — without them, animated-GIF picture effects log
-    // "Animation loader not registered" and render nothing.
-    ImageCacheEntry::SetGIFLoader([](const uint8_t* data, size_t len,
-                                      const std::string& /*filename*/) -> AnimatedImageData {
-        return DecodeAnimatedImageIO(data, len,
-                                      kCGImagePropertyGIFDictionary,
-                                      kCGImagePropertyGIFUnclampedDelayTime);
-    });
+    // GIF loading is handled by the core stb_image loader (LoadAnimatedGIFFromMemory) — no registration needed.
+    // Register WebP animation loader using iOS ImageIO.
     // ImageIO exposes WebP via kCGImagePropertyWebPDictionary on
     // sufficiently new SDKs; fall back to the GIF dict's delay key
     // since the ImageIO WebP-specific key isn't universally available.

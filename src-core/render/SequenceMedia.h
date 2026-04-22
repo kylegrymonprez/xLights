@@ -174,13 +174,12 @@ public:
     void SetFrameData(std::vector<std::string> data) { _frameData = std::move(data); }
 
     // Set animation loaders (called once during app init)
-    static void SetGIFLoader(AnimationLoaderFunc loader) { _gifLoader = std::move(loader); }
     static void SetWebPLoader(AnimationLoaderFunc loader) { _webpLoader = std::move(loader); }
-    static const AnimationLoaderFunc& GetGIFLoader() { return _gifLoader; }
 
 private:
     void LoadFromFile(const std::string& filepath);
     void LoadFromData(const std::string& base64Data);
+    void storeAnimated(AnimatedImageData result);
     void loadAnimated(const std::vector<uint8_t> &data, const AnimationLoaderFunc &loader);
     void loadImage(const std::vector<uint8_t> &data);
     int GetExifOrientation(const uint8_t* data, size_t len);
@@ -201,7 +200,6 @@ private:
     // Scaled image cache
     mutable std::map<ScaledImageCacheKey, std::shared_ptr<xlImage>> _scaledImageCache;
 
-    static AnimationLoaderFunc _gifLoader;
     static AnimationLoaderFunc _webpLoader;
 };
 

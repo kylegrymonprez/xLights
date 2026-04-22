@@ -1102,8 +1102,6 @@ void EffectTreeDialog::LoadGifImage(wxString const& path)
 {
     TimerGif.Stop();
     if (FileExists(path) && AnimatedImage::IsGIF(path) && !xLightParent->HidePresetPreview()) {
-        auto& loader = ImageCacheEntry::GetGIFLoader();
-        if (!loader) return;
         std::ifstream file(path.ToStdString(), std::ios::binary | std::ios::ate);
         if (!file.is_open()) return;
         auto sz = file.tellg();
@@ -1111,7 +1109,7 @@ void EffectTreeDialog::LoadGifImage(wxString const& path)
         file.seekg(0);
         std::vector<uint8_t> data(static_cast<size_t>(sz));
         file.read(reinterpret_cast<char*>(data.data()), sz);
-        auto animData = loader(data.data(), data.size(), path.ToStdString());
+        auto animData = LoadAnimatedGIFFromMemory(data.data(), data.size());
         gifImage = std::make_unique<AnimatedImage>(path.ToStdString(), animData);
 
         if (!gifImage->IsOk()) {
