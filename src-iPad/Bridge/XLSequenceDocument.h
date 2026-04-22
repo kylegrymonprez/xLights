@@ -69,6 +69,14 @@
 // write fails. Marks the sequence clean on success.
 - (BOOL)saveSequence;
 
+// Tier 1 memory mitigation — drop the undo / redo history.
+// Per-step snapshots (settings + palette strings for every
+// captured effect) add up fast in long editing sessions. Called
+// from the Swift save path after a successful save so the app
+// reclaims memory at the natural "I'm done with those edits"
+// checkpoint. Safe to call with no sequence open — no-op.
+- (void)clearUndoHistory;
+
 // Save to a new path (Save As / Export). `path` must end in `.xsq`;
 // the caller is responsible for obtaining security-scoped access
 // to the destination via `-obtainAccessToPath:…` before calling.

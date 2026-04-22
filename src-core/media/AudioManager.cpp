@@ -1756,24 +1756,14 @@ float* AudioManager::GetFilteredRightDataPtr(long offset) {
     return &_data[1][offset];
 }
 
-#if !TARGET_OS_IPHONE
-// xLightsVamp Functions
-xLightsVamp::xLightsVamp() {
-    
-    spdlog::debug("Constructing xLightsVamp");
-    _loader = Vamp::HostExt::PluginLoader::getInstance();
-}
-
-xLightsVamp::~xLightsVamp() {
-    while (_loadedPlugins.size() > 0) {
-        delete _loadedPlugins.back();
-        _loadedPlugins.pop_back();
-    }
-}
-
+// AudioManager::Hash is a portable MD5 over the audio track's sample
+// data — used by iPad's spectrogram cache to invalidate when the
+// audio content changes. Kept outside the VAMP `#if` gate below so
+// iOS builds (which exclude VAMP plugin code) still get this
+// symbol. Desktop callers use it too.
 std::string AudioManager::Hash() {
     if (_hash == "") {
-        
+
         while (!IsDataLoaded(_trackSize)) {
             spdlog::debug("GetLeftDataPtr waiting for data to be loaded.");
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
@@ -1786,6 +1776,21 @@ std::string AudioManager::Hash() {
     }
 
     return _hash;
+}
+
+#if !TARGET_OS_IPHONE
+// xLightsVamp Functions
+xLightsVamp::xLightsVamp() {
+
+    spdlog::debug("Constructing xLightsVamp");
+    _loader = Vamp::HostExt::PluginLoader::getInstance();
+}
+
+xLightsVamp::~xLightsVamp() {
+    while (_loadedPlugins.size() > 0) {
+        delete _loadedPlugins.back();
+        _loadedPlugins.pop_back();
+    }
 }
 
 // extract the features data from a Vamp plugins output

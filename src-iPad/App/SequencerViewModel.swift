@@ -509,6 +509,13 @@ class SequencerViewModel {
         }
         if ok {
             isDirty = false
+            // Tier 1 memory mitigation — post-save is a safe
+            // checkpoint to drop the undo / redo history.
+            // Per-step snapshots (settings + palette strings for
+            // every captured effect) add up in long editing
+            // sessions. Users expect undo within a session, not
+            // across save-close-reopen.
+            document.clearUndoHistory()
         }
         return ok
     }
@@ -528,6 +535,10 @@ class SequencerViewModel {
         }
         if ok {
             isDirty = false
+            // Tier 1 memory mitigation — same rationale as
+            // `saveSequence`: drop undo/redo on a successful
+            // save-as.
+            document.clearUndoHistory()
             // The bridge updates the underlying SequenceFile's
             // path; refresh the display name so the toolbar picks
             // up the new sequence name.
@@ -800,6 +811,13 @@ class SequencerViewModel {
             } else if event.contains(.warning) {
                 self.document.handleMemoryWarning()
             }
+            // Tier 1 memory mitigation — XLGridMetalBridge and any
+            // other Swift-side observers subscribe to this
+            // notification to drop their caches. Posted after the
+            // C++ handlers so the core has already trimmed what it
+            // can before the UI layer starts rebuilding textures.
+            NotificationCenter.default.post(
+                name: NSNotification.Name("XLMemoryWarning"), object: nil)
             self.memoryWarning = true
         }
         source.activate()
@@ -811,6 +829,8 @@ class SequencerViewModel {
             queue: .main
         ) { [weak self] _ in
             self?.document.handleMemoryWarning()
+            NotificationCenter.default.post(
+                name: NSNotification.Name("XLMemoryWarning"), object: nil)
             self?.memoryWarning = true
         }
 

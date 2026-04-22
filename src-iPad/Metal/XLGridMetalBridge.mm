@@ -52,6 +52,19 @@
         _rectBatch = nullptr;
         _lineBatch = nullptr;
         _bgBatch = nullptr;
+
+        // Tier 1 memory mitigation — drop our effect-icon / text /
+        // font textures on memory warning. iPad's grid holds per-
+        // string CoreText textures keyed by (text, size, color),
+        // which accumulate without bound over a long session.
+        // `SequencerViewModel` posts the notification from its
+        // memory-pressure observer; the actual textures rebuild
+        // lazily on the next draw that needs them.
+        [[NSNotificationCenter defaultCenter]
+            addObserver:self
+               selector:@selector(purgeTextureCaches)
+                   name:@"XLMemoryWarning"
+                 object:nil];
     }
     return self;
 }
@@ -312,8 +325,26 @@
 }
 
 - (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     // Drop cached textures; their MTLTexture retain/release lives
     // inside the xlTexture wrapper.
+    for (auto& kv : _textures) {
+        delete kv.second;
+    }
+    _textures.clear();
+    for (auto& kv : _fontTextures) {
+        delete kv.second;
+    }
+    _fontTextures.clear();
+}
+
+- (void)purgeTextureCaches {
+    // Tier 1 memory mitigation — called from XLMemoryWarning. Drop
+    // cached text / effect-icon textures + the per-size font
+    // atlases. The grid will rebuild them on the next draw that
+    // references them; cost is one CoreText render + one MTLBuffer
+    // upload per text string, which is well under a frame on
+    // modern iPads.
     for (auto& kv : _textures) {
         delete kv.second;
     }

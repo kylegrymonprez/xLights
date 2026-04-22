@@ -664,6 +664,37 @@ void SequenceMedia::Clear()
     _videoCache.clear();
 }
 
+void SequenceMedia::PurgePreviewCaches()
+{
+    std::scoped_lock lock(_cacheMutex);
+    // Every MediaCacheEntry holds `_previewFrames` — the scaled
+    // thumbnails built by `GeneratePreview` for the media picker
+    // and effect panels. Those dominate the UI-side memory; drop
+    // them first. On rebuild, the media picker re-requests with
+    // the current layout bounds.
+    for (auto& [path, entry] : _imageCache) {
+        if (entry) {
+            entry->ClearPreview();
+            entry->ClearScaledImageCache();
+        }
+    }
+    for (auto& [path, entry] : _textCache) {
+        if (entry) entry->ClearPreview();
+    }
+    for (auto& [path, entry] : _svgCache) {
+        if (entry) entry->ClearPreview();
+    }
+    for (auto& [path, entry] : _shaderCache) {
+        if (entry) entry->ClearPreview();
+    }
+    for (auto& [path, entry] : _binaryCache) {
+        if (entry) entry->ClearPreview();
+    }
+    for (auto& [path, entry] : _videoCache) {
+        if (entry) entry->ClearPreview();
+    }
+}
+
 void SequenceMedia::EmbedImage(const std::string& filepath)
 {
     std::scoped_lock lock(_cacheMutex);

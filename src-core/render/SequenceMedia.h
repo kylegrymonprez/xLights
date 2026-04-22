@@ -414,6 +414,14 @@ public:
     void MarkAllUnused();
     void RemoveUnusedMedia();
 
+    // Memory-pressure helpers. `PurgePreviewCaches` drops every
+    // entry's preview-frame strip (the thumbnail arrays built for
+    // the media picker / effect panels) and, for image entries,
+    // the unbounded `_scaledImageCache`. Entries themselves stay —
+    // only the render-time / UI-time derivatives are freed. Cheap
+    // to call; previews rebuild on next access.
+    void PurgePreviewCaches();
+
     // === Serialization ===
     bool LoadFromXml(const pugi::xml_node& node);
     void SaveToXml(pugi::xml_node& parent) const;

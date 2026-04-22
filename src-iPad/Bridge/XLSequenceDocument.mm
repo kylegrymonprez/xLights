@@ -247,6 +247,11 @@
     return ok ? YES : NO;
 }
 
+- (void)clearUndoHistory {
+    if (!_context) return;
+    _context->GetSequenceElements().get_undo_mgr().Clear();
+}
+
 - (BOOL)saveSequenceAs:(NSString*)path {
     if (!_context || !_context->IsSequenceLoaded()) return NO;
     if (path.length == 0) return NO;

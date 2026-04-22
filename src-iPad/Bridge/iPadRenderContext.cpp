@@ -45,6 +45,16 @@
 iPadRenderContext::iPadRenderContext()
     : _effectManager(FileUtils::GetResourcesDir() + "/effectmetadata"),
       _sequenceElements(this) {
+    // Tier 1 memory-pressure mitigation:
+    //   * Cap the disk-backed render cache at 50 MB so iPadOS
+    //     doesn't balloon its memory-resident frame map by loading
+    //     a huge desktop-authored cache at sequence open.
+    //   * Cap the undo history at 50 steps — every DeletedEffect /
+    //     ModifiedEffect snapshot can be several KB of settings
+    //     strings, so 2000-edit sessions on a long show add up.
+    //     iPad users don't need desktop-scale undo depth anyway.
+    _renderCache.SetMaximumSizeMB(50);
+    _sequenceElements.get_undo_mgr().SetMaxSteps(50);
 }
 
 iPadRenderContext::~iPadRenderContext() {
@@ -695,19 +705,63 @@ void iPadRenderContext::RenderAll() {
 }
 
 void iPadRenderContext::HandleMemoryWarning() {
+    // Lighter-touch response: try to free significant memory WITHOUT
+    // interrupting active work. Callers may fire this repeatedly as
+    // the pressure source stays elevated.
+    //
+    //   * Signal the render engine to abort at the next safe point
+    //     (actual abort is cooperative; workers notice between
+    //     frames).
+    //   * Drop the memory-resident render cache frames. The
+    //     on-disk cache stays — it rebuilds its mmap window on
+    //     next GetFrame.
+    //   * Drop UI-side derivatives from every media entry:
+    //     preview thumbnails and scaled-image variants. Those
+    //     rebuild lazily on the next media-picker or effect-panel
+    //     access, usually sub-second.
     if (_renderEngine) {
         _renderEngine->SignalAbort();
     }
     _renderCache.Purge(nullptr, false);
-    spdlog::warn("iPadRenderContext: memory warning handled -- aborted render, purged cache");
+    _sequenceElements.GetSequenceMedia().PurgePreviewCaches();
+    spdlog::warn("iPadRenderContext: memory warning handled "
+                 "(render abort signalled, cache + media previews purged)");
 }
 
 void iPadRenderContext::HandleMemoryCritical() {
+    // Strictly more aggressive than Warning — the lighter response
+    // wasn't enough, so we stop pretending and tear down optional
+    // state even at the cost of user work. Called when the OS is
+    // threatening jetsam.
     HandleMemoryWarning();
-    // Phase D note: once Model Preview owns its own vertex / texture buffers,
-    // free them here too. iPadModelPreview today rebuilds accumulators per
-    // frame, so there's nothing extra to drop.
-    spdlog::error("iPadRenderContext: memory critical handled");
+
+    // Block until render workers actually exit so the buffers they
+    // hold can be reclaimed. Warning just signals; Critical waits.
+    if (_renderEngine) {
+        AbortRender(3000);
+    }
+
+    // Free the preset render scaffolding (shader preview rendering,
+    // effect thumbnail generation). Reconstructed on next
+    // `EnsurePresetModel`.
+    _presetSequenceData.Cleanup();
+    if (_presetModel) {
+        _presetSequenceElements.Clear();
+        _presetModel = nullptr;
+        _presetModelManager.reset();
+    }
+
+    // Drop media entries that aren't referenced by any current
+    // effect. `MarkAllUnused` + render path would normally flag
+    // what's in use, but by the time we're critical we can't
+    // afford another render pass — walk every effect's settings
+    // and palette maps to build the "in-use" set, then remove the
+    // rest. `RemoveUnusedMedia` does exactly this on the
+    // caller's behalf.
+    _sequenceElements.GetSequenceMedia().RemoveUnusedMedia();
+
+    spdlog::error("iPadRenderContext: memory critical handled "
+                  "(render aborted, preset data freed, unused media removed)");
 }
 
 bool iPadRenderContext::IsRenderDone() {
@@ -977,6 +1031,14 @@ std::vector<std::shared_ptr<xlImage>> iPadRenderContext::RenderEffectToFrames(
                            (uint8_t*)&seqData[i][0], 1, true);
         result.push_back(img);
     }
+
+    // Tier 1 #6: release the preset SequenceData allocation once
+    // we've copied frames out to xlImages. For a 64×64 preset at
+    // 100 frames that's ~8 MB; for shader preview sweeps with
+    // hundreds of frames it balloons much further. Callers that
+    // need it again (the next shader preview, the next thumbnail
+    // batch) re-init via the standard path — allocation is cheap.
+    seqData.Cleanup();
 
     return result;
 }

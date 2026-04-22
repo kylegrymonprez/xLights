@@ -432,15 +432,19 @@ struct SequencerView: View {
 
     /// Builds the preview region. In `regularWide` we stack House
     /// and Model side-by-side (the existing layout). In
-    /// `regularNarrow` / `compact` we show one preview at a time
-    /// with a segmented picker to swap between them; the hidden
-    /// preview can still be opened in its own window via the View
-    /// menu (F-4) or by swapping to it first and tapping Detach.
+    /// `compact` (Slide Over / very narrow Stage Manager) shows one
+    /// preview at a time with a segmented picker to swap between
+    /// them — there just isn't horizontal room for two. Every
+    /// `.regular` width (narrow or wide) keeps the previews
+    /// side-by-side since users prefer seeing both at once; the
+    /// hidden preview in compact can still be opened in its own
+    /// window via the View menu (F-4) or by swapping to it first
+    /// and tapping Detach.
     @ViewBuilder
     private func previewBand(mode: PreviewLayoutMode,
                              effectiveH: Double) -> some View {
         switch mode {
-        case .regularWide:
+        case .regularWide, .regularNarrow:
             HStack(spacing: 0) {
                 embeddedModelPreview
                     .frame(maxWidth: .infinity)
@@ -450,7 +454,7 @@ struct SequencerView: View {
             }
             .frame(height: effectiveH)
 
-        case .regularNarrow, .compact:
+        case .compact:
             VStack(spacing: 0) {
                 HStack {
                     Picker("Preview", selection: dockedPreview) {
