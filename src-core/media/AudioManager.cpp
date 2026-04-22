@@ -1449,6 +1449,56 @@ FilteredAudioData* AudioManager::EnsureFilteredAudioData(AUDIOSAMPLETYPE type, i
         fad->type = type;
         _filtered.push_back(fad);
     } break;
+    case AUDIOSAMPLETYPE::STEM_DRUMS:
+    case AUDIOSAMPLETYPE::STEM_BASS:
+    case AUDIOSAMPLETYPE::STEM_OTHER:
+    case AUDIOSAMPLETYPE::STEM_VOCALS: {
+        // A8: build the FilteredAudioData from the cached stem
+        // buffers set by `SetStemData`. Picks the right vector pair
+        // per stem type; absent data → return nullptr so the bridge
+        // / draw path falls back to raw.
+        const std::vector<float>* L = nullptr;
+        const std::vector<float>* R = nullptr;
+        switch (type) {
+        case AUDIOSAMPLETYPE::STEM_DRUMS:  L = &_stemDrumsL;  R = &_stemDrumsR; break;
+        case AUDIOSAMPLETYPE::STEM_BASS:   L = &_stemBassL;   R = &_stemBassR; break;
+        case AUDIOSAMPLETYPE::STEM_OTHER:  L = &_stemOtherL;  R = &_stemOtherR; break;
+        case AUDIOSAMPLETYPE::STEM_VOCALS: L = &_stemVocalsL; R = &_stemVocalsR; break;
+        default: break;
+        }
+        if (L == nullptr || L->empty()) {
+            break; // no stems separated yet
+        }
+        fad = new FilteredAudioData();
+        long datasize = sizeof(float) * (_trackSize + _extra);
+        fad->data0 = (float*)calloc(1, datasize);
+        if (srcR) {
+            fad->data1 = (float*)calloc(1, datasize);
+        }
+        fad->pcmdata = (int16_t*)calloc(_pcmdatasize + PCMFUDGE, 1);
+        const long n = std::min<long>(_trackSize, long(L->size()));
+        const bool haveR = (R && !R->empty() && R->size() >= size_t(n));
+        for (long i = 0; i < n; i++) {
+            float l = (*L)[i];
+            float r = haveR ? (*R)[i] : l;
+            fad->data0[i] = l;
+            if (fad->data1) fad->data1[i] = r;
+            int vl = (int)(l * 32768);
+            if (vl > 32767) vl = 32767;
+            if (vl < -32768) vl = -32768;
+            fad->pcmdata[i * _channels] = int16_t(vl);
+            if (_channels > 1) {
+                int vr = (int)(r * 32768);
+                if (vr > 32767) vr = 32767;
+                if (vr < -32768) vr = -32768;
+                fad->pcmdata[i * _channels + 1] = int16_t(vr);
+            }
+        }
+        fad->lowNote = 0;
+        fad->highNote = 0;
+        fad->type = type;
+        _filtered.push_back(fad);
+    } break;
     case AUDIOSAMPLETYPE::ANY:
         break;
     }
@@ -1465,7 +1515,11 @@ FilteredAudioData* AudioManager::EnsureFilteredAudioData(AUDIOSAMPLETYPE type, i
     if (fad != nullptr &&
         type != AUDIOSAMPLETYPE::RAW &&
         type != AUDIOSAMPLETYPE::LUFS &&
-        type != AUDIOSAMPLETYPE::CLASSIFIED) {
+        type != AUDIOSAMPLETYPE::CLASSIFIED &&
+        type != AUDIOSAMPLETYPE::STEM_DRUMS &&
+        type != AUDIOSAMPLETYPE::STEM_BASS &&
+        type != AUDIOSAMPLETYPE::STEM_OTHER &&
+        type != AUDIOSAMPLETYPE::STEM_VOCALS) {
         float peak = 0;
         for (long i = 0; i < _trackSize; i++) {
             float a = std::fabs(fad->data0[i]);
@@ -1531,6 +1585,32 @@ FilteredAudioData* AudioManager::GetFilteredAudioData(AUDIOSAMPLETYPE type, int 
         }
     }
     return nullptr;
+}
+
+void AudioManager::SetStemData(const std::vector<float>& drumsL, const std::vector<float>& drumsR,
+                                const std::vector<float>& bassL, const std::vector<float>& bassR,
+                                const std::vector<float>& otherL, const std::vector<float>& otherR,
+                                const std::vector<float>& vocalsL, const std::vector<float>& vocalsR) {
+    std::unique_lock<std::shared_timed_mutex> locker(_mutex);
+    _stemDrumsL = drumsL;   _stemDrumsR = drumsR;
+    _stemBassL = bassL;     _stemBassR = bassR;
+    _stemOtherL = otherL;   _stemOtherR = otherR;
+    _stemVocalsL = vocalsL; _stemVocalsR = vocalsR;
+    // Evict any cached STEM_* entries so the next
+    // `EnsureFilteredAudioData(STEM_X)` rebuilds from the new data.
+    for (auto it = _filtered.begin(); it != _filtered.end(); ) {
+        AUDIOSAMPLETYPE t = (*it)->type;
+        if (t == AUDIOSAMPLETYPE::STEM_DRUMS || t == AUDIOSAMPLETYPE::STEM_BASS ||
+            t == AUDIOSAMPLETYPE::STEM_OTHER || t == AUDIOSAMPLETYPE::STEM_VOCALS) {
+            if ((*it)->data0) free((*it)->data0);
+            if ((*it)->data1 && (*it)->data1 != (*it)->data0) free((*it)->data1);
+            if ((*it)->pcmdata) free((*it)->pcmdata);
+            delete *it;
+            it = _filtered.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void AudioManager::SetClassifyGate(const std::string& className,

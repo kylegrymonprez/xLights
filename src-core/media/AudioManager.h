@@ -31,9 +31,14 @@ enum class AUDIOSAMPLETYPE {
     CUSTOM,
     ALTO,
     NONVOCALS,
-    LUFS,       // A3: BS.1770 K-weighted momentary-loudness envelope
-    VOCALS,     // A8 (partial): center-channel extraction — M - α|S|
-    CLASSIFIED, // A7: raw signal gated by a SoundAnalysis class curve
+    LUFS,         // A3: BS.1770 K-weighted momentary-loudness envelope
+    VOCALS,       // A8 (partial): center-channel extraction — M - α|S|
+    CLASSIFIED,   // A7: raw signal gated by a SoundAnalysis class curve
+    STEM_DRUMS,   // A8: isolated drums from HTDemucs
+    STEM_BASS,    // A8: isolated bass from HTDemucs
+    STEM_OTHER,   // A8: everything-else stem from HTDemucs
+    STEM_VOCALS,  // A8: ML-isolated vocals from HTDemucs (full separation,
+                  //     not to be confused with the M/S trick above)
     ANY
 };
 
@@ -103,6 +108,14 @@ class AudioManager {
     std::string _classifyGateClass;
     std::vector<float> _classifyGateCurve;
     float _classifyGateTimeStep = 1.0f;
+    // A8: cached output of the HTDemucs stem separator. Set via
+    // `SetStemData` and consumed by
+    // `EnsureFilteredAudioData(STEM_*)`. All eight vectors must be
+    // the same length (the track's sample count).
+    std::vector<float> _stemDrumsL, _stemDrumsR;
+    std::vector<float> _stemBassL, _stemBassR;
+    std::vector<float> _stemOtherL, _stemOtherR;
+    std::vector<float> _stemVocalsL, _stemVocalsR;
     int _sdlid = 0;
     bool _ok = false;
     std::string _hash;
@@ -218,6 +231,19 @@ public:
     };
 
     FilteredAudioData* GetFilteredAudioData(AUDIOSAMPLETYPE type, int lowNote, int highNote);
+
+    // A8: drop in the output of `StemSeparator::SeparateStems` so
+    // the filter cache can serve it through `AUDIOSAMPLETYPE::
+    // STEM_{DRUMS,BASS,OTHER,VOCALS}`. Each vector holds a full-track
+    // mono signal; stereo is reconstructed from the L/R pairs. Any
+    // stale STEM_* cache entries are evicted so subsequent
+    // `EnsureFilteredAudioData(STEM_X)` rebuilds from the new data.
+    // Pass empty vectors (or all-zero-length) to clear.
+    void SetStemData(const std::vector<float>& drumsL, const std::vector<float>& drumsR,
+                      const std::vector<float>& bassL, const std::vector<float>& bassR,
+                      const std::vector<float>& otherL, const std::vector<float>& otherR,
+                      const std::vector<float>& vocalsL, const std::vector<float>& vocalsR);
+    bool HasStemData() const { return !_stemDrumsL.empty(); }
 
     // A7: provide the per-second confidence curve that
     // `AUDIOSAMPLETYPE::CLASSIFIED` should gate the raw signal by.

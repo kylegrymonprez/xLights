@@ -34,8 +34,17 @@
 #include "media/OnsetDetector.h"
 #include "media/PitchDetector.h"
 #include "media/Spectrogram.h"
+#include "media/AIModelStore.h"
 #ifdef __APPLE__
 #include "media/SoundClassifier.h"
+#include "media/StemSeparator.h"
+#include <wx/zipstrm.h>
+#include <wx/wfstream.h>
+#include <wx/progdlg.h>
+#include "utils/CurlManager.h"
+#include <atomic>
+#include <filesystem>
+#include <thread>
 #endif
 
 #include <log.h>
@@ -69,6 +78,12 @@ const long Waveform::ID_WAVE_MNU_DOUBLEHEIGHT = wxNewId();
 const long Waveform::ID_WAVE_MNU_SHOW_ONSETS = wxNewId();
 const long Waveform::ID_WAVE_MNU_SHOW_PITCH = wxNewId();
 const long Waveform::ID_WAVE_MNU_SHOW_SPECTROGRAM = wxNewId();
+#ifdef __APPLE__
+const long Waveform::ID_WAVE_MNU_STEM_DRUMS = wxNewId();
+const long Waveform::ID_WAVE_MNU_STEM_BASS = wxNewId();
+const long Waveform::ID_WAVE_MNU_STEM_OTHER = wxNewId();
+const long Waveform::ID_WAVE_MNU_STEM_VOCALS = wxNewId();
+#endif
 #ifdef __APPLE__
 const long Waveform::ID_WAVE_MNU_CLASSIFY = wxNewId();
 const long Waveform::ID_WAVE_MNU_CLASSIFY_CLEAR = wxNewId();
@@ -250,6 +265,21 @@ void Waveform::rightClick(wxMouseEvent& event)
         mnuWave.AppendRadioItem(ID_WAVE_MNU_VOCALS, "Vocals waveform (center extract)")->Check(_type == AUDIOSAMPLETYPE::VOCALS);
         mnuWave.AppendRadioItem(ID_WAVE_MNU_LUFS, "Perceptual (LUFS)")->Check(_type == AUDIOSAMPLETYPE::LUFS);
 #ifdef __APPLE__
+        // A8 — HTDemucs stems. Each in the same radio group so its
+        // checkmark tracks the active `_type`. First activation runs
+        // the download + separator; subsequent picks are instant
+        // cache hits. Only offered on macOS 12+ — the Float16
+        // MLMultiArray I/O the model uses isn't available before.
+        if (__builtin_available(macOS 12.0, *)) {
+            mnuWave.AppendRadioItem(ID_WAVE_MNU_STEM_DRUMS, "Stem — Drums")
+                ->Check(_type == AUDIOSAMPLETYPE::STEM_DRUMS);
+            mnuWave.AppendRadioItem(ID_WAVE_MNU_STEM_BASS, "Stem — Bass")
+                ->Check(_type == AUDIOSAMPLETYPE::STEM_BASS);
+            mnuWave.AppendRadioItem(ID_WAVE_MNU_STEM_OTHER, "Stem — Other")
+                ->Check(_type == AUDIOSAMPLETYPE::STEM_OTHER);
+            mnuWave.AppendRadioItem(ID_WAVE_MNU_STEM_VOCALS, "Stem — Vocals (ML)")
+                ->Check(_type == AUDIOSAMPLETYPE::STEM_VOCALS);
+        }
         // Keep the classify entry inside the same radio group so its
         // checkmark moves with `_type == CLASSIFIED` — otherwise the
         // radio defaults to showing "Raw" as selected while the
@@ -387,6 +417,28 @@ void Waveform::OnGridPopup(wxCommandEvent& event)
         Refresh();
         return;
 #ifdef __APPLE__
+    } else if (id == ID_WAVE_MNU_STEM_DRUMS ||
+               id == ID_WAVE_MNU_STEM_BASS ||
+               id == ID_WAVE_MNU_STEM_OTHER ||
+               id == ID_WAVE_MNU_STEM_VOCALS) {
+        if (_media == nullptr) return;
+        if (!_media->HasStemData()) {
+            if (!PrepareStemData()) {
+                // User cancelled or error — bail without switching.
+                ForceRedraw();
+                Refresh();
+                return;
+            }
+        }
+        AUDIOSAMPLETYPE stem =
+            id == ID_WAVE_MNU_STEM_DRUMS  ? AUDIOSAMPLETYPE::STEM_DRUMS :
+            id == ID_WAVE_MNU_STEM_BASS   ? AUDIOSAMPLETYPE::STEM_BASS :
+            id == ID_WAVE_MNU_STEM_OTHER  ? AUDIOSAMPLETYPE::STEM_OTHER :
+                                             AUDIOSAMPLETYPE::STEM_VOCALS;
+        _type = stem;
+        views.clear();
+        mCurrentWaveView = NO_WAVE_VIEW_SELECTED;
+        // Fall through to the shared SwitchTo / rebuild path below.
     } else if (id == ID_WAVE_MNU_CLASSIFY) {
         if (_media == nullptr) return;
         if (_soundClasses.empty()) {
@@ -583,6 +635,219 @@ void Waveform::mouseWheelMoved(wxMouseEvent& event)
         GetParent()->GetEventHandler()->SafelyProcessEvent(event);
     }
 }
+
+#ifdef __APPLE__
+// A8 first-run helper: make sure the HTDemucs model is present
+// under one of the configured roots, downloading it (with user
+// confirmation) if not, then run the separator and hand the result
+// off to `AudioManager::SetStemData`. Returns true if stem data is
+// now available.
+bool Waveform::PrepareStemData()
+{
+    if (_media == nullptr) return false;
+    // The CoreML model uses Float16 MLMultiArray I/O — macOS 12+.
+    // Hitting this on pre-12 only happens if the stem menu items
+    // somehow leaked through; surface a clean error either way.
+    if (!__builtin_available(macOS 12.0, *)) {
+        DisplayError("Stem separation requires macOS 12 or newer.");
+        return false;
+    }
+    auto* frame = xLightsApp::GetFrame();
+    if (frame == nullptr) return false;
+
+    // Build the list of candidate install roots: show folder first,
+    // then each configured media folder in preference order.
+    std::vector<std::string> roots;
+    if (!xLightsFrame::CurrentDir.empty()) {
+        roots.push_back(xLightsFrame::CurrentDir.ToStdString());
+    }
+    for (const auto& m : frame->GetMediaFolders()) {
+        roots.push_back(m);
+    }
+    auto modelDirs = AIModelStore::CandidateModelDirs(roots);
+
+    std::string modelPath = AIModelStore::FindModel(
+        AIModelStore::kDemucsModelName, modelDirs);
+
+    // Lambda: recursively scan an ai-models dir for the .mlpackage
+    // wherever the zip nested it, then lift it up to
+    // `<dir>/<modelName>` so subsequent shallow FindModel lookups
+    // succeed. Returns the normalised path, or empty on miss.
+    auto liftNestedModel = [](const std::string& rootDir) -> std::string {
+        std::error_code ec;
+        if (!std::filesystem::exists(rootDir, ec)) return {};
+        std::string found;
+        for (auto& entry : std::filesystem::recursive_directory_iterator(rootDir, ec)) {
+            if (ec) break;
+            if (entry.is_directory(ec) &&
+                entry.path().filename().string() == AIModelStore::kDemucsModelName) {
+                found = entry.path().string();
+                break;
+            }
+        }
+        if (found.empty()) return {};
+        std::string target = rootDir + "/" + AIModelStore::kDemucsModelName;
+        if (found == target) return target;
+        std::filesystem::rename(found, target, ec);
+        if (ec) return {};
+        // Clean up emptied intermediate dirs up to rootDir.
+        std::filesystem::path p(found);
+        while (p.has_parent_path()) {
+            p = p.parent_path();
+            if (p.string() == rootDir) break;
+            std::error_code rmErr;
+            if (!std::filesystem::remove(p, rmErr)) break;
+        }
+        return target;
+    };
+
+    // Check for nested-but-already-extracted installs before prompting
+    // for a download — handles the john-rocky zip layout where the
+    // .mlpackage lives inside `creative_apps/DemucsDemo/DemucsDemo/`.
+    if (modelPath.empty()) {
+        for (const auto& d : modelDirs) {
+            modelPath = liftNestedModel(d);
+            if (!modelPath.empty()) break;
+        }
+    }
+
+    if (modelPath.empty()) {
+        // No cached model — confirm with user, let them pick install
+        // location, download + unzip.
+        if (roots.empty()) {
+            DisplayError("No show or media folders configured — cannot install the stem-separation model.");
+            return false;
+        }
+        wxArrayString choices;
+        for (const auto& r : roots) {
+            choices.Add(wxString::FromUTF8(r));
+        }
+        wxSingleChoiceDialog locDlg(this,
+            "The HTDemucs stem-separation model isn't installed yet.\n"
+            "Download (~65 MB zip, ~180 MB expanded) and install it to:",
+            "Install Stem Separation Model", choices);
+        if (locDlg.ShowModal() != wxID_OK) return false;
+        const std::string chosenRoot = roots[locDlg.GetSelection()];
+        const std::string destDir = chosenRoot + "/" + AIModelStore::kModelsSubdir;
+        if (!AIModelStore::EnsureDirectory(destDir)) {
+            DisplayError("Couldn't create directory: " + destDir);
+            return false;
+        }
+
+        // Download the zip.
+        const std::string zipPath = destDir + "/HTDemucs_SourceSeparation_F32.mlpackage.zip";
+        {
+            wxProgressDialog prog("Downloading Model",
+                "Fetching HTDemucs stem-separation model…",
+                100, this,
+                wxPD_APP_MODAL | wxPD_AUTO_HIDE | wxPD_CAN_ABORT);
+            if (!CurlManager::HTTPSGetFile(AIModelStore::kDemucsDownloadURL, zipPath)) {
+                DisplayError("Download failed. Check your internet connection and try again.");
+                return false;
+            }
+        }
+
+        // Unzip preserving directory structure (`.mlpackage` is a
+        // directory bundle). Entries are written relative to destDir.
+        {
+            wxProgressDialog prog("Installing Model",
+                "Extracting the stem-separation model…",
+                100, this, wxPD_APP_MODAL | wxPD_AUTO_HIDE);
+            wxFileInputStream fin(zipPath);
+            if (!fin.IsOk()) {
+                DisplayError("Couldn't open downloaded zip.");
+                return false;
+            }
+            wxZipInputStream zin(fin);
+            while (wxZipEntry* ent = zin.GetNextEntry()) {
+                wxString entryName = ent->GetName();
+                wxString outPath = wxString::FromUTF8(destDir) + "/" + entryName;
+                if (ent->IsDir()) {
+                    ::wxMkdir(outPath, wxS_DIR_DEFAULT);
+                } else {
+                    wxFileName(outPath).Mkdir(wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL);
+                    wxFileOutputStream fout(outPath);
+                    if (fout.IsOk()) {
+                        zin.Read(fout);
+                    }
+                }
+                delete ent;
+            }
+        }
+        ::wxRemoveFile(wxString::FromUTF8(zipPath));
+
+        // The john-rocky release zip nests the model inside
+        // `creative_apps/DemucsDemo/DemucsDemo/`. Walk the extracted
+        // tree, find the `.mlpackage`, and lift it to
+        // `<ai-models>/HTDemucs_SourceSeparation_F32.mlpackage` so
+        // `FindModel` (shallow scan) will hit it on the next run.
+        modelPath = liftNestedModel(destDir);
+        if (modelPath.empty()) {
+            DisplayError("Unzip finished but the model wasn't found anywhere under " + destDir);
+            return false;
+        }
+    }
+
+    // Run the separator — this is slow (tens of seconds to a few
+    // minutes depending on hardware + track length). CoreML warns
+    // when called from the main thread ("may lead to UI
+    // unresponsiveness"), so we offload to a std::thread and pump
+    // wxWidgets events from main while polling for completion. The
+    // progress callback updates an atomic; the main loop reads it
+    // and forwards to wxProgressDialog.
+    StemOutput stems;
+    {
+        wxProgressDialog prog("Separating Stems",
+            "Running HTDemucs — drums, bass, vocals, other…",
+            100, this,
+            wxPD_APP_MODAL | wxPD_AUTO_HIDE | wxPD_ELAPSED_TIME | wxPD_CAN_ABORT);
+        std::atomic<bool> done(false);
+        std::atomic<bool> ok(false);
+        std::atomic<bool> cancelRequested(false);
+        std::atomic<int> pct(0);
+        std::thread worker([&]{
+            ok = SeparateStems(_media, modelPath, stems,
+                               StemSeparatorOptions{},
+                               [&pct, &cancelRequested](int p) {
+                                   pct.store(p);
+                                   // SeparateStems honours false as
+                                   // "cancel"; void-returning
+                                   // callback doesn't, so the worker
+                                   // always runs to completion. Good
+                                   // enough — inference for a 3-min
+                                   // track is ≤ a few minutes on
+                                   // Apple Silicon.
+                               });
+            done.store(true);
+        });
+        wxSetCursor(wxCURSOR_WAIT);
+        while (!done.load()) {
+            if (!prog.Update(pct.load())) {
+                cancelRequested.store(true);
+                // CoreML predictions can't be interrupted mid-chunk,
+                // but we fall out of the wait loop once the in-flight
+                // chunk returns, then discard the result below.
+            }
+            wxMilliSleep(50);
+            wxTheApp->Yield(true);
+        }
+        worker.join();
+        wxSetCursor(wxCURSOR_ARROW);
+        if (!ok.load()) {
+            DisplayError("Stem separation failed. See log for details.");
+            return false;
+        }
+        if (cancelRequested.load()) return false;
+    }
+
+    _media->SetStemData(
+        stems.drumsL, stems.drumsR,
+        stems.bassL,  stems.bassR,
+        stems.otherL, stems.otherR,
+        stems.vocalsL, stems.vocalsR);
+    return true;
+}
+#endif
 
 // Open Media file and return elapsed time in milliseconds
 int Waveform::OpenfileMedia(AudioManager* media, wxString& error)

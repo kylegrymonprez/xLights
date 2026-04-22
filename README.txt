@@ -11,6 +11,13 @@ Issue Tracker is found here: www.github.com/xLightsSequencer/xLights/issues
 XLIGHTS/NUTCRACKER RELEASE NOTES
 ---------------------------------
 2026.07  April ??, 2026
+    -enh (dkulp)                Waveform (macOS 12+): four new "Stem — Drums / Bass / Other / Vocals (ML)" right-click
+                                filters run Apple CoreML inference against HTDemucs to split the audio into its constituent
+                                parts. Both the waveform and the playback signal follow the picked stem — so "Stem — Drums"
+                                lets you see and hear just the drum line for timing work. First activation prompts to
+                                download the model (~65 MB) into an `ai-models/` subdir of the show folder or any media
+                                folder; subsequent picks are instant cache hits. Inference runs on a background thread
+                                with a progress dialog so the UI stays responsive.
     -enh (dkulp)                AI services backend moved to wx-free core (src-core/ai/). Services now expose their
                                 settings as a declarative ServiceProperty schema; secrets go through an injectable
                                 IServiceSettingsStore so platform secure storage can be plugged in.

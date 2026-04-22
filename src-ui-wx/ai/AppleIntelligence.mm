@@ -123,19 +123,23 @@ static std::vector<uint8_t> CGImageToPNGBytes(CGImageRef image) {
     CFMutableDataRef data = CFDataCreateMutable(nullptr, 0);
     if (!data) return bytes;
 
-    CGImageDestinationRef dest = CGImageDestinationCreateWithData(data, (__bridge CFStringRef)UTTypePNG.identifier, 1, nullptr);
-    if (!dest) {
-        CFRelease(data);
-        return bytes;
+    if (@available(macOS 11.0, *)) {
+        CGImageDestinationRef dest = CGImageDestinationCreateWithData(data, (__bridge CFStringRef)UTTypePNG.identifier, 1, nullptr);
+        if (!dest) {
+            CFRelease(data);
+            return bytes;
+        }
+        
+        CGImageDestinationAddImage(dest, image, nullptr);
+        if (CGImageDestinationFinalize(dest)) {
+            const uint8_t* p = CFDataGetBytePtr(data);
+            CFIndex len = CFDataGetLength(data);
+            bytes.assign(p, p + len);
+        }
+        CFRelease(dest);
+    } else {
+        // Fallback on earlier versions
     }
-
-    CGImageDestinationAddImage(dest, image, nullptr);
-    if (CGImageDestinationFinalize(dest)) {
-        const uint8_t* p = CFDataGetBytePtr(data);
-        CFIndex len = CFDataGetLength(data);
-        bytes.assign(p, p + len);
-    }
-    CFRelease(dest);
     CFRelease(data);
     return bytes;
 }

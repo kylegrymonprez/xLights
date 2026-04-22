@@ -187,6 +187,8 @@
 		<Unit filename="../src-core/media/ChordDetector.h" />
 		<Unit filename="../src-core/media/Spectrogram.cpp" />
 		<Unit filename="../src-core/media/Spectrogram.h" />
+		<Unit filename="../src-core/media/AIModelStore.cpp" />
+		<Unit filename="../src-core/media/AIModelStore.h" />
 		<Unit filename="../src-core/media/MediaCompatibility.cpp" />
 		<Unit filename="../src-core/media/MediaCompatibility.h" />
 		<Unit filename="../src-core/media/VideoTranscoder.cpp" />

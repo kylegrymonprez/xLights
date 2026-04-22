@@ -681,6 +681,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="..\src-core\media\PitchDetector.cpp" />
     <ClCompile Include="..\src-core\media\ChordDetector.cpp" />
     <ClCompile Include="..\src-core\media\Spectrogram.cpp" />
+    <ClCompile Include="..\src-core\media\AIModelStore.cpp" />
     <ClCompile Include="..\src-core\media\MediaCompatibility.cpp" />
     <ClCompile Include="..\src-core\media\VideoTranscoder.cpp" />
     <ClCompile Include="..\src-core\media\AudioLoader.cpp" />
@@ -1255,6 +1256,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClInclude Include="..\src-core\media\PitchDetector.h" />
     <ClInclude Include="..\src-core\media\ChordDetector.h" />
     <ClInclude Include="..\src-core\media\Spectrogram.h" />
+    <ClInclude Include="..\src-core\media\AIModelStore.h" />
     <ClInclude Include="..\src-core\media\MediaCompatibility.h" />
     <ClInclude Include="..\src-core\media\VideoTranscoder.h" />
     <ClInclude Include="..\src-core\media\AudioLoader.h" />

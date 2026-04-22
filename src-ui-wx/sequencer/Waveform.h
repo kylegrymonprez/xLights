@@ -69,6 +69,14 @@ class Waveform : public GRAPHICS_BASE_CLASS
         // results, view-mode toggles) — called on sequence close /
         // media change so the next sequence opens in default mode.
         void ResetAnalysisState();
+#ifdef __APPLE__
+        // A8: locate the HTDemucs CoreML model (or prompt the user
+        // to pick a location and download it), then run the
+        // separator and stash the result on `_media` via
+        // `SetStemData`. Returns true if stem data is now available,
+        // false on user cancel / download / inference failure.
+        bool PrepareStemData();
+#endif
 
         int GetActiveAudioTrackIndex() const { return _activeAudioTrackIndex; }
 
@@ -160,6 +168,15 @@ class Waveform : public GRAPHICS_BASE_CLASS
         static const long ID_WAVE_MNU_SHOW_ONSETS;
         static const long ID_WAVE_MNU_SHOW_PITCH;
         static const long ID_WAVE_MNU_SHOW_SPECTROGRAM;
+#ifdef __APPLE__
+        // A8 — HTDemucs-based 4-stem separation. One radio item per
+        // stem; selecting any triggers a first-run download flow if
+        // the model isn't present.
+        static const long ID_WAVE_MNU_STEM_DRUMS;
+        static const long ID_WAVE_MNU_STEM_BASS;
+        static const long ID_WAVE_MNU_STEM_OTHER;
+        static const long ID_WAVE_MNU_STEM_VOCALS;
+#endif
 #ifdef __APPLE__
         static const long ID_WAVE_MNU_CLASSIFY;
         static const long ID_WAVE_MNU_CLASSIFY_CLEAR;
