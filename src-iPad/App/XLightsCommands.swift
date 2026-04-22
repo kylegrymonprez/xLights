@@ -145,6 +145,41 @@ struct XLSequencerCommands: Commands {
                 }
                 .keyboardShortcut(.rightArrow, modifiers: [.option])
                 .disabled(viewModel.selectedEffect == nil)
+
+                Divider()
+
+                // B13: stretch the effect's start / end to butt
+                // the adjacent neighbour. Keyboard-only on desktop;
+                // handy when tidying a sequence after edits.
+                Button("Extend to Previous Effect") {
+                    viewModel.extendSelectedEffectToPrevious()
+                }
+                .keyboardShortcut(.leftArrow, modifiers: [.shift, .command])
+                .disabled(viewModel.selectedEffect == nil)
+
+                Button("Extend to Next Effect") {
+                    viewModel.extendSelectedEffectToNext()
+                }
+                .keyboardShortcut(.rightArrow, modifiers: [.shift, .command])
+                .disabled(viewModel.selectedEffect == nil)
+
+                Divider()
+
+                // B6: hop to adjacent active timing mark. Uses
+                // Ctrl+PageUp / Ctrl+PageDown (the iPad keyboard
+                // can produce PageUp/PageDown with Fn+Arrow on a
+                // Magic Keyboard), matching desktop's binding.
+                Button("Nudge to Previous Timing Mark") {
+                    viewModel.nudgeSelectedEffectToTimingMark(direction: -1)
+                }
+                .keyboardShortcut(.pageUp, modifiers: [.control])
+                .disabled(viewModel.selectedEffect == nil)
+
+                Button("Nudge to Next Timing Mark") {
+                    viewModel.nudgeSelectedEffectToTimingMark(direction: 1)
+                }
+                .keyboardShortcut(.pageDown, modifiers: [.control])
+                .disabled(viewModel.selectedEffect == nil)
             }
             .disabled(viewModel.selectedEffect == nil)
         }
@@ -302,7 +337,65 @@ struct XLSequencerCommands: Commands {
             Button("Effect Below") { viewModel.selectEffectBelow() }
                 .keyboardShortcut(.downArrow, modifiers: [])
                 .disabled(viewModel.selectedEffect == nil)
+
+            // B3 — Tab / Shift+Tab navigate next / previous effect
+            // in row order. Mirrors the arrow-key bindings for
+            // hardware-keyboard users who expect Tab to advance.
+            // Desktop's `EffectsGrid` binds these via accelerator
+            // table; iPad surfaces them here for menu-bar discovery.
+            Button("Tab: Next Effect") { viewModel.selectNextEffect() }
+                .keyboardShortcut(.tab, modifiers: [])
+                .disabled(viewModel.selectedEffect == nil)
+
+            Button("Shift+Tab: Previous Effect") { viewModel.selectPreviousEffect() }
+                .keyboardShortcut(.tab, modifiers: [.shift])
+                .disabled(viewModel.selectedEffect == nil)
+
+            Divider()
+
+            // B34 / B35 numbered tags — desktop parity. Ctrl+N jumps
+            // to tag N; Ctrl+Shift+N sets tag N at the play head.
+            // Single flat submenu (one Menu per direction) so every
+            // binding surfaces in Menu Bar > Keyboard Shortcuts.
+            Menu("Go To Tag") {
+                ForEach(0..<10, id: \.self) { i in
+                    Button("Tag \(i)") { viewModel.goToTag(i) }
+                        .keyboardShortcut(XLSequencerCommands.digitKey(i),
+                                           modifiers: [.control])
+                        .disabled(viewModel.tagPositions[safe: i] ?? -1 < 0)
+                }
+            }
+            .disabled(!viewModel.isSequenceLoaded)
+
+            Menu("Set Tag at Play Head") {
+                ForEach(0..<10, id: \.self) { i in
+                    Button("Tag \(i)") {
+                        viewModel.setTag(i, atMS: viewModel.playPositionMS)
+                    }
+                    .keyboardShortcut(XLSequencerCommands.digitKey(i),
+                                       modifiers: [.control, .shift])
+                }
+            }
+            .disabled(!viewModel.isSequenceLoaded)
+
+            Button("Clear All Tags") { viewModel.clearAllTags() }
+                .disabled(!viewModel.isSequenceLoaded
+                           || !viewModel.tagPositions.contains(where: { $0 >= 0 }))
         }
+    }
+
+    /// KeyEquivalent for a single digit 0..9. Used by the numbered-
+    /// tag shortcuts so both `Go To Tag` and `Set Tag` can share the
+    /// same binding table.
+    static func digitKey(_ i: Int) -> KeyEquivalent {
+        let s = String(i)
+        return KeyEquivalent(s.first ?? "0")
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        return indices.contains(index) ? self[index] : nil
     }
 }
 
@@ -333,6 +426,23 @@ enum XLPlaybackSpeeds {
 private struct XLZoomCommands: View {
     @FocusedValue(\.timeline) private var timeline
 
+    /// B38 — zoom preset stops. Each label describes the rough span
+    /// that fits in a 1000-pt viewport at that pixels-per-ms; picked
+    /// to give a geometric progression that feels useful on both
+    /// long (song-length) and short (single-frame) zooms. Desktop's
+    /// 19-step ladder is overkill on touch; these 8 cover the same
+    /// range.
+    private static let zoomPresets: [(label: String, ppms: CGFloat)] = [
+        ("Fit ~10 min",    0.0017),
+        ("Fit ~3 min",     0.0055),
+        ("Fit ~1 min",     0.0167),
+        ("Fit ~30 s",      0.0333),
+        ("Fit ~10 s",      0.1),
+        ("Fit ~3 s",       0.333),
+        ("Fit ~1 s",       1.0),
+        ("Fit ~0.5 s",     2.0),
+    ]
+
     var body: some View {
         Button("Zoom Out") {
             if let t = timeline {
@@ -348,6 +458,15 @@ private struct XLZoomCommands: View {
             }
         }
         .keyboardShortcut("=", modifiers: [.command])
+        .disabled(timeline == nil)
+
+        Menu("Zoom To…") {
+            ForEach(Array(Self.zoomPresets.enumerated()), id: \.offset) { _, preset in
+                Button(preset.label) {
+                    timeline?.pixelsPerMS = preset.ppms
+                }
+            }
+        }
         .disabled(timeline == nil)
     }
 }

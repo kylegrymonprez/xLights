@@ -175,6 +175,14 @@
 - (NSArray<NSNumber*>*)timingRowIndices;
 - (BOOL)timingRowIsActiveAtIndex:(int)rowIndex;
 - (void)setTimingRowActive:(BOOL)active atIndex:(int)rowIndex;
+// B81: hide or show every timing track in the sequence (master
+// view). `allTimingTracksHidden` returns YES when none are
+// currently in the row-information list, i.e. all have been
+// hidden. Caller should `reloadRows` after flipping the state.
+- (void)setAllTimingTracksHidden:(BOOL)hidden;
+- (BOOL)allTimingTracksHidden;
+// B82: add every visible timing track to every non-master view.
+- (int)addAllTimingTracksToAllViews;
 // Color index assigned sequentially to each timing element (0..4, cycles).
 // Layers within the same timing element share the same color index.
 - (int)timingRowColorIndexAtIndex:(int)rowIndex;
@@ -187,6 +195,10 @@
 // Model-row queries used by row headers.
 - (BOOL)rowIsModelGroupAtIndex:(int)rowIndex;
 - (int)rowLayerCountAtIndex:(int)rowIndex;
+// B48: number of empty layers on the row's element. Use to gate
+// the "Delete Unused Layers" row-menu entry + label its count.
+- (int)unusedLayerCountAtRow:(int)rowIndex
+    NS_SWIFT_NAME(unusedLayerCount(atRow:));
 - (BOOL)rowIsElementCollapsedAtIndex:(int)rowIndex;
 - (void)toggleElementCollapsedAtIndex:(int)rowIndex;
 
@@ -223,7 +235,16 @@
 // that case too). Repopulates row info on success.
 - (BOOL)insertEffectLayerAboveAtIndex:(int)rowIndex;
 - (BOOL)insertEffectLayerBelowAtIndex:(int)rowIndex;
+// B47: insert `count` empty layers below the row's layerIndex.
+- (int)insertEffectLayersBelowAtIndex:(int)rowIndex count:(int)count
+    NS_SWIFT_NAME(insertEffectLayersBelow(at:count:));
 - (BOOL)removeEffectLayerAtIndex:(int)rowIndex;
+
+// B48: delete every layer on the row's element that has zero
+// effects (keeps the element's ≥ 1 layer invariant). Returns the
+// number of layers removed. Caller should `reloadRows` afterward.
+- (int)deleteUnusedLayersOnElementAtRow:(int)rowIndex
+    NS_SWIFT_NAME(deleteUnusedLayers(onElementAt:));
 
 // B57: global collapse / expand. `collapseAllElements` sets
 // `SetCollapsed(true)` on every non-timing Element; `expandAll` does
@@ -306,6 +327,22 @@
 - (BOOL)exportTimingTrackAtRow:(int)rowIndex toPath:(NSString*)path
     NS_SWIFT_NAME(exportTimingTrack(atRow:toPath:));
 
+// B49: export the rendered channel data for the row's model as a
+// compressed FSEQ v2 `.eseq` sub-sequence — the format Falcon
+// Player uses to play back per-model data. Uses the current render
+// state in `_seqData`, so the caller should ensure a full render
+// has completed first (the render engine runs continuously on
+// iPad, but a fresh render can be forced by kicking off the
+// toolbar render button). When `startMS` >= 0 and `endMS` > 0 the
+// exported file only covers the [startMS, endMS] frame range;
+// otherwise the whole sequence is written. Returns NO if the row
+// isn't a model row, the sequence has no rendered data, or the
+// write failed. Caller must call `ObtainAccessToURL` on `path`
+// beforehand.
+- (BOOL)exportModelAsFSEQAtRow:(int)rowIndex toPath:(NSString*)path
+                       startMS:(int)startMS endMS:(int)endMS
+    NS_SWIFT_NAME(exportModelAsFSEQ(atRow:toPath:startMS:endMS:));
+
 // Timing track rename / delete. `renameTiming…` wires through
 // `SequenceElements::RenameTimingTrack` so effect references to
 // the old name update in-place. `deleteTiming…` goes through
@@ -365,6 +402,16 @@
 // is in the way. Returns NO on rejection.
 - (BOOL)breakdownWordsAtRow:(int)rowIndex
     NS_SWIFT_NAME(breakdownWords(atRow:));
+
+// B34 / B35 — 10 numbered tags (0..9) anchored to absolute sequence
+// times. -1 = unset. Desktop's `SequenceElements::_tagPositions`
+// already persists via the `<TimingTags>` node in the .xsq so
+// save/load round-trips automatically.
+- (int)tagPositionAtIndex:(int)index
+    NS_SWIFT_NAME(tagPosition(at:));
+- (void)setTagPositionAtIndex:(int)index positionMS:(int)position
+    NS_SWIFT_NAME(setTagPosition(at:positionMS:));
+- (void)clearAllTags;
 
 // Views (view picker).
 - (NSArray<NSString*>*)availableViews;
@@ -698,6 +745,28 @@
 - (NSString*)effectSettingsStringForRow:(int)rowIndex atIndex:(int)effectIndex;
 - (NSString*)effectPaletteStringForRow:(int)rowIndex atIndex:(int)effectIndex;
 - (NSString*)effectNameForRow:(int)rowIndex atIndex:(int)effectIndex;
+
+// B15: replace an effect's settings + palette wholesale. Used by
+// Randomize / Reset bulk ops and (future) preset-apply. Empty
+// palette string skips palette replacement.
+- (BOOL)replaceEffectSettings:(NSString*)settings
+                      palette:(NSString*)palette
+                        inRow:(int)rowIndex
+                      atIndex:(int)effectIndex
+    NS_SWIFT_NAME(replaceEffectSettings(_:palette:inRow:atIndex:));
+
+// B20: free-text description for an effect, stored in the
+// `X_Effect_Description` settings key. The X_ prefix means
+// `SetSettings(… keepxsettings=true)` preserves it across
+// Randomise / Reset / preset-apply. Empty string clears the
+// entry. Caller should call `renderEffectForRow` afterward if the
+// effect is visible.
+- (NSString*)effectDescriptionForRow:(int)rowIndex atIndex:(int)effectIndex
+    NS_SWIFT_NAME(effectDescription(forRow:atIndex:));
+- (BOOL)setEffectDescription:(NSString*)description
+                        forRow:(int)rowIndex
+                       atIndex:(int)effectIndex
+    NS_SWIFT_NAME(setEffectDescription(_:forRow:atIndex:));
 
 // Paste / scripted add: insert a new effect with settings+palette pre-populated.
 // Returns the index of the new effect, or -1 on failure.

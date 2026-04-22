@@ -142,6 +142,11 @@ public:
     ModelManager& GetModelManager() { return *_modelManager; }
     ViewObjectManager& GetAllObjects() { return *_viewObjectManager; }
     SequenceFile* GetSequenceFile() { return _sequenceFile.get(); }
+    // B49: expose the render engine so the export-model bridge can
+    // call `RenderEngine::ExportModelData` without creating a
+    // second engine. Engine may be null before `EnsureRenderEngine`
+    // has been called.
+    RenderEngine* GetRenderEngine() { EnsureRenderEngine(); return _renderEngine.get(); }
 
     // B85 — lazy-loaded phoneme dictionary. First call loads
     // `standard_dictionary` / `extended_dictionary` /

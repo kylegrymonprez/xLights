@@ -20,6 +20,8 @@
 #include "render/SequenceElements.h"
 #include "render/SequenceMedia.h"
 #include "render/SequenceFile.h"
+#include "render/RenderEngine.h"
+#include "render/FSEQFile.h"
 #include "utils/UtilFunctions.h"
 #include "lyrics/PhonemeDictionary.h"
 #include "lyrics/LyricBreakdown.h"
@@ -169,6 +171,22 @@
 - (BOOL)openSequence:(NSString*)path {
     BOOL ok = _context->OpenSequence(std::string([path UTF8String]));
     if (ok) {
+        // Re-run the post-load view-select dance so a non-master
+        // saved view is actually populated. `PrepareViews` inside
+        // core's `LoadSequencerFile` only push_backs empty slots
+        // for each view — it doesn't fill `mAllViews[currentView]`
+        // for the saved view the same way a later SelectView call
+        // would. Desktop hides this via
+        // `ViewsModelsPanel::InitializeCheckboxes`'s
+        // `SelectView(GetViewName(GetCurrentView()))` call; iPad
+        // has no equivalent panel, so we do the same work here so
+        // the grid shows the right models immediately. Without
+        // this, the user has to click away to Master and back to
+        // force the populate.
+        int cur = _context->GetSequenceElements().GetCurrentView();
+        if (cur > 0) {
+            [self setCurrentViewIndex:cur];
+        }
         [self markSequenceClean];
     }
     return ok;
@@ -555,6 +573,54 @@ static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
     }
 }
 
+// B81: hide / show every timing row. Flips SetVisible +
+// SetMasterVisible on every timing element then repopulates row
+// info so the iPad view reflects the change after `reloadRows`.
+// Returns the new hide state so the caller can update any
+// dependent UI (menu label flip).
+- (void)setAllTimingTracksHidden:(BOOL)hidden {
+    auto& se = _context->GetSequenceElements();
+    se.HideAllTimingTracks(hidden ? true : false);
+    se.PopulateRowInformation();
+}
+
+// B82: add every visible timing track to every defined view.
+// Mirrors desktop's `AddTimingTracksToAllViews` row-menu entry.
+// Returns the count of timing-track-to-view additions performed
+// (informational only — callers don't rely on it).
+- (int)addAllTimingTracksToAllViews {
+    auto& se = _context->GetSequenceElements();
+    _context->AbortRender(5000);
+    int added = 0;
+    for (int i = 0; i < (int)se.GetElementCount(); i++) {
+        Element* e = se.GetElement(i);
+        if (!e) continue;
+        if (e->GetType() != ElementType::ELEMENT_TYPE_TIMING) continue;
+        if (!e->GetVisible()) continue;
+        se.AddTimingToAllViews(e->GetName());
+        ++added;
+    }
+    if (added > 0) {
+        se.PopulateRowInformation();
+    }
+    return added;
+}
+
+- (BOOL)allTimingTracksHidden {
+    auto& se = _context->GetSequenceElements();
+    int n = se.GetRowInformationSize();
+    for (int i = 0; i < n; i++) {
+        auto* row = se.GetRowInformation(i);
+        if (row && row->element &&
+            row->element->GetType() == ElementType::ELEMENT_TYPE_TIMING) {
+            // If any timing row is present in the row info, at least one
+            // is currently visible — i.e. not all hidden.
+            return NO;
+        }
+    }
+    return YES;
+}
+
 - (int)timingRowColorIndexAtIndex:(int)rowIndex {
     auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
     if (!row) return 0;
@@ -790,6 +856,72 @@ static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
     return YES;
 }
 
+- (BOOL)exportModelAsFSEQAtRow:(int)rowIndex toPath:(NSString*)path
+                       startMS:(int)startMS endMS:(int)endMS {
+    if (!path || path.length == 0) return NO;
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    if (row->element->GetType() == ElementType::ELEMENT_TYPE_TIMING) return NO;
+    const std::string modelName = row->element->GetName();
+    if (modelName.empty()) return NO;
+
+    Model* model = _context->GetModel(modelName);
+    if (!model) return NO;
+
+    RenderEngine* engine = _context->GetRenderEngine();
+    if (!engine) return NO;
+
+    SequenceData& fullData = _context->GetSequenceData();
+    if (fullData.NumFrames() == 0 || fullData.NumChannels() == 0) return NO;
+
+    // Extract per-model channel data. Uses the current `_sequenceData`
+    // — callers should trigger a render before exporting if they want
+    // fresh values; the background render engine keeps it current
+    // during normal editing.
+    auto exported = engine->ExportModelData(modelName, fullData);
+    if (!exported.data) return NO;
+    SequenceData& modelData = *exported.data;
+    const uint32_t totalFrames = (uint32_t)modelData.NumFrames();
+    if (totalFrames == 0) return NO;
+
+    // Clamp to requested [startMS, endMS] window. Negative values or
+    // zero-length windows fall back to the full sequence.
+    const int frameTime = modelData.FrameTime();
+    uint32_t startFrame = 0;
+    uint32_t endFrame = totalFrames;
+    if (startMS >= 0 && endMS > startMS && frameTime > 0) {
+        startFrame = std::min<uint32_t>(totalFrames, (uint32_t)(startMS / frameTime));
+        endFrame = std::min<uint32_t>(totalFrames,
+                                      (uint32_t)((endMS + frameTime - 1) / frameTime));
+    }
+    if (endFrame <= startFrame) return NO;
+
+    const std::string outPath = [path UTF8String];
+    const uint32_t modelChans = (uint32_t)model->GetActChanCount();
+    const uint32_t startAddr = (uint32_t)model->NodeStartChannel(0) + 1;
+
+    // Falcon Pi v2 compressed FSEQ sub-sequence. Matches
+    // `xLightsFrame::WriteFalconPiModelFile` v2 branch.
+    std::unique_ptr<FSEQFile> f(FSEQFile::createFSEQFile(outPath, 2,
+                                                         FSEQFile::CompressionType::zstd,
+                                                         -99));
+    V2FSEQFile* v2 = dynamic_cast<V2FSEQFile*>(f.get());
+    if (!v2) return NO;
+
+    v2->setNumFrames(endFrame - startFrame);
+    v2->setStepTime(frameTime);
+    v2->setChannelCount((uint64_t)startAddr + modelChans - 1);
+    v2->m_sparseRanges.push_back(std::pair<uint32_t, uint32_t>(startAddr - 1, modelChans));
+    v2->writeHeader();
+    // Data buffer only contains the model's channels (0..modelChans-1).
+    v2->m_sparseRanges[0] = std::pair<uint32_t, uint32_t>(0, modelChans);
+    for (uint32_t fr = startFrame; fr < endFrame; ++fr) {
+        v2->addFrame(fr - startFrame, &modelData[fr][0]);
+    }
+    v2->finalize();
+    return YES;
+}
+
 - (BOOL)removeWordsAndPhonemesAtRow:(int)rowIndex {
     auto& se = _context->GetSequenceElements();
     auto* row = se.GetRowInformation(rowIndex);
@@ -900,6 +1032,22 @@ static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
     _context->GetSequenceElements().PopulateRowInformation();
     return YES;
 }
+// B47: insert `count` new empty layers immediately below the
+// row's own layerIndex. Idempotent for non-positive counts.
+// Single `PopulateRowInformation` at the end keeps UI refresh
+// cheap. Returns the number actually added.
+- (int)insertEffectLayersBelowAtIndex:(int)rowIndex count:(int)count {
+    if (count <= 0) return 0;
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return 0;
+    Element* elem = row->element;
+    for (int i = 0; i < count; ++i) {
+        elem->InsertEffectLayer(row->layerIndex + 1 + i);
+    }
+    _context->GetSequenceElements().PopulateRowInformation();
+    return count;
+}
+
 - (BOOL)removeEffectLayerAtIndex:(int)rowIndex {
     auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
     if (!row || !row->element) return NO;
@@ -911,6 +1059,49 @@ static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
     row->element->RemoveEffectLayer(row->layerIndex);
     _context->GetSequenceElements().PopulateRowInformation();
     return YES;
+}
+
+- (int)unusedLayerCountAtRow:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return 0;
+    Element* elem = row->element;
+    int total = (int)elem->GetEffectLayerCount();
+    if (total <= 1) return 0;
+    int empty = 0;
+    for (int i = 0; i < total; ++i) {
+        EffectLayer* layer = elem->GetEffectLayer(i);
+        if (layer && layer->GetEffectCount() == 0) ++empty;
+    }
+    // One layer must survive; the delete op never removes the last
+    // one. Cap the reportable count accordingly so the menu label
+    // matches what the delete will actually do.
+    return std::min(empty, total - 1);
+}
+
+// B48: delete every layer on the row's element that has zero
+// effects. Preserves at least one layer (desktop invariant — an
+// element always has ≥ 1 layer). Returns the count of layers
+// removed. Walks the layer list from the top so removals don't
+// invalidate the remaining indices.
+- (int)deleteUnusedLayersOnElementAtRow:(int)rowIndex {
+    auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+    if (!row || !row->element) return 0;
+    Element* elem = row->element;
+    int total = (int)elem->GetEffectLayerCount();
+    if (total <= 1) return 0;
+    _context->AbortRender(5000);
+    int removed = 0;
+    for (int i = total - 1; i >= 0 && elem->GetEffectLayerCount() > 1; --i) {
+        EffectLayer* layer = elem->GetEffectLayer(i);
+        if (layer && layer->GetEffectCount() == 0) {
+            elem->RemoveEffectLayer(i);
+            ++removed;
+        }
+    }
+    if (removed > 0) {
+        _context->GetSequenceElements().PopulateRowInformation();
+    }
+    return removed;
 }
 
 - (BOOL)renameTimingTrackAtIndex:(int)rowIndex newName:(NSString*)newName {
@@ -1073,6 +1264,26 @@ static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
     }
     se.PopulateRowInformation();
     return YES;
+}
+
+// MARK: - Tags (B34 / B35)
+
+- (int)tagPositionAtIndex:(int)index {
+    if (index < 0 || index > 9) return -1;
+    return _context->GetSequenceElements().GetTagPosition(index);
+}
+
+- (void)setTagPositionAtIndex:(int)index positionMS:(int)position {
+    if (index < 0 || index > 9) return;
+    int duration = _context->GetSequenceFile()
+                   ? _context->GetSequenceFile()->GetSequenceDurationMS()
+                   : 0;
+    if (duration > 0 && position > duration) position = duration;
+    _context->GetSequenceElements().SetTagPosition(index, position);
+}
+
+- (void)clearAllTags {
+    _context->GetSequenceElements().ClearTags();
 }
 
 - (BOOL)breakdownWordsAtRow:(int)rowIndex {
@@ -2605,6 +2816,62 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
     Effect* e = layer->GetEffect(effectIndex);
     if (!e) return @"";
     return [NSString stringWithUTF8String:e->GetEffectName().c_str()];
+}
+
+// B20: read/write free-text description. Stored as
+// `X_Effect_Description` so it survives `SetSettings(.., keep=true)`
+// from randomise / reset / preset-apply.
+- (NSString*)effectDescriptionForRow:(int)rowIndex atIndex:(int)effectIndex {
+    auto* layer = [self effectLayerForRow:rowIndex];
+    if (!layer || effectIndex < 0 || effectIndex >= layer->GetEffectCount()) return @"";
+    Effect* e = layer->GetEffect(effectIndex);
+    if (!e) return @"";
+    const SettingsMap& s = e->GetSettings();
+    if (!s.Contains("X_Effect_Description")) return @"";
+    return [NSString stringWithUTF8String:s.Get("X_Effect_Description", "").c_str()];
+}
+
+- (BOOL)setEffectDescription:(NSString*)description
+                        forRow:(int)rowIndex
+                       atIndex:(int)effectIndex {
+    auto* layer = [self effectLayerForRow:rowIndex];
+    if (!layer || effectIndex < 0 || effectIndex >= layer->GetEffectCount()) return NO;
+    Effect* e = layer->GetEffect(effectIndex);
+    if (!e) return NO;
+    std::string v = description ? std::string([description UTF8String]) : std::string();
+    SettingsMap& s = e->GetSettings();
+    if (v.empty()) {
+        s.erase("X_Effect_Description");
+    } else {
+        s["X_Effect_Description"] = v;
+    }
+    e->IncrementChangeCount();
+    return YES;
+}
+
+// B15: replace the entire settings + palette maps of an existing
+// effect in one shot. Used by randomize / reset / (future) preset
+// apply where the whole property set changes at once. Returns NO
+// only on an out-of-range row or effect index; passing a nil /
+// empty string for either side clears that side (SetSettings with
+// an empty string resets; SetPalette with empty similarly clears
+// the palette).
+- (BOOL)replaceEffectSettings:(NSString*)settings
+                      palette:(NSString*)palette
+                        inRow:(int)rowIndex
+                      atIndex:(int)effectIndex {
+    auto* layer = [self effectLayerForRow:rowIndex];
+    if (!layer || effectIndex < 0 || effectIndex >= layer->GetEffectCount()) return NO;
+    Effect* e = layer->GetEffect(effectIndex);
+    if (!e) return NO;
+    std::string st = settings ? std::string([settings UTF8String]) : std::string();
+    std::string pal = palette ? std::string([palette UTF8String]) : std::string();
+    e->SetSettings(st, true);
+    if (!pal.empty()) {
+        e->SetPalette(pal);
+    }
+    e->IncrementChangeCount();
+    return YES;
 }
 
 - (int)addEffectToRow:(int)rowIndex

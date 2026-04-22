@@ -43,6 +43,10 @@ struct EffectCanvasActions {
     /// the touch location into view-space coordinates so the menu can
     /// anchor near the finger.
     var onRequestContextMenu: (_ row: Int, _ effect: Int, _ anchorInCanvas: CGPoint) -> Void = { _,_,_ in }
+    /// B18: double-tap in empty space. The canvas passes the row id
+    /// plus the `ms` it landed on; the outer view decides whether
+    /// to create an effect (palette armed) filling the cell.
+    var onDoubleTapEmpty: (_ rowIndex: Int, _ ms: Int) -> Void = { _,_ in }
 }
 
 /// State provider for per-effect lock / disabled look. Keeping this as a

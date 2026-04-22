@@ -41,6 +41,9 @@ struct TimingRowHeader: View {
     var onImportLyrics: (() -> Void)?
     /// B89: fires when the user picks "Auto-Label Marks…".
     var onAutoLabelMarks: (() -> Void)?
+    /// B91: fires when the user picks "Halve Timing Marks" —
+    /// splits every mark at its midpoint.
+    var onHalveTimingMarks: (() -> Void)?
 
     // Active state is carried on `row.timing?.isActive` so a toggle
     // here flips the struct equality and re-runs the grid body —
@@ -97,6 +100,17 @@ struct TimingRowHeader: View {
                     .font(.caption2)
                     .foregroundStyle(Color.white.opacity(0.8))
                     .frame(width: 10)
+            }
+            // B63: glyph for timing-row type. Lyric breakdown layers
+            // (Phrases / Words / Phonemes, surfaced via B84/B85) get
+            // a distinct icon so users scanning a busy timing band
+            // can tell lyric content from plain beat marks. Plain
+            // timing tracks stay clean — the coloured dot already
+            // signals the row type.
+            if let iconName = Self.timingLayerIcon(layerName: row.timing?.layerName ?? "") {
+                Image(systemName: iconName)
+                    .font(.caption2)
+                    .foregroundStyle(Color.white.opacity(0.8))
             }
             Text(row.displayName)
                 .font(.caption)
@@ -187,6 +201,12 @@ struct TimingRowHeader: View {
                                systemImage: "number")
                     }
                 }
+                if let fire = onHalveTimingMarks {
+                    Button { fire() } label: {
+                        Label("Halve Timing Marks",
+                               systemImage: "square.split.1x2")
+                    }
+                }
                 Button(role: .destructive) {
                     showDelete = true
                 } label: { Label("Delete Timing Track", systemImage: "trash") }
@@ -215,6 +235,17 @@ struct TimingRowHeader: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Delete \(row.timing?.elementName ?? row.displayName)? This also removes its layers and any references from effect settings.")
+        }
+    }
+
+    /// B63 — SF Symbol for a lyric-breakdown layer. Nil for plain
+    /// timing tracks (no decoration; the coloured dot is enough).
+    static func timingLayerIcon(layerName: String) -> String? {
+        switch layerName.lowercased() {
+        case "phrases":  return "text.bubble"
+        case "words":    return "textformat.abc"
+        case "phonemes": return "waveform.path"
+        default:         return nil
         }
     }
 }
@@ -266,6 +297,24 @@ struct ModelRowHeader: View {
     var onCutRow: (() -> Void)?
     var onCopyModel: (() -> Void)?
     var onCutModel: (() -> Void)?
+    /// B49 export rendered-channel data for this row's model as a
+    /// Falcon Player `.eseq` sub-sequence. The closure receives
+    /// `true` when the caller should restrict the export to the
+    /// active loop region, `false` for the whole sequence. The
+    /// "selected range" entry only shows up when `hasLoopRegion`
+    /// is true — on iPad, loop-region is how we indicate a time
+    /// window (desktop uses a frame selection).
+    var hasLoopRegion: Bool = false
+    var onExportModelFSEQ: ((_ useLoopRegion: Bool) -> Void)?
+    /// B48 — delete every empty layer on this row's element.
+    /// Shown only on the element's primary row (`layerIndex == 0`)
+    /// and only when there's > 1 layer to begin with.
+    var unusedLayerCount: Int = 0
+    var onDeleteUnusedLayers: (() -> Void)?
+    /// B47 — insert N empty layers in one shot. The outer view
+    /// owns the count prompt; we just fire the closure with the
+    /// chosen value.
+    var onInsertMultipleLayersBelow: (() -> Void)?
 
     @State private var showDeleteLayerConfirm: Bool = false
     @State private var showDeleteAllEffectsConfirm: Bool = false
@@ -371,6 +420,10 @@ struct ModelRowHeader: View {
         .background(row.id % 2 == 0
                     ? Color.black.opacity(0.25)
                     : Color.black.opacity(0.15))
+        // B66 — render-disabled (desktop calls it "muted") rows
+        // show at 45 % opacity so the user can tell at a glance
+        // which models won't contribute to the render pass.
+        .opacity(elementRenderDisabled ? 0.45 : 1.0)
         .contentShape(Rectangle())
         // Double-tap comes first so SwiftUI's recognizer chain treats
         // it as the primary gesture on rows that have something to
@@ -429,6 +482,18 @@ struct ModelRowHeader: View {
                            systemImage: "square.stack.3d.up.trianglebadge.exclamationmark")
                 }
             }
+            if !isSubLayer && !isNodeRow, let fire = onExportModelFSEQ {
+                Button { fire(false) } label: {
+                    Label("Export Model as FSEQ…",
+                           systemImage: "square.and.arrow.up.on.square")
+                }
+                if hasLoopRegion {
+                    Button { fire(true) } label: {
+                        Label("Export Model (Loop Range) as FSEQ…",
+                               systemImage: "arrow.up.doc")
+                    }
+                }
+            }
             if !isSubLayer && !isNodeRow, let fire = onToggleRenderDisabled {
                 Button { fire() } label: {
                     Label(elementRenderDisabled ? "Enable Render" : "Disable Render",
@@ -456,10 +521,23 @@ struct ModelRowHeader: View {
                         onRowsChanged()
                     }
                 } label: { Label("Insert Layer Below", systemImage: "square.3.layers.3d.bottom.filled") }
+                if let fire = onInsertMultipleLayersBelow {
+                    Button { fire() } label: {
+                        Label("Insert Multiple Layers Below…",
+                               systemImage: "square.stack.3d.down.right")
+                    }
+                }
                 if canDeleteLayer {
                     Button(role: .destructive) {
                         showDeleteLayerConfirm = true
                     } label: { Label("Delete Layer", systemImage: "trash") }
+                }
+                if !isSubLayer, unusedLayerCount > 0,
+                   let fire = onDeleteUnusedLayers {
+                    Button(role: .destructive) { fire() } label: {
+                        Label("Delete \(unusedLayerCount) Unused Layer\(unusedLayerCount == 1 ? "" : "s")",
+                               systemImage: "trash.square")
+                    }
                 }
             }
             if canToggleSubmodels {

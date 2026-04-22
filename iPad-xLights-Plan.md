@@ -27,9 +27,9 @@ editing + loop region + tags-less-tags, phrase and word breakdown,
 lyric sub-layer rendering, follow-playhead, trackpad scroll, drag-to-
 scrub, waveform filters, pointer hover, `.xtiming` I/O, import lyrics,
 auto-label, cut/copy row + model, multi-effect clipboard with relative
-timing, and column-resize). Open work is **6 P1s** (tags B34/B35,
-randomize/reset B15, presets-menu stub B19, export-model B49, visible
-scrollbars B94) plus ~40 P2 polish items — see
+timing, column-resize, numbered tags B34/B35, FSEQ export B49, visible
+scrollbars B94, randomise/reset B15, presets stub B19). **All P1 gaps
+closed.** Remaining ~40 items are P2 polish — see
 [`plans/phase-b-grid-parity.md`](plans/phase-b-grid-parity.md).
 
 ### Code layout
@@ -83,7 +83,7 @@ variants in `libdbg-ios/`.
 | Phase | Title | Status | Sub-plan |
 |---|---|---|---|
 | A | Core-path hardening | ✓ complete | — (one small follow-up in [`plans/followups.md`](plans/followups.md)) |
-| B | Effects grid parity with desktop | In progress — all original P0s closed + 20+ P1s landed across 2026-04-20/21 (loop region, waveform filters, word breakdown, `.xtiming` I/O, import lyrics, auto-label, cut/copy row+model, multi-effect clipboard, pointer hover, column resize, etc.). **6 P1s open** (tags B34/B35, randomize B15, presets stub B19, export model B49, scrollbars B94) + ~40 P2 polish. | [`plans/phase-b-grid-parity.md`](plans/phase-b-grid-parity.md) |
+| B | Effects grid parity with desktop | **P0 + P1 closed** — all original P0s + 24 P1s landed across 2026-04-20/22 (loop region, waveform filters, word breakdown, `.xtiming` I/O, import lyrics, auto-label, cut/copy row+model, multi-effect clipboard, pointer hover, column resize, tags B34/B35, FSEQ export B49, scrollbars B94, randomise/reset B15, presets stub B19, etc.). ~40 P2 polish items remain. | [`plans/phase-b-grid-parity.md`](plans/phase-b-grid-parity.md) |
 | B-Metal | Grid render pipeline migration (CG → Metal) | ✓ complete | — |
 | C | Effect settings inspector | ✓ complete — two polish follow-ups (MH colour/path authoring, DMX state persistence) tracked in [`plans/followups.md`](plans/followups.md) | — |
 | D | Model Preview + preview polish | ✓ complete — layout-editor overlays parked in [`plans/future-layout-editing.md`](plans/future-layout-editing.md) | [`plans/phase-d-preview.md`](plans/phase-d-preview.md) |

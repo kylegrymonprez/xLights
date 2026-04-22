@@ -25,6 +25,10 @@ struct TimingEffectsMetalGridView: UIViewRepresentable {
     /// model should move the mark via its existing `moveEffect` path.
     var onMarkDragEnd: ((_ rowIndex: Int, _ markIndex: Int,
                           _ newStartMS: Int, _ newEndMS: Int) -> Void)?
+    /// B92: fired on double-tap over an existing timing mark.
+    /// Carries the global row id + mark index so the outer view can
+    /// set the loop region to the mark range and start playback.
+    var onDoubleTapMark: ((_ rowIndex: Int, _ markIndex: Int) -> Void)?
 
     func makeUIView(context: Context) -> TimingEffectsMetalMTKView {
         let v = TimingEffectsMetalMTKView()
@@ -47,6 +51,7 @@ struct TimingEffectsMetalGridView: UIViewRepresentable {
         c.onUserInteraction = onUserInteraction
         c.onLongPressMark = onLongPressMark
         c.onMarkDragEnd = onMarkDragEnd
+        c.onDoubleTapMark = onDoubleTapMark
         view.setNeedsDisplay()
     }
 
@@ -66,6 +71,7 @@ struct TimingEffectsMetalGridView: UIViewRepresentable {
         var onUserInteraction: (() -> Void)?
         var onLongPressMark: ((Int, Int?, Int) -> Void)?
         var onMarkDragEnd: ((Int, Int, Int, Int) -> Void)?
+        var onDoubleTapMark: ((Int, Int) -> Void)?
         var panStartScrollX: CGFloat = 0
         var panStartScrollY: CGFloat = 0
 
@@ -350,6 +356,14 @@ final class TimingEffectsMetalMTKView: MTKView, MTKViewDelegate {
     func installGestures() {
         let tap = UITapGestureRecognizer(target: self, action: #selector(onTap(_:)))
         addGestureRecognizer(tap)
+        // B92: double-tap a mark to set the loop region to that
+        // mark's range + start playback. Attach before the single
+        // tap so `require(toFail:)` defers the seek.
+        let doubleTap = UITapGestureRecognizer(target: self,
+                                                 action: #selector(onDoubleTap(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        addGestureRecognizer(doubleTap)
+        tap.require(toFail: doubleTap)
         let pan = UIPanGestureRecognizer(target: self, action: #selector(onPan(_:)))
         pan.allowedScrollTypesMask = .all   // B95: trackpad + scroll-wheel scroll
         addGestureRecognizer(pan)
@@ -363,6 +377,26 @@ final class TimingEffectsMetalMTKView: MTKView, MTKViewDelegate {
         lp.minimumPressDuration = 0.5
         lp.allowableMovement = 6
         addGestureRecognizer(lp)
+    }
+
+    @objc func onDoubleTap(_ g: UITapGestureRecognizer) {
+        guard let c = coordinator, c.pixelsPerMS > 0 else { return }
+        let p = g.location(in: self)
+        var y: CGFloat = -c.scrollOffsetY
+        var rowIdx = -1
+        for (i, _) in c.rows.enumerated() {
+            if p.y >= y && p.y < y + c.rowHeight { rowIdx = i; break }
+            y += c.rowHeight
+        }
+        guard rowIdx >= 0 else { return }
+        let row = c.rows[rowIdx]
+        let ms = max(0, Int((p.x + c.scrollOffsetX) / c.pixelsPerMS))
+        for (mi, m) in row.effects.enumerated() {
+            if ms >= m.startTimeMS && ms <= m.endTimeMS {
+                c.onDoubleTapMark?(row.id, mi)
+                return
+            }
+        }
     }
 
     @objc func onLongPress(_ g: UILongPressGestureRecognizer) {

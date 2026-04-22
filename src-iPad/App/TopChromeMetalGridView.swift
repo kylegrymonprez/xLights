@@ -30,6 +30,9 @@ struct TopChromeMetalGridView: UIViewRepresentable {
     /// B41: long-press on the waveform strip surfaces the filter-
     /// variant menu (bass / treble / alto / non-vocals / full).
     var onWaveformMenu: (() -> Void)?
+    /// B34 tag positions (0..9; -1 = unset). Drawn as numbered
+    /// flags on the ruler.
+    var tagPositions: [Int] = Array(repeating: -1, count: 10)
     /// A2: optional onset overlay. When `showOnsets` is true, each
     /// `onsetMS` value draws a faint vertical line across the
     /// waveform strip.
@@ -79,6 +82,7 @@ struct TopChromeMetalGridView: UIViewRepresentable {
         c.pitchContour = pitchContour
         c.showSpectrogram = showSpectrogram
         c.spectrogramFetcher = spectrogramFetcher
+        c.tagPositions = tagPositions
         view.setNeedsDisplay()
     }
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -122,6 +126,8 @@ struct TopChromeMetalGridView: UIViewRepresentable {
         // Cache key for the spectrogram texture so we only re-upload
         // when zoom / scroll / size actually change.
         var spectrogramCacheKey: String = ""
+        // B34 numbered-tag positions (0..9).
+        var tagPositions: [Int] = Array(repeating: -1, count: 10)
     }
 }
 
@@ -266,6 +272,39 @@ final class TopChromeMetalMTKView: MTKView, MTKViewDelegate {
                 // White labels to match the row-header text colour.
                 bridge.drawText(lp.1, atX: lp.0 + 2, y: 2, fontSize: 9,
                                  r: 1.0, g: 1.0, b: 1.0, a: 1.0)
+            }
+        }
+
+        // B34 numbered-tag flags on the ruler. Drawn after ticks so
+        // the flag sits on top of the tick/label pair. Each tag gets a
+        // distinct hue on a 10-step wheel plus a small numeric label.
+        if c.pixelsPerMS > 0 && c.durationMS > 0 {
+            let flagH: CGFloat = 11
+            let flagW: CGFloat = 10
+            let flagY: CGFloat = 1
+            for i in 0..<min(10, c.tagPositions.count) {
+                let pos = c.tagPositions[i]
+                if pos < 0 { continue }
+                let x = CGFloat(pos) * c.pixelsPerMS - c.scrollOffsetX
+                if x < -flagW || x > size.width + flagW { continue }
+                let hue = Float(i) / 10.0
+                let (r, g, b) = hslToRGB(h: hue, s: 0.75, l: 0.55)
+                // Stem (vertical line down to the ruler baseline).
+                bridge.beginLineBatch()
+                bridge.appendLineX1(x, y1: flagY,
+                                     x2: x, y2: c.rulerHeight,
+                                     r: CGFloat(r), g: CGFloat(g),
+                                     b: CGFloat(b), a: 1.0)
+                bridge.flushLineBatch()
+                // Flag rectangle (triangle-pair fill).
+                bridge.fillTriangleX1(x, y1: flagY,
+                                      x2: x + flagW, y2: flagY + flagH / 2,
+                                      x3: x, y3: flagY + flagH,
+                                      r: CGFloat(r), g: CGFloat(g),
+                                      b: CGFloat(b), a: 0.95)
+                // Number inside the flag.
+                bridge.drawText("\(i)", atX: x + 2, y: flagY + 1,
+                                 fontSize: 9, r: 0, g: 0, b: 0, a: 1.0)
             }
         }
 

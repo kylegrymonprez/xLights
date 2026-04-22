@@ -50,6 +50,14 @@ class SequencerViewModel {
     /// timer wraps at `loopEndMS` back to `loopStartMS`.
     var loopPlayEnabled: Bool = false
     var hasLoopRegion: Bool { loopEndMS > loopStartMS }
+
+    /// B34 — 10 numbered tag positions. -1 = unset. Mirrored from
+    /// the bridge's `SequenceElements::_tagPositions` so SwiftUI can
+    /// observe + render tags on the ruler. `reloadTagPositions()`
+    /// pulls from the bridge on sequence load and after any mutating
+    /// op; tag writes go through `setTag(_:atMS:)` which updates
+    /// both sides.
+    var tagPositions: [Int] = Array(repeating: -1, count: 10)
     // True while a selection-scoped preview loop is advancing
     // `playPositionMS`. Observed by the preview panes so they keep their
     // MTKView display link running during scrub (not just real playback).
@@ -203,6 +211,12 @@ class SequencerViewModel {
 
     // Selection & editing
     var selectedEffect: EffectSelection?
+    /// B28: snapshot of the selection that was active immediately
+    /// before the current one. Used by the grid to render a subtle
+    /// "reference" highlight so users can compare settings between
+    /// the previous and current selection. Cleared on any
+    /// `clearSelection`.
+    var previousSelectedEffect: EffectSelection?
     /// Full set of selected effects. Always mirrors `selectedEffect`:
     /// single-select sets it to `[primary]`, multi-select via marquee
     /// fills it with N, clear empties it. When multi-selected, the
@@ -451,6 +465,8 @@ class SequencerViewModel {
             frameIntervalMS = Int(document.frameIntervalMS())
             hasAudio = document.hasAudio()
             reloadRows()
+            reloadTagPositions()
+            syncClipboardFromPasteboard()   // B99
             loadAvailableEffects()
             loadWaveform(startMS: 0, endMS: sequenceDurationMS)
             startBackgroundRender()
@@ -470,6 +486,8 @@ class SequencerViewModel {
             frameIntervalMS = Int(document.frameIntervalMS())
             hasAudio = document.hasAudio()
             reloadRows()
+            reloadTagPositions()
+            syncClipboardFromPasteboard()   // B99
             loadAvailableEffects()
             // Initial load uses a modest sample count; grid re-requests
             // a higher-resolution waveform once it knows the zoom level
@@ -986,6 +1004,64 @@ class SequencerViewModel {
         loopPlayEnabled.toggle()
     }
 
+    /// B92: set the loop region to the given timing-mark bounds
+    /// and start looping playback from the mark's start. Used by
+    /// double-tap on a timing mark — gives users a quick way to
+    /// preview one phrase / word / phoneme in isolation without
+    /// hand-dragging the loop region.
+    func playLoopForTimingMark(rowIndex: Int, markIndex: Int) {
+        guard rowIndex >= 0, rowIndex < rows.count else { return }
+        let row = rows[rowIndex]
+        guard markIndex >= 0, markIndex < row.effects.count else { return }
+        let mark = row.effects[markIndex]
+        setLoopRegion(startMS: mark.startTimeMS, endMS: mark.endTimeMS)
+        loopPlayEnabled = true
+        seekTo(ms: mark.startTimeMS)
+        if !isPlaying { togglePlayPause() }
+    }
+
+    // MARK: - Tags (B34 / B35)
+
+    /// Pull the 10 tag positions from the bridge into the observable
+    /// `tagPositions` array. Call on sequence open / post-save.
+    func reloadTagPositions() {
+        var out: [Int] = []
+        out.reserveCapacity(10)
+        for i in 0..<10 {
+            out.append(Int(document.tagPosition(at: Int32(i))))
+        }
+        tagPositions = out
+    }
+
+    /// B34 — set tag `idx` (0..9) to `atMS`. Passing -1 clears the
+    /// tag (but callers should use `clearTag(_:)` for readability).
+    /// Marks the sequence dirty via the bridge write.
+    func setTag(_ idx: Int, atMS: Int) {
+        guard idx >= 0 && idx < 10 else { return }
+        document.setTagPosition(at: Int32(idx), positionMS: Int32(atMS))
+        reloadTagPositions()
+    }
+
+    /// B34 — clear tag `idx` (sets position to -1).
+    func clearTag(_ idx: Int) {
+        guard idx >= 0 && idx < 10 else { return }
+        document.setTagPosition(at: Int32(idx), positionMS: -1)
+        reloadTagPositions()
+    }
+
+    /// B35 — clear all tags at once (desktop "Delete All").
+    func clearAllTags() {
+        document.clearAllTags()
+        reloadTagPositions()
+    }
+
+    /// B34 — jump the play head to tag `idx` (no-op if unset).
+    func goToTag(_ idx: Int) {
+        guard idx >= 0 && idx < 10 else { return }
+        let pos = tagPositions[idx]
+        if pos >= 0 { seekTo(ms: pos) }
+    }
+
     /// B44: render only the loop region. Uses the existing
     /// per-model render primitive; touches every row so the output
     /// buffer gets refreshed across the range.
@@ -1283,6 +1359,12 @@ class SequencerViewModel {
             startTimeMS: effect.startTimeMS,
             endTimeMS: effect.endTimeMS
         )
+        // B28: capture what we're moving away from (only when it's
+        // a different effect — repeat-selects shouldn't overwrite).
+        if let old = selectedEffect,
+           !(old.rowIndex == sel.rowIndex && old.effectIndex == sel.effectIndex) {
+            previousSelectedEffect = old
+        }
         selectedEffect = sel
         selectedEffects = [sel]
         showInspector = true
@@ -1314,6 +1396,7 @@ class SequencerViewModel {
     func clearSelection() {
         selectedEffect = nil
         selectedEffects = []
+        previousSelectedEffect = nil   // B28
         selectedEffectSettings = [:]
         selectedEffectMetadata = nil
         stopScrub()
@@ -1830,7 +1913,350 @@ class SequencerViewModel {
         undoManager.setActionName(targetLocked ? "Lock Effects" : "Unlock Effects")
     }
 
+    // MARK: - Layer management (B48)
+
+    /// B48: remove every empty layer on the row's element (keeping
+    /// the ≥ 1 layer invariant). Returns the count removed so the
+    /// caller can flip to a "no unused layers" toast when zero.
+    @discardableResult
+    func deleteUnusedLayers(rowIndex: Int) -> Int {
+        let n = Int(document.deleteUnusedLayers(onElementAt: Int32(rowIndex)))
+        if n > 0 { reloadRows() }
+        return n
+    }
+
+    /// B47: insert `count` empty layers immediately below the row's
+    /// own layer. Returns the number actually inserted.
+    @discardableResult
+    func insertLayersBelow(rowIndex: Int, count: Int) -> Int {
+        guard count > 0 else { return 0 }
+        let clamped = min(count, 32)  // sanity cap
+        let n = Int(document.insertEffectLayersBelow(at: Int32(rowIndex),
+                                                       count: Int32(clamped)))
+        if n > 0 { reloadRows() }
+        return n
+    }
+
+    // MARK: - Description (B20)
+
+    /// B20: read the `X_Effect_Description` value off the effect
+    /// at `(row, idx)`. Empty string when no description is set.
+    func effectDescription(rowIndex: Int, effectIndex: Int) -> String {
+        return document.effectDescription(forRow: Int32(rowIndex),
+                                           atIndex: Int32(effectIndex)) ?? ""
+    }
+
+    /// B20: update an effect's description. Empty string clears.
+    /// Undo-able; tracks the previous value and restores it.
+    func setEffectDescription(rowIndex: Int, effectIndex: Int,
+                               _ description: String) {
+        let before = effectDescription(rowIndex: rowIndex, effectIndex: effectIndex)
+        if before == description { return }
+        _ = document.setEffectDescription(description,
+                                            forRow: Int32(rowIndex),
+                                            atIndex: Int32(effectIndex))
+        undoManager.registerUndo(withTarget: self) { vm in
+            vm.setEffectDescription(rowIndex: rowIndex,
+                                     effectIndex: effectIndex,
+                                     before)
+        }
+        undoManager.setActionName("Edit Description")
+    }
+
+    // MARK: - Effect presets (B19, session-only)
+
+    /// Snapshot of an effect's type + settings + palette. Session-
+    /// only for now — persistence is Phase C work. Identity is
+    /// `name` (preset name chosen by the user).
+    struct EffectPreset: Identifiable, Hashable {
+        let id: UUID
+        var name: String
+        let effectName: String
+        let settings: String
+        let palette: String
+    }
+
+    /// Session-only preset store. Cleared on app launch; a future
+    /// Phase C `EffectPresetManager` will persist to disk. Exposed
+    /// for the effect context menu to list + apply.
+    var presets: [EffectPreset] = []
+
+    /// Capture the selected effect's current settings as a named
+    /// preset. No-ops if nothing is selected or the name is blank.
+    @discardableResult
+    func saveSelectedEffectAsPreset(name: String) -> Bool {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard let sel = selectedEffect else { return false }
+        let row = Int32(sel.rowIndex)
+        let idx = Int32(sel.effectIndex)
+        let effectName = document.effectName(forRow: row, at: idx) ?? sel.name
+        let settings = document.effectSettingsString(forRow: row, at: idx) ?? ""
+        let palette = document.effectPaletteString(forRow: row, at: idx) ?? ""
+        let preset = EffectPreset(id: UUID(), name: trimmed,
+                                    effectName: effectName,
+                                    settings: settings, palette: palette)
+        // Replace an existing preset with the same name — matches
+        // desktop's overwrite-on-save behaviour.
+        if let existing = presets.firstIndex(where: { $0.name == trimmed }) {
+            presets[existing] = preset
+        } else {
+            presets.append(preset)
+        }
+        return true
+    }
+
+    /// Apply `preset` to every selected effect. If the preset's
+    /// effect type matches the target's type the settings + palette
+    /// replace the target's wholesale; otherwise the effect is
+    /// deleted and a new one of the preset's type is added at the
+    /// same time range. Registered as a single undo step.
+    @discardableResult
+    func applyPreset(_ preset: EffectPreset) -> Bool {
+        let targets: [EffectSelection]
+        if selectedEffects.count > 1 {
+            targets = Array(selectedEffects)
+        } else if let one = selectedEffect {
+            targets = [one]
+        } else { return false }
+        undoManager.beginUndoGrouping()
+        for sel in targets {
+            let row = Int32(sel.rowIndex)
+            let idx = Int32(sel.effectIndex)
+            let currentName = document.effectName(forRow: row, at: idx) ?? ""
+            if currentName == preset.effectName {
+                applySettingsTransform(selection: sel) { _, _ in
+                    Self.parseSettingsString(preset.settings)
+                }
+                // applySettingsTransform re-uses the target's existing
+                // palette; override it by calling replaceEffectSettings
+                // once more with the preset's palette so colour
+                // customisations travel with the preset.
+                _ = document.replaceEffectSettings(preset.settings,
+                                                     palette: preset.palette,
+                                                     inRow: row, atIndex: idx)
+            } else {
+                // Different effect type — delete + re-add. Preserves
+                // [startMS, endMS] so the replacement sits in the
+                // same slot.
+                let startMS = sel.startTimeMS
+                let endMS = sel.endTimeMS
+                deleteEffect(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex)
+                _ = document.addEffect(toRow: row, name: preset.effectName,
+                                         settings: preset.settings,
+                                         palette: preset.palette,
+                                         startMS: Int32(startMS),
+                                         endMS: Int32(endMS))
+            }
+        }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName("Apply Preset \(preset.name)")
+        refreshSelectedEffectSettings()
+        reloadRows()
+        return true
+    }
+
+    /// Remove a preset from the session store. The UI's "Manage
+    /// Presets…" sheet will drive this once we have one; exposed
+    /// now so tests can prune.
+    func deletePreset(_ preset: EffectPreset) {
+        presets.removeAll { $0.id == preset.id }
+    }
+
+    // MARK: - Randomize / Reset (B15)
+
+    /// B15: reset every `E_*` setting on the selected effect(s) back
+    /// to type defaults. Preserves the palette (C_*) and shared
+    /// Buffer / Blending settings (B_* / T_*) so Fade, blending mode,
+    /// and colour choices survive. Registered as a single undo step.
+    func resetSelectedEffectsToDefaults() {
+        let targets: [EffectSelection]
+        if selectedEffects.count > 1 {
+            targets = Array(selectedEffects)
+        } else if let one = selectedEffect {
+            targets = [one]
+        } else { return }
+        undoManager.beginUndoGrouping()
+        for sel in targets {
+            applySettingsTransform(selection: sel) { current, _ in
+                var out = current
+                out.removeAll { $0.key.hasPrefix("E_") }
+                return out
+            }
+        }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName(targets.count > 1
+                                   ? "Reset \(targets.count) Effects"
+                                   : "Reset Effect")
+        refreshSelectedEffectSettings()
+    }
+
+    /// B15: randomise every `E_*` setting on each selected effect by
+    /// walking the effect's metadata and picking a random value in
+    /// range per control type. Sliders / spinners pick an int in
+    /// [min, max]; choices pick a random option; checkboxes flip a
+    /// 50/50 coin. Each selected effect gets independent random
+    /// values. Preserves palette + shared panels.
+    func randomizeSelectedEffects() {
+        let targets: [EffectSelection]
+        if selectedEffects.count > 1 {
+            targets = Array(selectedEffects)
+        } else if let one = selectedEffect {
+            targets = [one]
+        } else { return }
+        undoManager.beginUndoGrouping()
+        for sel in targets {
+            applySettingsTransform(selection: sel) { [self] current, effectName in
+                let metadata = loadEffectMetadata(effectName)
+                return randomizedSettings(current: current, metadata: metadata)
+            }
+        }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName(targets.count > 1
+                                   ? "Randomise \(targets.count) Effects"
+                                   : "Randomise Effect")
+        refreshSelectedEffectSettings()
+    }
+
+    /// Helper: snapshot current settings, let `transform` produce a
+    /// new list, write it back via the bridge, register an undo that
+    /// restores the snapshot. `transform` receives the parsed current
+    /// settings and the effect name; returns the new settings.
+    private func applySettingsTransform(
+        selection sel: EffectSelection,
+        transform: (_ current: [(key: String, value: String)],
+                     _ effectName: String) -> [(key: String, value: String)]
+    ) {
+        let row = Int32(sel.rowIndex)
+        let idx = Int32(sel.effectIndex)
+        let beforeSettings = document.effectSettingsString(forRow: row, at: idx) ?? ""
+        let beforePalette  = document.effectPaletteString(forRow: row, at: idx) ?? ""
+        let effectName = document.effectName(forRow: row, at: idx) ?? sel.name
+
+        let parsed = Self.parseSettingsString(beforeSettings)
+        let newPairs = transform(parsed, effectName)
+        let afterSettings = Self.encodeSettingsString(newPairs)
+
+        guard document.replaceEffectSettings(afterSettings,
+                                              palette: beforePalette,
+                                              inRow: row, atIndex: idx) else {
+            return
+        }
+        undoManager.registerUndo(withTarget: self) { vm in
+            _ = vm.document.replaceEffectSettings(beforeSettings,
+                                                    palette: beforePalette,
+                                                    inRow: row, atIndex: idx)
+            vm.refreshSelectedEffectSettings()
+        }
+    }
+
+    /// Walk `metadata` and produce a new settings list with random
+    /// values for every `E_*` property. Entries outside the effect's
+    /// metadata (B_ / T_ / X_) are preserved from `current`. When
+    /// `metadata` is nil, the input is returned unchanged so the
+    /// caller's undo / snapshot logic still exercises the same code
+    /// path.
+    private func randomizedSettings(
+        current: [(key: String, value: String)],
+        metadata: EffectMetadata?
+    ) -> [(key: String, value: String)] {
+        var out = current
+        // Drop every existing E_* entry; we'll rebuild from metadata.
+        out.removeAll { $0.key.hasPrefix("E_") }
+        guard let md = metadata else { return out }
+        let prefix = md.settingKeyPrefix
+        // Only randomise E-prefixed panels; shared panels have B_/T_/C_.
+        guard prefix == "E_" else { return out }
+        let props = md.properties ?? []
+        for prop in props {
+            guard prop.isForIPad else { continue }
+            let key = prop.settingKey(prefix: prefix)
+            guard let randomValue = randomValueFor(property: prop) else { continue }
+            out.append((key: key, value: randomValue))
+        }
+        return out
+    }
+
+    /// Pick a single random value appropriate for `prop.controlType`.
+    /// Returns nil for control types we don't randomise (custom
+    /// canvases, file pickers, etc.) — those are left at their
+    /// current / default value.
+    private func randomValueFor(property prop: PropertyMetadata) -> String? {
+        switch prop.controlType {
+        case "slider", "spin":
+            // Slider/spin ranges are inclusive integer ticks. Float
+            // sliders still store the int tick value — the divisor
+            // is applied at display time, so we don't need to know it.
+            let lo = Int((prop.min ?? 0).rounded())
+            let hi = Int((prop.max ?? 100).rounded())
+            if hi <= lo { return "\(lo)" }
+            return "\(Int.random(in: lo...hi))"
+        case "checkbox", "togglebutton":
+            return Bool.random() ? "1" : "0"
+        case "choice", "combobox":
+            let opts = prop.options ?? []
+            guard !opts.isEmpty else { return nil }
+            return opts.randomElement()
+        default:
+            return nil
+        }
+    }
+
+    /// Parse the `key=value,key=value` settings string that
+    /// `Effect::GetSettingsAsString` emits. Values are un-escaped
+    /// (`&amp;` → `&`, `&comma;` → `,`) so callers see the raw
+    /// stored strings.
+    static func parseSettingsString(_ s: String) -> [(key: String, value: String)] {
+        guard !s.isEmpty else { return [] }
+        var out: [(key: String, value: String)] = []
+        for pair in s.split(separator: ",", omittingEmptySubsequences: true) {
+            guard let eq = pair.firstIndex(of: "=") else { continue }
+            let k = String(pair[..<eq])
+            var v = String(pair[pair.index(after: eq)...])
+            v = v.replacingOccurrences(of: "&comma;", with: ",")
+            v = v.replacingOccurrences(of: "&amp;", with: "&")
+            out.append((key: k, value: v))
+        }
+        return out
+    }
+
+    /// Inverse of `parseSettingsString`: escapes commas + ampersands
+    /// in values so the resulting string round-trips cleanly through
+    /// `SettingsMap::Parse`.
+    static func encodeSettingsString(_ pairs: [(key: String, value: String)]) -> String {
+        var parts: [String] = []
+        for (k, rawV) in pairs {
+            var v = rawV
+            v = v.replacingOccurrences(of: "&", with: "&amp;")
+            v = v.replacingOccurrences(of: ",", with: "&comma;")
+            parts.append("\(k)=\(v)")
+        }
+        return parts.joined(separator: ",")
+    }
+
     // MARK: - Timing tracks & marks (B67 / B69 / B73)
+
+    /// B81: whether every timing track is currently hidden.
+    var allTimingTracksHidden: Bool {
+        document.allTimingTracksHidden()
+    }
+
+    /// B81: toggle the visibility of every timing track at once.
+    /// Desktop equivalent: right-click any timing row →
+    /// "Hide All Timing Tracks" / "Show All Timing Tracks".
+    func setAllTimingTracksHidden(_ hidden: Bool) {
+        document.setAllTimingTracksHidden(hidden)
+        reloadRows()
+    }
+
+    /// B82: ensure every visible timing track appears in every
+    /// non-master view. Returns the number of timing-tracks added.
+    @discardableResult
+    func addAllTimingTracksToAllViews() -> Int {
+        let n = Int(document.addAllTimingTracksToAllViews())
+        if n > 0 { reloadRows() }
+        return n
+    }
 
     /// B73: add a new variable timing track. On success the new track
     /// is made active and the rows are reloaded. Undo-able.
@@ -2081,6 +2507,20 @@ class SequencerViewModel {
         return document.exportTimingTrack(atRow: Int32(rowIndex), toPath: path)
     }
 
+    /// B49: export the model at `rowIndex` as a Falcon Player v2
+    /// compressed sub-sequence (`.eseq`). When `startMS`/`endMS` is
+    /// nil, the whole sequence is exported; when both are provided,
+    /// only that [startMS, endMS] window is written.
+    @discardableResult
+    func exportModelAsFSEQ(rowIndex: Int, path: String,
+                           startMS: Int? = nil, endMS: Int? = nil) -> Bool {
+        return document.exportModelAsFSEQ(
+            atRow: Int32(rowIndex),
+            toPath: path,
+            startMS: Int32(startMS ?? -1),
+            endMS: Int32(endMS ?? -1))
+    }
+
     /// B76: convert a fixed-interval timing track to variable
     /// (user-editable). Existing marks are kept in place; only the
     /// fixed-period flag is cleared. Not undo-able for first cut.
@@ -2185,6 +2625,56 @@ class SequencerViewModel {
                     newStartMS: newStartMS, newEndMS: newEndMS)
         undoManager.setActionName("Move Timing Mark")
         return true
+    }
+
+    /// B91: halve every mark on a timing row — each mark becomes
+    /// two by inserting a midpoint split. Walks the marks from
+    /// last to first so each split doesn't shift the indices of
+    /// the ones we haven't processed yet. Marks with < 2 ms span
+    /// are skipped since splitTimingMark requires atMS strictly
+    /// between start and end. Registers one undo step for the
+    /// whole operation.
+    @discardableResult
+    func halveTimingMarks(rowIndex: Int) -> Int {
+        guard rowIndex >= 0, rowIndex < rows.count else { return 0 }
+        let row = rows[rowIndex]
+        guard row.timing != nil else { return 0 }
+        let count = row.effects.count
+        guard count > 0 else { return 0 }
+        undoManager.beginUndoGrouping()
+        var split = 0
+        for i in stride(from: count - 1, through: 0, by: -1) {
+            let m = row.effects[i]
+            let mid = (m.startTimeMS + m.endTimeMS) / 2
+            guard mid > m.startTimeMS && mid < m.endTimeMS else { continue }
+            if splitTimingMark(rowIndex: rowIndex, markIndex: i, atMS: mid) {
+                split += 1
+            }
+        }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName("Halve Timing Marks")
+        return split
+    }
+
+    /// B90: toggle the `-shimmer` suffix on a timing mark's label.
+    /// Convenience op — adds the suffix if missing, strips it if
+    /// present. Passes through `renameTimingMark` so undo reuses
+    /// the same inverse. Returns the new label (nil on failure).
+    @discardableResult
+    func toggleShimmerSuffixOnMark(rowIndex: Int, markIndex: Int) -> String? {
+        guard rowIndex >= 0, rowIndex < rows.count else { return nil }
+        let row = rows[rowIndex]
+        guard row.timing != nil,
+              markIndex >= 0, markIndex < row.effects.count else { return nil }
+        let current = row.effects[markIndex].name
+        let newLabel: String
+        if current.hasSuffix("-shimmer") {
+            newLabel = String(current.dropLast("-shimmer".count))
+        } else {
+            newLabel = current + "-shimmer"
+        }
+        return renameTimingMark(rowIndex: rowIndex, markIndex: markIndex,
+                                 label: newLabel) ? newLabel : nil
     }
 
     /// B70: set a timing mark's label. Empty string clears it.
@@ -2526,6 +3016,200 @@ class SequencerViewModel {
         if newStart == sel.startTimeMS { return }
         moveEffect(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex,
                     newStartMS: newStart, newEndMS: newStart + dur)
+    }
+
+    /// B83: create a new variable timing track whose marks align
+    /// with every effect's `[start, end]` on `modelRowIndex`. Walks
+    /// every row that belongs to the same element (so sub-layer /
+    /// submodel / strand / node effects all contribute) and
+    /// de-duplicates identical ranges. Returns the number of marks
+    /// added; 0 if the row has no effects or the track couldn't be
+    /// created (name collision already uniquified by the bridge).
+    @discardableResult
+    func createTimingTrackFromEffects(modelRowIndex rowIndex: Int,
+                                       trackName name: String) -> Int {
+        guard rowIndex >= 0, rowIndex < rows.count else { return 0 }
+        let base = (document.rowModelName(at: Int32(rowIndex)) as String?) ?? "Model"
+        // Gather every row that forwards to the same element. The
+        // bridge's `rowModelName` returns the element name, so rows
+        // with a matching name belong to the same element tree.
+        var ranges: Set<String> = []
+        var pairs: [(start: Int, end: Int)] = []
+        for row in rows {
+            let rowName = (document.rowModelName(at: Int32(row.id)) as String?) ?? ""
+            if rowName != base { continue }
+            for e in row.effects {
+                let key = "\(e.startTimeMS)-\(e.endTimeMS)"
+                if ranges.insert(key).inserted {
+                    pairs.append((start: e.startTimeMS, end: e.endTimeMS))
+                }
+            }
+        }
+        guard !pairs.isEmpty else { return 0 }
+        pairs.sort { $0.start < $1.start }
+
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let proposed = trimmed.isEmpty ? "\(base) Timing" : trimmed
+        undoManager.beginUndoGrouping()
+        if !addTimingTrack(name: proposed) {
+            undoManager.endUndoGrouping()
+            return 0
+        }
+        // `addTimingTrack` uniquifies names + reloads rows. Find
+        // the track's row index by matching its element name.
+        let addedName = addedTimingTrackName(prefix: proposed)
+        let timingRowIdx = rows.firstIndex(where: {
+            $0.timing?.elementName == addedName
+        }) ?? -1
+        guard timingRowIdx >= 0 else {
+            undoManager.endUndoGrouping()
+            return 0
+        }
+        var added = 0
+        for p in pairs {
+            if addTimingMark(rowIndex: timingRowIdx,
+                              startMS: p.start, endMS: p.end,
+                              label: "") {
+                added += 1
+            }
+        }
+        undoManager.endUndoGrouping()
+        undoManager.setActionName("Create Timing From Effects")
+        return added
+    }
+
+    /// Find the exact name the bridge settled on after
+    /// `addTimingTrack` — `addTimingTrackNamed:` appends a suffix
+    /// on name collisions. We scan timing rows for any name
+    /// starting with `prefix` (taking the most-recently-added).
+    private func addedTimingTrackName(prefix: String) -> String {
+        let timingIdx = (document.timingRowIndices() as [NSNumber]).map { $0.intValue }
+        var last: String? = nil
+        for idx in timingIdx {
+            guard idx < rows.count else { continue }
+            if let name = rows[idx].timing?.elementName, name.hasPrefix(prefix) {
+                last = name
+            }
+        }
+        return last ?? prefix
+    }
+
+    /// B18: double-tap on empty area of a model row creates an
+    /// effect spanning the gap between the previous and next
+    /// neighbour (or an active timing cell if one brackets `atMS`).
+    /// Requires an armed palette effect; no-op otherwise.
+    func doubleTapCreateInCell(rowIndex: Int, atMS: Int) {
+        guard selectedPaletteEffect != nil,
+              rowIndex >= 0, rowIndex < rows.count else { return }
+        let row = rows[rowIndex]
+        guard row.timing == nil else { return }
+        // Prefer the active timing cell if one brackets the tap —
+        // matches `pasteEffect`'s cell-aware behaviour.
+        let startMS: Int
+        let endMS: Int
+        if let cell = activeTimingCell(forMS: atMS) {
+            startMS = cell.startMS
+            endMS = min(cell.endMS, sequenceDurationMS)
+        } else {
+            // Fill the gap between neighbours on the row.
+            var prevEnd = 0
+            var nextStart = sequenceDurationMS
+            for e in row.effects {
+                if e.endTimeMS <= atMS { prevEnd = max(prevEnd, e.endTimeMS) }
+                if e.startTimeMS > atMS, e.startTimeMS < nextStart {
+                    nextStart = e.startTimeMS
+                }
+            }
+            startMS = prevEnd
+            endMS = nextStart
+        }
+        guard endMS > startMS else { return }
+        addEffect(rowIndex: rowIndex, startMS: startMS, endMS: endMS)
+    }
+
+    /// B13: extend the selected effect's end to butt against the
+    /// next effect on the same row (or the sequence end when it's
+    /// the last one). Preserves start; grows duration. No-op when
+    /// the end is already flush with the neighbour.
+    func extendSelectedEffectToNext() {
+        guard let sel = selectedEffect,
+              sel.rowIndex >= 0, sel.rowIndex < rows.count,
+              sel.effectIndex >= 0,
+              sel.effectIndex < rows[sel.rowIndex].effects.count else { return }
+        let row = rows[sel.rowIndex]
+        let nextStart = sel.effectIndex + 1 < row.effects.count
+            ? row.effects[sel.effectIndex + 1].startTimeMS
+            : sequenceDurationMS
+        if nextStart <= sel.endTimeMS { return }
+        moveEffect(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex,
+                    newStartMS: sel.startTimeMS, newEndMS: nextStart)
+    }
+
+    /// B13: extend the selected effect's start back to butt against
+    /// the previous effect on the same row (or sequence start).
+    /// Preserves end; grows duration.
+    func extendSelectedEffectToPrevious() {
+        guard let sel = selectedEffect,
+              sel.rowIndex >= 0, sel.rowIndex < rows.count,
+              sel.effectIndex >= 0,
+              sel.effectIndex < rows[sel.rowIndex].effects.count else { return }
+        let row = rows[sel.rowIndex]
+        let prevEnd = sel.effectIndex > 0
+            ? row.effects[sel.effectIndex - 1].endTimeMS
+            : 0
+        if prevEnd >= sel.startTimeMS { return }
+        moveEffect(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex,
+                    newStartMS: prevEnd, newEndMS: sel.endTimeMS)
+    }
+
+    /// B6: nudge the selected effect's start to the previous or
+    /// next active timing-mark position (preserving duration).
+    /// `direction` < 0 → previous mark; > 0 → next mark. Snaps to
+    /// the effect's current neighbour range so the nudge still
+    /// respects butted effects. No-op when there are no active
+    /// timing marks or nothing is selected.
+    func nudgeSelectedEffectToTimingMark(direction: Int) {
+        guard let sel = selectedEffect, direction != 0 else { return }
+        let marks = activeTimingMarkTimes().sorted()
+        guard !marks.isEmpty else { return }
+        let current = sel.startTimeMS
+        let target: Int
+        if direction < 0 {
+            guard let prev = marks.last(where: { $0 < current }) else { return }
+            target = prev
+        } else {
+            guard let next = marks.first(where: { $0 > current }) else { return }
+            target = next
+        }
+        let dur = sel.endTimeMS - sel.startTimeMS
+        guard sel.rowIndex < rows.count,
+              sel.effectIndex < rows[sel.rowIndex].effects.count else { return }
+        let row = rows[sel.rowIndex]
+        let prevEnd = sel.effectIndex > 0
+            ? row.effects[sel.effectIndex - 1].endTimeMS : 0
+        let nextStart = sel.effectIndex + 1 < row.effects.count
+            ? row.effects[sel.effectIndex + 1].startTimeMS : sequenceDurationMS
+        let newStart = max(prevEnd, min(nextStart - dur, target))
+        if newStart == current { return }
+        moveEffect(rowIndex: sel.rowIndex, effectIndex: sel.effectIndex,
+                    newStartMS: newStart, newEndMS: newStart + dur)
+    }
+
+    /// Union of every start/end from every row on an active timing
+    /// track. Used by `nudgeSelectedEffectToTimingMark` and by the
+    /// grid view's guide-line overlay.
+    func activeTimingMarkTimes() -> [Int] {
+        let timingIdx = (document.timingRowIndices() as [NSNumber]).map { $0.intValue }
+        var out: Set<Int> = []
+        for idx in timingIdx {
+            guard document.timingRowIsActive(at: Int32(idx)) else { continue }
+            guard let row = rows.first(where: { $0.id == idx }) else { continue }
+            for e in row.effects {
+                out.insert(e.startTimeMS)
+                out.insert(e.endTimeMS)
+            }
+        }
+        return Array(out)
     }
 
     /// B53: copy every effect on a given row into the clipboard
@@ -3210,7 +3894,7 @@ class SequencerViewModel {
     /// One effect snapshot, relative to a paste anchor so a multi-
     /// effect copy preserves inter-effect timing + cross-row layout
     /// when pasted at a new cell.
-    struct ClipboardEntry {
+    struct ClipboardEntry: Codable {
         let rowOffset: Int        // target = pasteRow + rowOffset
         let startOffsetMS: Int    // target = pasteStartMS + startOffsetMS
         let endOffsetMS: Int
@@ -3219,8 +3903,61 @@ class SequencerViewModel {
         let palette: String
     }
 
-    private var clipboardEntries: [ClipboardEntry] = []
-    var hasClipboard: Bool { !clipboardEntries.isEmpty }
+    /// B99 — custom UTI for effect clipboard data on `UIPasteboard`.
+    /// Lowercase reverse-DNS matches Apple's convention for dynamic
+    /// UTIs (no Info.plist declaration needed since nothing outside
+    /// the app consumes it yet).
+    static let effectClipboardUTI = "com.xlights.effectclip"
+
+    private var clipboardEntries: [ClipboardEntry] = [] {
+        didSet { publishClipboardToPasteboard() }
+    }
+    /// True when the in-memory buffer has entries or the system
+    /// pasteboard carries xLights effect data written by another
+    /// session / another device via Universal Clipboard.
+    var hasClipboard: Bool {
+        if !clipboardEntries.isEmpty { return true }
+        return UIPasteboard.general.data(forPasteboardType: Self.effectClipboardUTI) != nil
+    }
+
+    /// Copy the current `clipboardEntries` to `UIPasteboard` so
+    /// other processes / Universal Clipboard can pick them up.
+    /// Clears the pasteboard entry when the local buffer empties.
+    private func publishClipboardToPasteboard() {
+        let pb = UIPasteboard.general
+        if clipboardEntries.isEmpty {
+            pb.items = pb.items.filter { !$0.keys.contains(Self.effectClipboardUTI) }
+            return
+        }
+        do {
+            let data = try JSONEncoder().encode(clipboardEntries)
+            pb.setData(data, forPasteboardType: Self.effectClipboardUTI)
+        } catch {
+            // JSON encoding can't actually fail for these types;
+            // swallow to keep the call-site noise-free.
+        }
+    }
+
+    /// Inverse of `publishClipboardToPasteboard`. When the in-memory
+    /// buffer is empty but the system pasteboard carries xLights
+    /// data, rehydrate the local `clipboardEntries`. Called on
+    /// sequence open + just-in-time from the paste paths so a fresh
+    /// launch or drop-in-from-another-device surfaces the clipboard.
+    @discardableResult
+    func syncClipboardFromPasteboard() -> Bool {
+        if !clipboardEntries.isEmpty { return true }
+        let pb = UIPasteboard.general
+        guard let data = pb.data(forPasteboardType: Self.effectClipboardUTI),
+              let decoded = try? JSONDecoder().decode([ClipboardEntry].self, from: data),
+              !decoded.isEmpty else {
+            return false
+        }
+        // Assign directly to the backing storage so `didSet`'s re-
+        // publish doesn't churn the pasteboard for a no-op round
+        // trip.
+        self.clipboardEntries = decoded
+        return true
+    }
     /// Shortcut for legacy callers: the duration of the first
     /// clipboard entry (0 if empty). Used by the inspector's
     /// "Duplicate" path which still expects a single-effect model.
@@ -3371,7 +4108,68 @@ class SequencerViewModel {
     /// target position. Each entry goes through `addEffectWithSettings`
     /// so the bridge validates overlap per-effect; silent
     /// partial-paste on conflict.
+    /// B100: true iff a paste at `(rowIndex, startMS)` would land
+    /// on an existing effect. Looks at the clipboard's primary
+    /// entry range (single-entry) or any of the multi-entry
+    /// target ranges. Used by the UI to decide whether to surface
+    /// an "overwrite?" confirmation before calling `pasteEffect`.
+    func pasteWouldOverlap(rowIndex: Int, startMS: Int) -> Bool {
+        guard !clipboardEntries.isEmpty,
+              rowIndex >= 0, rowIndex < rows.count else { return false }
+        for entry in clipboardEntries {
+            let targetRow = rowIndex + entry.rowOffset
+            if targetRow < 0 || targetRow >= rows.count { continue }
+            if rows[targetRow].timing != nil { continue }
+            let tStart = startMS + entry.startOffsetMS
+            let tEnd = min(startMS + entry.endOffsetMS, sequenceDurationMS)
+            guard tEnd > tStart else { continue }
+            for e in rows[targetRow].effects {
+                if e.startTimeMS < tEnd && e.endTimeMS > tStart {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    /// B100: delete any effects the incoming paste would overlap,
+    /// then call `pasteEffect`. Single undo group covers both the
+    /// deletes and the paste so ⌘Z brings everything back. Caller
+    /// should have already confirmed the overwrite with the user.
+    func pasteEffectReplacingOverlaps(rowIndex: Int, startMS: Int) {
+        guard !clipboardEntries.isEmpty,
+              rowIndex >= 0, rowIndex < rows.count else { return }
+        undoManager.beginUndoGrouping()
+        for entry in clipboardEntries {
+            let targetRow = rowIndex + entry.rowOffset
+            if targetRow < 0 || targetRow >= rows.count { continue }
+            if rows[targetRow].timing != nil { continue }
+            let tStart = startMS + entry.startOffsetMS
+            let tEnd = min(startMS + entry.endOffsetMS, sequenceDurationMS)
+            guard tEnd > tStart else { continue }
+            // Collect overlaps first (indices shift after each delete).
+            // Walk high-to-low so each delete leaves lower indices
+            // valid for the next iteration.
+            let overlaps = rows[targetRow].effects.enumerated()
+                .filter { _, e in e.startTimeMS < tEnd && e.endTimeMS > tStart }
+                .map { idx, _ in idx }
+                .sorted(by: >)
+            for idx in overlaps {
+                deleteEffect(rowIndex: targetRow, effectIndex: idx)
+            }
+        }
+        pasteEffect(rowIndex: rowIndex, startMS: startMS)
+        undoManager.endUndoGrouping()
+        undoManager.setActionName(clipboardEntries.count > 1
+                                   ? "Replace & Paste \(clipboardEntries.count) Effects"
+                                   : "Replace & Paste Effect")
+    }
+
     func pasteEffect(rowIndex: Int, startMS: Int) {
+        // B99: pick up clipboard data written by a previous session
+        // (or another device via Universal Clipboard) just before a
+        // paste, so the user doesn't have to copy again post-launch.
+        if clipboardEntries.isEmpty { syncClipboardFromPasteboard() }
         guard !clipboardEntries.isEmpty else { return }
         guard rowIndex >= 0 && rowIndex < rows.count else { return }
         // B14 paste-by-cell: with exactly one clipboard entry AND an

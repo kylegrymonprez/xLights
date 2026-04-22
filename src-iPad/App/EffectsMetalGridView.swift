@@ -17,6 +17,10 @@ struct EffectsMetalGridView: UIViewRepresentable {
     let metrics: GridMetrics
     let pixelsPerMS: CGFloat
     let selection: SequencerViewModel.EffectSelection?
+    /// B28 — prior-selection snapshot. When set, the grid paints a
+    /// subtle dimmed outline on that effect so users can compare
+    /// against what they were just editing.
+    var previousSelection: SequencerViewModel.EffectSelection? = nil
     /// Full selection set (B1 marquee multi-select). Every member is
     /// drawn with the selection bracket colour. When `count == 1` the
     /// single member coincides with `selection` and shows edge + fade
@@ -82,6 +86,7 @@ struct EffectsMetalGridView: UIViewRepresentable {
         ctx.metrics = metrics
         ctx.pixelsPerMS = pixelsPerMS
         ctx.selection = selection
+        ctx.previousSelection = previousSelection
         ctx.selectedEffects = selectedEffects
         ctx.activeDrag = activeDrag
         ctx.timingMarkTimesMS = timingMarkTimesMS
@@ -117,6 +122,11 @@ struct EffectsMetalGridView: UIViewRepresentable {
         var metrics = GridMetrics.standard
         var pixelsPerMS: CGFloat = 0.1
         var selection: SequencerViewModel.EffectSelection?
+        var previousSelection: SequencerViewModel.EffectSelection?   // B28
+        /// B96: active momentum-scroll display link, if one is
+        /// coasting. Invalidated when a new pan begins or the
+        /// view tears down.
+        var momentumLink: CADisplayLink?
         var selectedEffects: Set<SequencerViewModel.EffectSelection> = []
         var activeDrag: SequencerViewModel.ActiveDrag?
         var timingMarkTimesMS: [Int] = []
@@ -581,12 +591,21 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate, UIPencilInteracti
                 let iconLeft = iconX - iconSize / 2
                 let iconRight = iconX + iconSize / 2
                 var rightStart = iconRight
-                if width > 70, !e.name.isEmpty {
+                if !e.name.isEmpty {
                     let ns = iconRight + 4
                     let nMax = e.x2 - 3
-                    if nMax - ns > 14 {
-                        let labelW = bridge.size(ofText: e.name, fontSize: nameFontSize).width
-                        if labelW <= nMax - ns { rightStart = ns + labelW + 2 }
+                    let avail = nMax - ns
+                    if avail > 8 {
+                        // B29: mirror the font-stepping used when
+                        // drawing the label below so the horizontal
+                        // bracket line doesn't cut through the text.
+                        for fs in [nameFontSize, 9, 8, 7] as [CGFloat] {
+                            let labelW = bridge.size(ofText: e.name, fontSize: fs).width
+                            if labelW <= avail {
+                                rightStart = ns + labelW + 2
+                                break
+                            }
+                        }
                     }
                 }
                 bridge.appendLineX1(e.x1, y1: mid + 0.5, x2: iconLeft, y2: mid + 0.5,
@@ -651,17 +670,42 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate, UIPencilInteracti
                                  x2: iconRight + 0.5, y2: iconBottom + 0.5,
                                  r: oR, g: oG, b: oB, a: 0.9)
             bridge.flushLineBatch()
-            if width > 70, !e.name.isEmpty {
+            if !e.name.isEmpty {
                 let nameStartX = iconRight + 4
                 let nameMaxX = e.x2 - 3
-                if nameMaxX - nameStartX > 14 {
-                    let labelSize = bridge.size(ofText: e.name, fontSize: nameFontSize)
-                    if labelSize.width <= (nameMaxX - nameStartX) {
+                let available = nameMaxX - nameStartX
+                // B29: step font + fade instead of hard cutoff at 70 pt.
+                // Desktop progressively shrinks the label; iPad mirrors
+                // that so narrow effects still hint at their identity.
+                // The chosen size is the largest that fits; opacity
+                // dims at the smallest widths so the letters don't
+                // compete with the icon for attention.
+                if available > 8 {
+                    let sizes: [CGFloat] = [nameFontSize, 9, 8, 7]
+                    var chosenSize: CGFloat? = nil
+                    var chosenWidth: CGFloat = 0
+                    var chosenHeight: CGFloat = 0
+                    for fs in sizes {
+                        let sz = bridge.size(ofText: e.name, fontSize: fs)
+                        if sz.width <= available {
+                            chosenSize = fs
+                            chosenWidth = sz.width
+                            chosenHeight = sz.height
+                            break
+                        }
+                    }
+                    if let fs = chosenSize {
+                        // Linear fade: full opacity at fontSize >= 9,
+                        // fading to 0.55 at fontSize == 7.
+                        let alpha: CGFloat = fs >= 9 ? 0.95
+                                                      : 0.95 - (9 - fs) * 0.2
                         bridge.drawText(e.name,
                                          atX: nameStartX,
-                                         y: e.top + (e.bottom - e.top - labelSize.height) / 2,
-                                         fontSize: nameFontSize,
-                                         r: e.stroke.0, g: e.stroke.1, b: e.stroke.2, a: 0.95)
+                                         y: e.top + (e.bottom - e.top - chosenHeight) / 2,
+                                         fontSize: fs,
+                                         r: e.stroke.0, g: e.stroke.1, b: e.stroke.2,
+                                         a: max(0.5, alpha))
+                        _ = chosenWidth   // reserved for future crop logic
                     }
                 }
             }
@@ -716,6 +760,37 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate, UIPencilInteracti
             if e.x2 - e.x1 > 10 {
                 bridge.drawText("🔒", atX: e.x2 - 12, y: e.top,
                                  fontSize: 9, r: 1, g: 1, b: 1, a: 1)
+            }
+        }
+
+        // B28: dotted outline on the previously-selected effect
+        // (desktop's "reference effect" indicator). Skip if it
+        // coincides with the current selection — no point dimming
+        // a bracket that's already solid.
+        if let prev = c.previousSelection,
+           !(prev.rowIndex == c.selection?.rowIndex
+             && prev.effectIndex == c.selection?.effectIndex) {
+            for e in vis where prev.rowIndex == e.rowId
+                               && prev.effectIndex == e.effectIndex {
+                // Single inset outline in a muted warm tone so it
+                // reads distinct from the blue selection bracket.
+                let inset: CGFloat = 1
+                bridge.beginLineBatch()
+                let (r, g, b): (CGFloat, CGFloat, CGFloat) = (0.95, 0.75, 0.25)
+                let a: CGFloat = 0.65
+                bridge.appendLineX1(e.x1 + inset, y1: e.top + inset,
+                                     x2: e.x2 - inset, y2: e.top + inset,
+                                     r: r, g: g, b: b, a: a)
+                bridge.appendLineX1(e.x1 + inset, y1: e.bottom - inset,
+                                     x2: e.x2 - inset, y2: e.bottom - inset,
+                                     r: r, g: g, b: b, a: a)
+                bridge.appendLineX1(e.x1 + inset, y1: e.top + inset,
+                                     x2: e.x1 + inset, y2: e.bottom - inset,
+                                     r: r, g: g, b: b, a: a)
+                bridge.appendLineX1(e.x2 - inset, y1: e.top + inset,
+                                     x2: e.x2 - inset, y2: e.bottom - inset,
+                                     r: r, g: g, b: b, a: a)
+                bridge.flushLineBatch()
             }
         }
 
@@ -931,6 +1006,16 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate, UIPencilInteracti
         let tap = UITapGestureRecognizer(target: self, action: #selector(onTap(_:)))
         tap.delegate = del
         addGestureRecognizer(tap)
+        // B18: double-tap an empty cell (palette armed) creates an
+        // effect that fills the span between adjacent effects.
+        // Chained via `require(toFail:)` so single-tap selection
+        // still works immediately when double-tap isn't imminent.
+        let doubleTap = UITapGestureRecognizer(target: self,
+                                                 action: #selector(onDoubleTapCell(_:)))
+        doubleTap.numberOfTapsRequired = 2
+        doubleTap.delegate = del
+        addGestureRecognizer(doubleTap)
+        tap.require(toFail: doubleTap)
         // B30: pointer hover from Magic Keyboard / trackpad. Never
         // fires for finger touches, so this is a no-cost addition
         // for touch-only users.
@@ -1068,6 +1153,28 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate, UIPencilInteracti
         }
     }
 
+    @objc func onDoubleTapCell(_ g: UITapGestureRecognizer) {
+        guard let c = coordinator else { return }
+        let p = g.location(in: self)
+        // Skip if the tap landed on an existing effect — single-tap
+        // selection already handles that and we don't want to mutate.
+        if hitTestEffect(at: p) != nil { return }
+        var y: CGFloat = -c.scrollOffsetY
+        var rowId: Int? = nil
+        for row in c.rows {
+            let h = (row.id == c.selection?.rowIndex)
+                ? c.metrics.selectedRowHeight : c.metrics.rowHeight
+            if p.y >= y && p.y < y + h {
+                if row.timing == nil { rowId = row.id }
+                break
+            }
+            y += h
+        }
+        guard let rid = rowId, c.pixelsPerMS > 0 else { return }
+        let ms = max(0, Int((p.x + c.scrollOffsetX) / c.pixelsPerMS))
+        c.actions.onDoubleTapEmpty(rid, ms)
+    }
+
     @objc func onHover(_ g: UIHoverGestureRecognizer) {
         guard let c = coordinator else { return }
         let newHover: EffectsMetalGridView.Coordinator.HoverHit?
@@ -1135,6 +1242,8 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate, UIPencilInteracti
         guard let c = coordinator else { return }
         switch g.state {
         case .began:
+            // B96: any new pan cancels an in-flight momentum coast.
+            stopMomentumScroll()
             let p = g.location(in: self)
             if let hit = hitTestEffect(at: p), canvasHasDragCandidate(at: p) {
                 beginEffectDrag(hit: hit, c: c)
@@ -1161,10 +1270,66 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate, UIPencilInteracti
             stopAutoScroll(c: c)
             if let _ = c.drag {
                 endEffectDrag(c: c)
+            } else if g.state == .ended {
+                // B96: start momentum scroll from the pan's release
+                // velocity. Touch pans carry real momentum; trackpad
+                // two-finger scrolls report tiny velocities (the
+                // gesture decomposition is done by the trackpad) so
+                // we gate on a minimum magnitude to avoid over-
+                // shooting on scroll-wheel-style inputs.
+                let v = g.velocity(in: self)
+                if abs(v.x) > 80 || abs(v.y) > 80 {
+                    startMomentumScroll(velocity: v, c: c)
+                }
             }
         default:
             break
         }
+    }
+
+    // MARK: - B96 momentum scroll
+
+    private func startMomentumScroll(velocity: CGPoint,
+                                      c: EffectsMetalGridView.Coordinator) {
+        // Stop any prior coast first (user started a new pan).
+        stopMomentumScroll()
+        var vX = velocity.x
+        var vY = velocity.y
+        // Exponential decay @ ~60 Hz; factor picked so 300 px/s
+        // velocity coasts visible for ~0.5 s.
+        let decay: CGFloat = 0.93
+        let stopThreshold: CGFloat = 20    // px/s
+        let displayLink = CADisplayLink(target: MomentumTarget { [weak self] in
+            guard let self = self, let c = self.coordinator else {
+                self?.stopMomentumScroll()
+                return
+            }
+            let dt: CGFloat = 1.0 / 60.0
+            let newX = max(0, c.scrollOffsetX - vX * dt)
+            let newY = max(0, c.scrollOffsetY - vY * dt)
+            c.onUpdateScrollX(newX)
+            c.onUpdateScrollY(newY)
+            vX *= decay
+            vY *= decay
+            if abs(vX) < stopThreshold && abs(vY) < stopThreshold {
+                self.stopMomentumScroll()
+            }
+        }, selector: #selector(MomentumTarget.tick(_:)))
+        displayLink.add(to: .main, forMode: .common)
+        coordinator?.momentumLink = displayLink
+    }
+
+    private func stopMomentumScroll() {
+        coordinator?.momentumLink?.invalidate()
+        coordinator?.momentumLink = nil
+    }
+
+    /// Shim object so we can pass a captured closure as a
+    /// `CADisplayLink` target (which needs an `@objc` selector).
+    private final class MomentumTarget: NSObject {
+        let action: () -> Void
+        init(_ action: @escaping () -> Void) { self.action = action }
+        @objc func tick(_ link: CADisplayLink) { action() }
     }
 
     // MARK: - B1 marquee select (two-finger drag)
