@@ -15,21 +15,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: false   # handled manually below to skip the macOS submodule
-
-      - name: Init submodules (skip macOS)
-        shell: bash
-        run: |
-          git submodule update --init \
-            dependencies/liquidfun \
-            dependencies/midifile \
-            dependencies/libltc \
-            dependencies/libxlsxwriter \
-            dependencies/lua \
-            dependencies/pybind11 \
-            dependencies/nanosvg \
-            dependencies/pugixml \
-            dependencies/spdlog
+          submodules: true
 
       # ── MSVC environment ──────────────────────────────────────────────────
       - name: Setup msbuild
