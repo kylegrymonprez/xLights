@@ -48,6 +48,7 @@ static std::string MediaTypeName(MediaType t) {
         case MediaType::TextFile: return "Text Files";
         case MediaType::BinaryFile: return "Other Files";
         case MediaType::Video: return "Videos";
+        case MediaType::Audio: return "Audio";
     }
     return "Unknown";
 }
@@ -90,7 +91,19 @@ static std::string CopyToDir(const std::string& srcPath, const std::string& targ
 }
 
 static wxString WildcardForMediaType(std::optional<MediaType> type) {
-    if (!type.has_value()) return "All files (*.*)|*.*";
+    if (!type.has_value()) {
+        return "All Media Files|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tiff;*.tga;*.pcx;*.ico;"
+               "*.avi;*.mp4;*.mkv;*.mov;*.asf;*.flv;*.mpg;*.mpeg;*.m4v;*.wmv;"
+               "*.mp3;*.ogg;*.m4a;*.wav;*.flac;*.aac;*.wma;"
+               "*.svg;*.fs;*.txt|"
+               "Image Files|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tiff;*.tga;*.pcx;*.ico|"
+               "Video Files|*.avi;*.mp4;*.mkv;*.mov;*.asf;*.flv;*.mpg;*.mpeg;*.m4v;*.wmv|"
+               "Audio Files|*.mp3;*.ogg;*.m4a;*.wav;*.flac;*.aac;*.wma|"
+               "SVG Files|*.svg|"
+               "Shader Files|*.fs|"
+               "Text Files|*.txt|"
+               "All files (*.*)|*.*";
+    }
     switch (*type) {
         case MediaType::Image: return wxImage::GetImageExtWildcard();
         case MediaType::Video: return "Video Files|*.avi;*.mp4;*.mkv;*.mov;*.asf;*.flv;*.mpg;*.mpeg;*.m4v;*.wmv;*.gif";
@@ -98,6 +111,7 @@ static wxString WildcardForMediaType(std::optional<MediaType> type) {
         case MediaType::SVG: return "SVG Files (*.svg)|*.svg";
         case MediaType::TextFile: return "Text Files (*.txt)|*.txt";
         case MediaType::BinaryFile: return "Glediator Files|*.gled;*.out;*.csv";
+        case MediaType::Audio: return "Audio Files|*.mp3;*.ogg;*.m4a;*.wav;*.flac;*.aac;*.wma";
     }
     return "All files (*.*)|*.*";
 }
@@ -172,15 +186,38 @@ static std::string MaybeConvertIncompatibleVideo(wxWindow* parent,
 }
 
 static wxString LastDirConfigKey(std::optional<MediaType> type) {
-    if (!type.has_value()) return "MediaManagerLastImageDir";
+    if (!type.has_value()) return "MediaManagerLastAllMediaDir";
     switch (*type) {
         case MediaType::Video:      return "MediaManagerLastVideoDir";
         case MediaType::Shader:     return "MediaManagerLastShaderDir";
         case MediaType::SVG:        return "MediaManagerLastSVGDir";
         case MediaType::TextFile:   return "MediaManagerLastTextFileDir";
         case MediaType::BinaryFile: return "MediaManagerLastBinaryFileDir";
+        case MediaType::Audio:      return "MediaManagerLastAudioDir";
         default:                    return "MediaManagerLastImageDir";
     }
+}
+
+// Infer MediaType from a file path's extension.
+// .gif is treated as Image because SequenceMedia handles animated GIFs
+// as multi-frame image cache entries.
+static MediaType MediaTypeFromPath(const std::string& path)
+{
+    wxString ext = wxFileName(wxString(path)).GetExt().Lower();
+    if (ext == "fs")
+        return MediaType::Shader;
+    if (ext == "svg")
+        return MediaType::SVG;
+    if (ext == "txt")
+        return MediaType::TextFile;
+    if (ext == "avi" || ext == "mp4" || ext == "mkv" || ext == "mov" ||
+        ext == "asf" || ext == "flv" || ext == "mpg" || ext == "mpeg" ||
+        ext == "m4v" || ext == "wmv")
+        return MediaType::Video;
+    if (ext == "mp3" || ext == "ogg" || ext == "m4a" || ext == "wav" ||
+        ext == "flac" || ext == "aac" || ext == "wma")
+        return MediaType::Audio;
+    return MediaType::Image;
 }
 
 // ---------------------------------------------------------------------------
@@ -312,6 +349,14 @@ void MediaViewModel::Rebuild(SequenceMedia* media, const std::string& showDirect
                     node->statusStr += " (broken)";
             } else if (type == MediaType::Video) {
                 auto entry = media->GetVideo(path);
+                if (!entry) continue;
+                resolvedPath = entry->GetFilePath();
+                node->canLoad = true;
+                node->sizeStr = "-";
+                node->framesStr = "-";
+                node->statusStr = "External";
+            } else if (type == MediaType::Audio) {
+                auto entry = media->GetAudio(path);
                 if (!entry) continue;
                 resolvedPath = entry->GetFilePath();
                 node->canLoad = true;
@@ -645,7 +690,8 @@ void ManageMediaPanel::Populate(const std::string& selectPath)
 
     // Hide embed/extract buttons for non-embeddable types
     bool typeIsEmbeddable = !_filterType.has_value() ||
-        (*_filterType != MediaType::Video && *_filterType != MediaType::BinaryFile);
+        (*_filterType != MediaType::Video && *_filterType != MediaType::BinaryFile &&
+         *_filterType != MediaType::Audio);
     _embedButton->Show(typeIsEmbeddable);
     _extractButton->Show(typeIsEmbeddable);
     _embedAllButton->Show(typeIsEmbeddable);
@@ -688,8 +734,8 @@ void ManageMediaPanel::Populate(const std::string& selectPath)
             if (!entry) continue;
             if (!entry->IsEmbedded() && entry->IsEmbeddable()) hasEmbeddable = true;
             if (entry->IsEmbedded()) hasExtractable = true;
-        } else if (type == MediaType::Video) {
-            // Videos are not embeddable
+        } else if (type == MediaType::Video || type == MediaType::Audio) {
+            // Videos and audio are not embeddable
         } else {
             // For other types, check via the appropriate accessor
             MediaCacheEntry* baseEntry = nullptr;
@@ -819,9 +865,7 @@ void ManageMediaPanel::UpdateButtons()
             if (!entry) continue;
             isEmbedded = entry->IsEmbedded();
             isEmbeddable = entry->IsEmbeddable();
-        } else if (mtype == MediaType::Video) {
-            auto entry = _sequenceMedia->GetVideo(path);
-            if (!entry) continue;
+        } else if (mtype == MediaType::Video || mtype == MediaType::Audio) {
             isEmbedded = false;
             isEmbeddable = false;
         } else {
@@ -1735,23 +1779,35 @@ void ManageMediaPanel::OnAddButtonClick(wxCommandEvent& event)
     wxString defaultDir;
     {
         auto* config = GetXLightsConfig();
-        config->Read(LastDirConfigKey(MediaType::Image), &defaultDir);
+        config->Read(LastDirConfigKey(std::nullopt), &defaultDir);
         if (defaultDir.empty())
             defaultDir = _showDirectory.empty() ? wxString() : wxString(_showDirectory);
     }
-    wxFileDialog dlg(this, "Add Image to Sequence", defaultDir, wxEmptyString,
-                     "Image files (*.png;*.jpg;*.jpeg;*.gif;*.bmp)|*.png;*.jpg;*.jpeg;*.gif;*.bmp|All files (*.*)|*.*",
+    wxFileDialog dlg(this, "Add Media to Sequence", defaultDir, wxEmptyString,
+                     WildcardForMediaType(std::nullopt),
                      wxFD_OPEN | wxFD_FILE_MUST_EXIST | wxFD_MULTIPLE);
     if (dlg.ShowModal() != wxID_OK) return;
 
     wxArrayString paths;
     dlg.GetPaths(paths);
     if (!paths.empty())
-        GetXLightsConfig()->Write(LastDirConfigKey(MediaType::Image), wxFileName(paths[0]).GetPath());
+        GetXLightsConfig()->Write(LastDirConfigKey(std::nullopt), wxFileName(paths[0]).GetPath());
     std::string lastPath;
     const std::string sep(1, wxFileName::GetPathSeparator());
     for (const auto& p : paths) {
         std::string path = ToStdString(p);
+        MediaType type = MediaTypeFromPath(path);
+        std::string subDirName = MediaTypeName(type);
+
+        // For videos, check AVFoundation compatibility up front.
+        if (type == MediaType::Video) {
+            std::string maybe = MaybeConvertIncompatibleVideo(this, path);
+            if (maybe.empty()) continue;
+            path = maybe;
+            // Re-detect after transcoding in case the output extension changed
+            type = MediaTypeFromPath(path);
+            subDirName = MediaTypeName(type);
+        }
 
         // If the file is outside the show/media folders, require the user to
         // choose where to place it — no "use original location" option.
@@ -1771,7 +1827,10 @@ void ManageMediaPanel::OnAddButtonClick(wxCommandEvent& event)
                 }
             }
 
-            std::string importedMediaDir = ImportedMediaPath(_xlFrame, _showDirectory, "Images");
+            // Shaders are always loaded from disk; no ImportedMedia option for them
+            std::string importedMediaDir;
+            if (type != MediaType::Shader)
+                importedMediaDir = ImportedMediaPath(_xlFrame, _showDirectory, subDirName);
 
             wxArrayString choices;
             choices.Add("Embed in sequence");
@@ -1792,41 +1851,56 @@ void ManageMediaPanel::OnAddButtonClick(wxCommandEvent& event)
             int copyOffset = 1 + (hasImported ? 1 : 0);
 
             if (sel == 0) {
-                // Embed in sequence
-                _sequenceMedia->GetImage(path);
-                std::string embeddedName = "Images/" + ToStdString(fn.GetFullName());
-                if (_sequenceMedia->HasImage(embeddedName)) {
-                    int answer = wxMessageBox(
-                        wxString::Format("'%s' is already embedded in the sequence.\n\nReplace it with the selected file?",
-                                         fn.GetFullName()),
-                        "Image Already Embedded",
-                        wxYES_NO | wxCANCEL | wxICON_QUESTION, this);
-                    if (answer == wxCANCEL) {
-                        _sequenceMedia->RemoveImage(path);
-                        continue;
+                // Embed in sequence — images use the typed-key embed scheme;
+                // all other types embed in place via the cross-type API.
+                if (type == MediaType::Image) {
+                    _sequenceMedia->GetImage(path);
+                    std::string embeddedName = "Images/" + ToStdString(fn.GetFullName());
+                    if (_sequenceMedia->HasImage(embeddedName)) {
+                        int answer = wxMessageBox(
+                            wxString::Format("'%s' is already embedded in the sequence.\n\nReplace it with the selected file?",
+                                             fn.GetFullName()),
+                            "Already Embedded",
+                            wxYES_NO | wxCANCEL | wxICON_QUESTION, this);
+                        if (answer == wxCANCEL) {
+                            _sequenceMedia->RemoveImage(path);
+                            continue;
+                        }
+                        if (answer == wxYES) {
+                            _sequenceMedia->RemoveImage(embeddedName);
+                            _sequenceMedia->RenameImage(path, embeddedName);
+                            _sequenceMedia->EmbedImage(embeddedName);
+                            lastPath = embeddedName;
+                            continue;
+                        }
                     }
-                    if (answer == wxYES) {
-                        _sequenceMedia->RemoveImage(embeddedName);
-                        _sequenceMedia->RenameImage(path, embeddedName);
-                        _sequenceMedia->EmbedImage(embeddedName);
-                        lastPath = embeddedName;
-                        continue;
+                    int suffix = 1;
+                    std::string candidate = embeddedName;
+                    while (_sequenceMedia->HasImage(candidate)) {
+                        candidate = "Images/" + ToStdString(fn.GetName()) +
+                                    "_" + std::to_string(suffix++) + "." +
+                                    ToStdString(fn.GetExt());
                     }
+                    embeddedName = candidate;
+                    _sequenceMedia->RenameImage(path, embeddedName);
+                    _sequenceMedia->EmbedImage(embeddedName);
+                    lastPath = embeddedName;
+                } else {
+                    switch (type) {
+                        case MediaType::Video:      _sequenceMedia->GetVideo(path); break;
+                        case MediaType::SVG:        _sequenceMedia->GetSVG(path); break;
+                        case MediaType::Shader:     _sequenceMedia->GetShader(path); break;
+                        case MediaType::TextFile:   _sequenceMedia->GetTextFile(path); break;
+                        case MediaType::BinaryFile: _sequenceMedia->GetBinaryFile(path); break;
+                        case MediaType::Audio:      _sequenceMedia->GetAudio(path); break;
+                        default: break;
+                    }
+                    _sequenceMedia->EmbedMedia(path);
+                    lastPath = path;
                 }
-                int suffix = 1;
-                std::string candidate = embeddedName;
-                while (_sequenceMedia->HasImage(candidate)) {
-                    candidate = "Images/" + ToStdString(fn.GetName()) +
-                                "_" + std::to_string(suffix++) + "." +
-                                ToStdString(fn.GetExt());
-                }
-                embeddedName = candidate;
-                _sequenceMedia->RenameImage(path, embeddedName);
-                _sequenceMedia->EmbedImage(embeddedName);
-                lastPath = embeddedName;
                 continue;
             } else if (hasImported && sel == 1) {
-                // Copy to ImportedMedia/<seqStem>/Images
+                // Copy to ImportedMedia/<seqStem>/<type>
                 std::string newPath = CopyToDir(path, importedMediaDir);
                 if (newPath.empty()) {
                     wxMessageBox("Failed to copy file to ImportedMedia folder.", "Error",
@@ -1841,7 +1915,7 @@ void ManageMediaPanel::OnAddButtonClick(wxCommandEvent& event)
                 if (_xlFrame && targetDir == _showDirectory) {
                     // Check if destination exists with different content before MoveToShowFolder
                     // auto-suffixes it.
-                    wxString destDir = wxString(targetDir) + wxString(sep) + "Images";
+                    wxString destDir = wxString(targetDir) + wxString(sep) + wxString(subDirName);
                     wxString destFile = destDir + wxString(sep) + fn.GetFullName();
                     if (wxFileExists(destFile) && !_xlFrame->FilesMatch(path, ToStdString(destFile))) {
                         int answer = wxMessageBox(
@@ -1855,13 +1929,13 @@ void ManageMediaPanel::OnAddButtonClick(wxCommandEvent& event)
                                 newPath = ToStdString(destFile);
                         } else {
                             // Add as New — let MoveToShowFolder generate a suffix name
-                            newPath = _xlFrame->MoveToShowFolder(path, sep + "Images");
+                            newPath = _xlFrame->MoveToShowFolder(path, sep + subDirName);
                         }
                     } else {
-                        newPath = _xlFrame->MoveToShowFolder(path, sep + "Images");
+                        newPath = _xlFrame->MoveToShowFolder(path, sep + subDirName);
                     }
                 } else {
-                    wxString destDir = wxString(targetDir) + wxString(sep) + "Images";
+                    wxString destDir = wxString(targetDir) + wxString(sep) + wxString(subDirName);
                     if (!wxDirExists(destDir)) wxMkdir(destDir);
                     wxString dest = destDir + wxString(sep) + fn.GetFullName();
                     if (wxFileExists(dest) &&
@@ -1902,17 +1976,25 @@ void ManageMediaPanel::OnAddButtonClick(wxCommandEvent& event)
             }
         }
 
-        // For external images now inside a show/media folder, store the relative path
+        // For files now inside a show/media folder, store the relative path
         if (_xlFrame) {
             std::string rel = _xlFrame->MakeRelativePath(path);
             if (!rel.empty()) path = rel;
         }
 
-        // If the path is already in the cache (e.g. same file added again after
-        // being modified on disk), remove it first so GetImage reloads from disk.
-        if (_sequenceMedia->HasImage(path))
-            _sequenceMedia->RemoveImage(path);
-        _sequenceMedia->GetImage(path);
+        // If already in cache (e.g. same file re-added after disk modification),
+        // remove it first so the Get* call reloads from disk.
+        if (_sequenceMedia->HasMedia(path))
+            _sequenceMedia->RemoveMedia(path);
+        switch (type) {
+            case MediaType::Image:      _sequenceMedia->GetImage(path); break;
+            case MediaType::Video:      _sequenceMedia->GetVideo(path); break;
+            case MediaType::SVG:        _sequenceMedia->GetSVG(path); break;
+            case MediaType::Shader:     _sequenceMedia->GetShader(path); break;
+            case MediaType::TextFile:   _sequenceMedia->GetTextFile(path); break;
+            case MediaType::BinaryFile: _sequenceMedia->GetBinaryFile(path); break;
+            case MediaType::Audio:      _sequenceMedia->GetAudio(path); break;
+        }
         lastPath = path;
     }
     Populate(lastPath);
@@ -2449,7 +2531,7 @@ void SelectMediaDialog::OnAddFromDisk(wxCommandEvent& event)
     const std::string sep(1, wxFileName::GetPathSeparator());
 
     // Determine which MediaType to register as
-    MediaType regType = _filterType.has_value() ? *_filterType : MediaType::Image;
+    MediaType regType = _filterType.has_value() ? *_filterType : MediaTypeFromPath(path);
 
     // For videos, check AVFoundation compatibility up front and offer to
     // transcode before any copy/embed handling. Converted output (if any)
@@ -2524,6 +2606,7 @@ void SelectMediaDialog::OnAddFromDisk(wxCommandEvent& event)
                     case MediaType::Shader:   _panel->_sequenceMedia->GetShader(path); break;
                     case MediaType::TextFile: _panel->_sequenceMedia->GetTextFile(path); break;
                     case MediaType::BinaryFile: _panel->_sequenceMedia->GetBinaryFile(path); break;
+                    case MediaType::Audio:    _panel->_sequenceMedia->GetAudio(path); break;
                 }
                 if (regType == MediaType::Image) {
                     std::string embeddedName = "Images/" + ToStdString(fn.GetFullName());
