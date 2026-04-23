@@ -247,6 +247,9 @@ struct ContentView: View {
         // G-3 — replay any deferred Open-in-xLights once the show
         // folder finishes loading (typical on cold-launch via Files
         // tap, where the URL arrives before bookmarks restore).
+        // Note: `.xsqz` opens never land here — those go direct in
+        // `handleIncomingSequenceURL` since the package brings its
+        // own show folder. Only `.xsq` taps defer.
         .onChange(of: viewModel.isShowFolderLoaded) { _, loaded in
             guard loaded, let url = pendingOpenURL else { return }
             pendingOpenURL = nil
@@ -393,16 +396,35 @@ struct ContentView: View {
     /// isn't loaded yet we wait — the open is queued in
     /// `pendingOpenURL` and re-tried whenever the folder becomes
     /// available.
+    ///
+    /// `.xsqz` (sequence package) taps route to the packaged-open
+    /// path instead. Packages carry their own temp show folder, so
+    /// they don't need `isShowFolderLoaded` and can open immediately
+    /// even on first launch before any show folder is configured —
+    /// this is the primary review/self-service flow (reviewer
+    /// downloads an `.xsqz`, taps it, the app opens it end-to-end).
     private func handleIncomingSequenceURL(_ url: URL) {
         let path = url.path
         guard !path.isEmpty else { return }
         _ = XLSequenceDocument.obtainAccess(toPath: path,
                                              enforceWritable: true)
+        if isPackageURL(url) {
+            viewModel.openPackagedSequence(path: path)
+            return
+        }
         if viewModel.isShowFolderLoaded {
             viewModel.openSequence(path: path)
         } else {
             pendingOpenURL = url
         }
+    }
+
+    /// True iff the URL's pathExtension marks it as a sequence
+    /// package the iPad bridge can unpack. Matches
+    /// `SequencePackage`'s constructor detection on the core side.
+    private func isPackageURL(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        return ext == "xsqz" || ext == "zip" || ext == "piz"
     }
 
     /// Run once per open: compare `.xbkp` mtime vs. `.xsq` and

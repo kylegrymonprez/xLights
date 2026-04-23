@@ -71,6 +71,14 @@ class SequencePackage {
         pugi::xml_document& GetRgbEffectsFile();
         std::string GetTempDir() const;
 
+        // Pack the current temp directory back into a `.xsqz` at
+        // `targetXsqz`, overwriting atomically (writes to a sibling
+        // `.tmp`, then renames). Returns true on success. Used by the
+        // iPad flow when the user opens a `.xsqz` from Files, edits,
+        // and saves — the desktop has its own "Package Sequence"
+        // dialog that doesn't go through here.
+        bool Repack(const std::filesystem::path& targetXsqz);
+
         std::string FixAndImportMedia(Effect* mappedEffect, EffectLayer *target);
         void ImportFaceInfo(Effect* mappedEffect, EffectLayer *target, const std::string& faceName);
         std::filesystem::path CopyMediaToTarget(const std::string& targetFolder, const std::filesystem::path& mediaToCopy);

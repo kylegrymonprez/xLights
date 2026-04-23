@@ -10,6 +10,11 @@ class SequencerViewModel {
     var sequenceName: String?
     var isShowFolderLoaded = false
     var isSequenceLoaded = false
+    /// True while `openPackagedSequence` is unzipping an `.xsqz`
+    /// off the main queue. UI shells can show a progress overlay
+    /// on this; extraction of a multi-MB package with embedded
+    /// media takes long enough (seconds) to warrant a spinner.
+    var isExtractingPackage = false
     /// Dirty marker mirrored from `XLSequenceDocument.isSequenceDirty`.
     /// Updated by the dirty-poll timer (500ms) while a sequence is
     /// loaded — toolbar Save / close-with-prompt key off it. Poll
@@ -509,6 +514,58 @@ class SequencerViewModel {
             // recovery prompt (when the `.xbkp` is newer than the
             // `.xsq`) is presented by the UI shell after open.
             startAutosaveTimer()
+        }
+    }
+
+    /// Open an `.xsqz` / `.zip` / `.piz` sequence package. The bridge
+    /// extracts into a temp dir, swaps the show folder to it, and opens
+    /// the inner `.xsq`. On save, the bridge re-packs the temp dir
+    /// back into the original `.xsqz` — see
+    /// `XLSequenceDocument.openPackagedSequence(atPath:)` for the
+    /// lifecycle details.
+    ///
+    /// Extraction is dispatched off the main queue because even
+    /// modest packages with embedded media can take seconds to
+    /// unzip, and the main queue is the SwiftUI update thread.
+    /// `isExtractingPackage` flips to true for the duration so UI
+    /// shells can show a progress affordance.
+    func openPackagedSequence(path: String) {
+        guard !isExtractingPackage else { return }
+        isExtractingPackage = true
+
+        let doc = document
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let ok = doc.openPackagedSequence(atPath: path)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.isExtractingPackage = false
+                if !ok { return }
+
+                // Same post-open wire-up as `openSequence` —
+                // identical semantics once the bridge has the
+                // inner `.xsq` loaded. If the two paths ever
+                // grow more shared work than differs, refactor
+                // the body into a `finishSequenceLoaded` helper.
+                self.isSequenceLoaded = true
+                self.isDirty = false
+                self.sequenceName = self.document.sequenceName()
+                self.sequenceDurationMS = Int(self.document.sequenceDurationMS())
+                self.frameIntervalMS = Int(self.document.frameIntervalMS())
+                self.hasAudio = self.document.hasAudio()
+                self.reloadRows()
+                self.reloadTagPositions()
+                self.syncClipboardFromPasteboard()
+                self.loadAvailableEffects()
+                self.loadWaveform(startMS: 0, endMS: self.sequenceDurationMS)
+                self.startBackgroundRender()
+                self.startDirtyPolling()
+                self.scheduleBrokenMediaScan()
+                // Record the `.xsqz` (not the temp `.xsq`) in recents —
+                // that's the user-meaningful file and the one that'll
+                // still exist on the next launch.
+                RecentSequences.record(path: path)
+                self.startAutosaveTimer()
+            }
         }
     }
 

@@ -50,6 +50,32 @@
 - (void)closeSequence;
 - (BOOL)isSequenceLoaded;
 
+// xsqz open: `pkgPath` is a `.xsqz` / `.zip` / `.piz` package.
+// Extracts it to a temp dir (via `SequencePackage`), swaps the
+// show folder to that temp dir, and opens the inner `.xsq`.
+// On a subsequent `-saveSequence`, the bridge re-packs the
+// temp dir back into `pkgPath` atomically — see
+// `-[saveSequence]`. `-closeSequence` wipes the temp dir and
+// restores whatever show folder was active before the open.
+//
+// May take a noticeable time for large packages (disk I/O on
+// many-MB zips); Swift callers should dispatch this off the
+// main queue and show a progress affordance.
+//
+// Returns NO if extraction fails, the package has no `.xsq`
+// inside, or the internal open fails.
+- (BOOL)openPackagedSequence:(NSString*)pkgPath NS_SWIFT_NAME(openPackagedSequence(atPath:));
+
+// YES iff the currently-open sequence was opened via
+// `-openPackagedSequence:` and hasn't been closed yet. The
+// Swift UI uses this to skip "Save As to new xsq" affordances
+// that would break out of the package.
+- (BOOL)isPackagedSequence;
+
+// Absolute path of the `.xsqz` the current session was opened
+// from. Empty when the current sequence isn't packaged.
+- (NSString*)packagePath;
+
 // E-2 — create a fresh sequence on disk at `savePath` and
 // immediately open it as the active document. `type` is one of
 // "Media" / "Animation" / "Effect"; `mediaPath` is required for

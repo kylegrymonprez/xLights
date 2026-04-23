@@ -20,6 +20,7 @@
 
 extern "C" {
 #include "../../dependencies/libxlsxwriter/third_party/minizip/unzip.h"
+#include "../../dependencies/libxlsxwriter/third_party/minizip/zip.h"
 }
 
 #include <log.h>
@@ -680,4 +681,111 @@ std::vector<std::pair<std::string, std::string>> SequencePackage::FindAndCopyAlt
     }
 
     return result;
+}
+
+bool SequencePackage::Repack(const std::filesystem::path& targetXsqz)
+{
+    if (_tempDir.empty() || !std::filesystem::exists(_tempDir)) {
+        spdlog::error("SequencePackage::Repack: no temp dir to pack from ('{}')", _tempDir.string());
+        return false;
+    }
+
+    ObtainAccessToURL(targetXsqz.string(), /*enforceWritable=*/true);
+
+    // Write to a sibling .tmp and atomically rename so a crash / failure
+    // mid-write can't corrupt the user's original package.
+    std::filesystem::path tmpPath = targetXsqz;
+    tmpPath += ".tmp";
+
+    std::error_code ec;
+    std::filesystem::remove(tmpPath, ec);
+
+    zipFile zf = zipOpen(tmpPath.string().c_str(), APPEND_STATUS_CREATE);
+    if (zf == nullptr) {
+        spdlog::error("SequencePackage::Repack: zipOpen failed for '{}'", tmpPath.string());
+        return false;
+    }
+
+    bool success = true;
+    size_t filesPacked = 0;
+
+    for (auto it = std::filesystem::recursive_directory_iterator(_tempDir, ec);
+         it != std::filesystem::recursive_directory_iterator();
+         ++it) {
+        const auto& entry = *it;
+        if (!entry.is_regular_file()) {
+            continue;
+        }
+
+        std::string filename = entry.path().filename().string();
+        // Skip Finder cruft and autosave backups that don't belong in a package
+        if (filename == ".DS_Store" || filename.rfind(".xbkp") != std::string::npos) {
+            continue;
+        }
+
+        // Zip paths are always forward-slash, relative to the temp dir root
+        std::string relStr = std::filesystem::relative(entry.path(), _tempDir, ec).generic_string();
+        if (ec || relStr.empty()) {
+            continue;
+        }
+
+        zip_fileinfo zi{};
+        if (zipOpenNewFileInZip(zf, relStr.c_str(), &zi,
+                                nullptr, 0, nullptr, 0, nullptr,
+                                Z_DEFLATED, Z_DEFAULT_COMPRESSION) != ZIP_OK) {
+            spdlog::error("SequencePackage::Repack: zipOpenNewFileInZip failed for '{}'", relStr);
+            success = false;
+            break;
+        }
+
+        std::ifstream fis(entry.path(), std::ios::binary);
+        if (!fis.is_open()) {
+            spdlog::error("SequencePackage::Repack: could not read '{}'", entry.path().string());
+            zipCloseFileInZip(zf);
+            success = false;
+            break;
+        }
+
+        char buf[8192];
+        while (fis.good()) {
+            fis.read(buf, sizeof(buf));
+            std::streamsize n = fis.gcount();
+            if (n > 0) {
+                if (zipWriteInFileInZip(zf, buf, static_cast<unsigned>(n)) != ZIP_OK) {
+                    spdlog::error("SequencePackage::Repack: write failed for '{}'", relStr);
+                    success = false;
+                    break;
+                }
+            }
+        }
+        fis.close();
+        zipCloseFileInZip(zf);
+
+        if (!success) {
+            break;
+        }
+        ++filesPacked;
+    }
+
+    zipClose(zf, nullptr);
+
+    if (!success) {
+        std::filesystem::remove(tmpPath, ec);
+        return false;
+    }
+
+    // Atomic replace of the original .xsqz. std::filesystem::rename on
+    // POSIX is rename(2) which is atomic within a single filesystem —
+    // which is always the case here since the tmp and target are
+    // siblings in the user's Files location.
+    std::filesystem::rename(tmpPath, targetXsqz, ec);
+    if (ec) {
+        spdlog::error("SequencePackage::Repack: rename '{}' -> '{}' failed: {}",
+                      tmpPath.string(), targetXsqz.string(), ec.message());
+        std::filesystem::remove(tmpPath, ec);
+        return false;
+    }
+
+    spdlog::info("SequencePackage::Repack: packed {} files into '{}'", filesPacked, targetXsqz.string());
+    return true;
 }

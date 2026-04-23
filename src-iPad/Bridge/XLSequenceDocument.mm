@@ -20,6 +20,7 @@
 #include "render/SequenceElements.h"
 #include "render/SequenceMedia.h"
 #include "render/SequenceFile.h"
+#include "render/SequencePackage.h"
 #include "render/RenderEngine.h"
 #include "render/FSEQFile.h"
 #include "utils/UtilFunctions.h"
@@ -84,6 +85,16 @@
     // reload.
     Spectrogram _spectrogram;
     std::string _spectrogramAudioHash;
+
+    // xsqz / sequence-package lifecycle. `_openPackage` owns the
+    // extracted temp directory — destroying it (on close) wipes the
+    // temp dir. `_packagePath` is the original `.xsqz` the session
+    // was opened from; `-saveSequence` re-packs the temp dir back
+    // there. `_previousShowFolder` remembers the show dir that was
+    // active before the package open so we can restore it on close.
+    std::unique_ptr<SequencePackage> _openPackage;
+    std::string _packagePath;
+    std::string _previousShowFolder;
 }
 
 @synthesize lastClassificationTimeStep = _lastClassificationTimeStep;
@@ -192,6 +203,91 @@
     return ok;
 }
 
+- (BOOL)openPackagedSequence:(NSString*)pkgPath {
+    if (!_context || pkgPath.length == 0) return NO;
+    std::string pkgStr([pkgPath UTF8String]);
+    if (!FileExists(pkgStr)) {
+        printf("openPackagedSequence: '%s' does not exist\n", pkgStr.c_str());
+        return NO;
+    }
+    // Ensure we have writable scope — we'll repack into this URL on save.
+    ObtainAccessToURL(pkgStr, /*enforceWritable=*/true);
+
+    // Drop any currently-loaded sequence + previously-open package
+    // before we set up the new one. Doing this via closeSequence
+    // restores the previous show folder, which is the natural state
+    // to preserve if the new package open fails below.
+    [self closeSequence];
+
+    // Remember the show folder that was active so closeSequence can
+    // restore it after this package session ends.
+    _previousShowFolder = _context->GetShowDirectory();
+
+    // SequencePackage does the extract. We pass `showDir=""` and
+    // `seqXmlFileName=""` because the package's own `.xsq` supplies
+    // both — the non-empty constructor parameters are only used by
+    // the media-import codepaths on desktop (FindAndCopyAudio,
+    // ImportFaceInfo, etc.) which this flow doesn't touch.
+    auto pkg = std::make_unique<SequencePackage>(
+        std::filesystem::path(pkgStr),
+        /*showDir=*/std::string(),
+        /*seqXmlFileName=*/std::string(),
+        /*models=*/nullptr);
+    pkg->Extract();
+    const std::filesystem::path& xsq = pkg->GetXsqFile();
+    if (xsq.empty() || !FileExists(xsq.string())) {
+        printf("openPackagedSequence: no .xsq found in package '%s'\n", pkgStr.c_str());
+        // Package destructor wipes the temp dir since we never set
+        // SetLeaveFiles(true). Restore the previous show folder
+        // since we already captured it above.
+        if (!_previousShowFolder.empty()) {
+            _context->LoadShowFolder(_previousShowFolder);
+            _previousShowFolder.clear();
+        }
+        return NO;
+    }
+
+    // The extracted temp dir is a self-contained show folder (the
+    // package carries the subset of xlights_rgbeffects / models /
+    // media needed by the sequence). Load it so the inner .xsq
+    // resolves its models + relative media paths correctly.
+    const std::string tempDir = pkg->GetTempDir();
+    if (!_context->LoadShowFolder(tempDir)) {
+        printf("openPackagedSequence: LoadShowFolder('%s') failed\n", tempDir.c_str());
+        if (!_previousShowFolder.empty()) {
+            _context->LoadShowFolder(_previousShowFolder);
+            _previousShowFolder.clear();
+        }
+        return NO;
+    }
+
+    NSString* innerPath = [NSString stringWithUTF8String:xsq.string().c_str()];
+    BOOL ok = [self openSequence:innerPath];
+    if (!ok) {
+        if (!_previousShowFolder.empty()) {
+            _context->LoadShowFolder(_previousShowFolder);
+            _previousShowFolder.clear();
+        }
+        return NO;
+    }
+
+    // Commit the package state only after successful open. From here
+    // on, `-saveSequence` will repack into `pkgStr` and
+    // `-closeSequence` will clean up.
+    _openPackage = std::move(pkg);
+    _packagePath = pkgStr;
+    return YES;
+}
+
+- (BOOL)isPackagedSequence {
+    return (_openPackage != nullptr && !_packagePath.empty()) ? YES : NO;
+}
+
+- (NSString*)packagePath {
+    if (_packagePath.empty()) return @"";
+    return [NSString stringWithUTF8String:_packagePath.c_str()];
+}
+
 - (BOOL)newSequenceAtPath:(NSString*)savePath
                        type:(NSString*)type
                   mediaPath:(NSString*)mediaPath
@@ -243,6 +339,22 @@
 - (void)closeSequence {
     _context->CloseSequence();
     _lastSavedChangeCount = 0;
+
+    // If the current session came from a `.xsqz`, tear down the
+    // package now. The `SequencePackage` destructor removes the
+    // extracted temp dir (we never set `SetLeaveFiles(true)`).
+    // Then restore the show folder that was active before the
+    // package was opened so follow-on UI (sequence picker,
+    // model selection, etc.) points back at the user's real
+    // show folder instead of the now-deleted temp.
+    if (_openPackage) {
+        _openPackage.reset();
+        _packagePath.clear();
+        if (!_previousShowFolder.empty()) {
+            _context->LoadShowFolder(_previousShowFolder);
+            _previousShowFolder.clear();
+        }
+    }
 }
 
 - (BOOL)isSequenceLoaded {
@@ -263,10 +375,26 @@
     ObtainAccessToURL(path, /*enforceWritable=*/true);
 
     bool ok = sf->Save(_context->GetSequenceElements());
-    if (ok) {
-        [self markSequenceClean];
+    if (!ok) {
+        return NO;
     }
-    return ok ? YES : NO;
+
+    // xsqz save-back: the `.xsq` just written lives inside the
+    // extracted temp dir. Re-pack the whole temp dir back into
+    // the original `.xsqz` so the file the user tapped in Files
+    // reflects the edits. Repack writes to `.xsqz.tmp` and
+    // atomically renames, so a failure here can't corrupt the
+    // original — but if it fails, we surface NO to the caller
+    // and leave the in-memory sequence dirty (markSequenceClean
+    // is conditional on full success).
+    if (_openPackage && !_packagePath.empty()) {
+        if (!_openPackage->Repack(std::filesystem::path(_packagePath))) {
+            return NO;
+        }
+    }
+
+    [self markSequenceClean];
+    return YES;
 }
 
 - (void)clearUndoHistory {
