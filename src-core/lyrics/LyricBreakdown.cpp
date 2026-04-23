@@ -83,7 +83,7 @@ void BreakdownWord(EffectLayer* phoneme_layer, int start_time, int end_time,
         short_interval = minPeriod;
     }
     double adjusted_interval = default_interval_ms;
-    if (phonemes.size() > 1) {
+    if (phonemes.size() > 1 && phonemes.size() > countShort) {
         adjusted_interval = (end_time - start_time - countShort * short_interval) / (phonemes.size() - countShort);
     } else {
         short_interval = default_interval_ms;

@@ -11,6 +11,22 @@ Issue Tracker is found here: www.github.com/xLightsSequencer/xLights/issues
 XLIGHTS/NUTCRACKER RELEASE NOTES
 ---------------------------------
 2026.07  April ??, 2026
+    -bug (dkulp)                Replaced throwing std::stoi calls in OutputManager / xxxSerialOutput / HinksPix with
+                                non-throwing std::strtol so corrupt config or controller responses no longer crash.
+    -bug (dkulp)                State / Faces / Shockwave / VUMeter / Lyric / MatrixModel: added div-by-zero and
+                                map.at() guards on render-thread paths that could crash on edge-case inputs.
+    -bug (dkulp)                Faces / xlFontInfo / SpecialOptions / FileUtils / ip_utils / AudioManager: added
+                                missing locks around static / shared caches that were mutated concurrently from
+                                render workers and could corrupt or crash under heavy parallel rendering.
+    -bug (dkulp)                E1.31 / ArtNet / DDP SetManyChannels: bounds-check the starting channel before
+                                memcpy so an out-of-range channel can't overflow the packet buffer.
+    -bug (dkulp)                AlphaPix / WLED / HinksPix: free curl_slist headers (and the WLED CURL handle) on
+                                every exit path; firmware-upload filename copy now uses bounded strncpy.
+    -bug (dkulp)                AudioManager: widened sample-loop counters to long so pcm conversion no longer
+                                overflows on multi-hour audio; added missing int16 clamp on the NONVOCALS / VOCALS
+                                mono fallback.
+    -bug (dkulp)                Render engine: AggregatorRenderer::setPreviousFrameDone bounds-checks the frame
+                                index before indexing the per-frame counter array.
     -change (dkulp)             Package Sequence: rewritten to walk SequenceMedia + every model/view-object's file
                                 references + Matrix face images so shaders, custom images, videos, meshes, and
                                 face/state assets are actually included. Show-relative paths preserved where possible;

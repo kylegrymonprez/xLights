@@ -16,6 +16,7 @@
 #include <pugixml.hpp>
 #include <string>
 #include <map>
+#include <mutex>
 #include <spdlog/spdlog.h>
 
 
@@ -37,6 +38,8 @@ std::string SpecialOptions::GetOption(const std::string& option, const std::stri
 {
     static bool __loaded = false;
     static std::map<std::string, std::string> __cache;
+    static std::mutex __cacheMutex;
+    std::lock_guard<std::mutex> lock(__cacheMutex);
 
     // Prefer show folder; fall back to the directory containing the executable.
     std::string showFile = StashShowDir() + GetPathSeparator() + "special.options";
@@ -98,10 +101,11 @@ std::string SpecialOptions::GetOption(const std::string& option, const std::stri
 
     if (option == "") return defaultValue;
 
-    if (__cache.find(option) == __cache.end()) {
+    auto it = __cache.find(option);
+    if (it == __cache.end()) {
         return defaultValue;
     }
 
-    return __cache.at(option);
+    return it->second;
 }
 

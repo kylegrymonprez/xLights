@@ -190,6 +190,10 @@ public:
         if (idx == END_OF_RENDER_FRAME) {
             idx = finalFrame;
         }
+        if (idx < 0 || idx >= (int)data.size()) {
+            // Out-of-range frame index — clamp to the sentinel slot to avoid OOB.
+            idx = finalFrame;
+        }
         int i = data[idx].fetch_add(1);
         if (i == (max - 1)) {
             previousFrameDone = frame;

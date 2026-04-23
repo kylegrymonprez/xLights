@@ -90,6 +90,7 @@ int ShockwaveEffect::DrawEffectBackground(const Effect* e, int x1, int y1, int x
                                           xlVertexColorAccumulator& backgrounds, xlColor* colorMask, bool ramps)
 {
     int cycles = e->GetSettings().GetInt("E_SLIDER_Shockwave_Cycles", sCyclesDefault);
+    if (cycles < 1) cycles = 1;
     int totalsize = x2 - x1;
     double x_size = totalsize / (double)cycles;
     x_size = std::max(x_size, 0.01);
@@ -122,6 +123,7 @@ void ShockwaveEffect::adjustSettings(const std::string& version, Effect* effect,
 void ShockwaveEffect::Render(Effect* effect, const SettingsMap& SettingsMap, RenderBuffer& buffer)
 {
     int cycles = SettingsMap.GetInt("SLIDER_Shockwave_Cycles", sCyclesDefault);
+    if (cycles < 1) cycles = 1;
     double eff_pos = buffer.GetEffectTimeIntervalPosition(cycles);
     int center_x = GetValueCurveInt("Shockwave_CenterX", sCenterXDefault, SettingsMap, eff_pos, sCenterXMin, sCenterXMax, buffer.GetStartTimeMS(), buffer.GetEndTimeMS());
     int center_y = GetValueCurveInt("Shockwave_CenterY", sCenterYDefault, SettingsMap, eff_pos, sCenterYMin, sCenterYMax, buffer.GetStartTimeMS(), buffer.GetEndTimeMS());

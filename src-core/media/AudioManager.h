@@ -14,6 +14,7 @@
 #include <future>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <string>
 #include <vector>
@@ -102,6 +103,12 @@ class AudioManager {
     MEDIAPLAYINGSTATE _media_state;
     bool _polyphonicTranscriptionDone = false;
     std::vector<FilteredAudioData*> _filtered;
+    // Guards `_filtered`. Filter computations (EnsureFilteredAudioData)
+    // can run from the UI thread or render workers concurrently with
+    // SetStemData/SetClassifyGate, which erase entries; iterating the
+    // vector or holding a FilteredAudioData* across erase is otherwise
+    // UAF.
+    mutable std::recursive_mutex _filteredMutex;
     // A7: state for `AUDIOSAMPLETYPE::CLASSIFIED`. Populated by
     // `SetClassifyGate`. The gate curve is re-interpolated per-
     // sample inside `EnsureFilteredAudioData(CLASSIFIED)`.

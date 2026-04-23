@@ -505,7 +505,12 @@ void AudioManager::DoPrepareFrameData() {
     spdlog::info("DoPrepareFrameData: Data is loaded.");
 
     // we need to ensure at least the raw data is available
-    if (_filtered.size() == 0) {
+    bool needsRaw;
+    {
+        std::lock_guard<std::recursive_mutex> flock(_filteredMutex);
+        needsRaw = _filtered.empty();
+    }
+    if (needsRaw) {
         locker.unlock();
         SwitchTo(AUDIOSAMPLETYPE::RAW, 0, 0);
         locker.lock();
@@ -778,18 +783,21 @@ AudioManager::~AudioManager() {
         _pcmdata = nullptr;
     }
 
-    while (_filtered.size() > 0) {
-        if (_filtered.back()->data0) {
-            free(_filtered.back()->data0);
+    {
+        std::lock_guard<std::recursive_mutex> flock(_filteredMutex);
+        while (_filtered.size() > 0) {
+            if (_filtered.back()->data0) {
+                free(_filtered.back()->data0);
+            }
+            if (_filtered.back()->data1 && _filtered.back()->data1 != _filtered.back()->data0) {
+                free(_filtered.back()->data1);
+            }
+            if (_filtered.back()->pcmdata) {
+                free(_filtered.back()->pcmdata);
+            }
+            delete _filtered.back();
+            _filtered.pop_back();
         }
-        if (_filtered.back()->data1) {
-            free(_filtered.back()->data1);
-        }
-        if (_filtered.back()->pcmdata) {
-            free(_filtered.back()->pcmdata);
-        }
-        delete _filtered.back();
-        _filtered.pop_back();
     }
 
     // wait for prepare frame data to finish ... if i delete the data before it is done we will crash
@@ -984,7 +992,7 @@ void AudioManager::NormaliseFilteredAudioData(FilteredAudioData* fad) {
     float* data1 = fad->data1;
     float fmax = -99.0;
     float fmin = 99.0;
-    for (int i = 0; i < _trackSize; i++) {
+    for (long i = 0; i < _trackSize; i++) {
         if (*data0 > fmax)
             fmax = *data0;
         if (*data0 < fmin)
@@ -1009,7 +1017,7 @@ void AudioManager::NormaliseFilteredAudioData(FilteredAudioData* fad) {
     // data is the played music
     data0 = fad->data0;
     data1 = fad->data1;
-    for (int i = 0; i < _trackSize; i++) {
+    for (long i = 0; i < _trackSize; i++) {
         *data0 = *data0 * fscale;
         if (data1 != nullptr) {
             *data1 = *data1 * fscale;
@@ -1032,6 +1040,8 @@ FilteredAudioData* AudioManager::EnsureFilteredAudioData(AUDIOSAMPLETYPE type, i
         lowNote = 72;
         highNote = 84;
     }
+
+    std::lock_guard<std::recursive_mutex> flock(_filteredMutex);
 
     // Fast path: already cached.
     for (const auto& it : _filtered) {
@@ -1114,24 +1124,29 @@ FilteredAudioData* AudioManager::EnsureFilteredAudioData(AUDIOSAMPLETYPE type, i
         // fall back to the raw signal so the user sees a usable
         // waveform instead of a flat line.
         const bool stereoDistinct = (srcR != nullptr && srcR != srcL);
+        const long ch = (long)_channels;
         if (stereoDistinct) {
-            for (int i = 0; i < _trackSize; ++i) {
+            for (long i = 0; i < _trackSize; ++i) {
                 float v = srcL[i] - srcR[i];
                 fad->data0[i] = v;
                 if (fad->data1) fad->data1[i] = v;
                 int v2 = (int)(v * 32768);
-                fad->pcmdata[i * _channels] = v2;
-                if (_channels > 1) fad->pcmdata[i * _channels + 1] = v2;
+                if (v2 > 32767) v2 = 32767;
+                if (v2 < -32768) v2 = -32768;
+                fad->pcmdata[i * ch] = (int16_t)v2;
+                if (ch > 1) fad->pcmdata[i * ch + 1] = (int16_t)v2;
             }
         } else {
             spdlog::info("NONVOCALS: mono / aliased channel; falling back to raw waveform");
-            for (int i = 0; i < _trackSize; ++i) {
+            for (long i = 0; i < _trackSize; ++i) {
                 float v = srcL[i];
                 fad->data0[i] = v;
                 if (fad->data1) fad->data1[i] = v;
                 int v2 = (int)(v * 32768);
-                fad->pcmdata[i * _channels] = v2;
-                if (_channels > 1) fad->pcmdata[i * _channels + 1] = v2;
+                if (v2 > 32767) v2 = 32767;
+                if (v2 < -32768) v2 = -32768;
+                fad->pcmdata[i * ch] = (int16_t)v2;
+                if (ch > 1) fad->pcmdata[i * ch + 1] = (int16_t)v2;
             }
         }
         fad->lowNote = 0;
@@ -1229,7 +1244,8 @@ FilteredAudioData* AudioManager::EnsureFilteredAudioData(AUDIOSAMPLETYPE type, i
         const bool stereoDistinct = (srcR != nullptr && srcR != srcL);
         const float alpha = 1.5f;
         if (stereoDistinct) {
-            for (int i = 0; i < _trackSize; ++i) {
+            const long ch = (long)_channels;
+            for (long i = 0; i < _trackSize; ++i) {
                 float L = srcL[i];
                 float R = srcR[i];
                 float M = 0.5f * (L + R);
@@ -1244,18 +1260,21 @@ FilteredAudioData* AudioManager::EnsureFilteredAudioData(AUDIOSAMPLETYPE type, i
                 int v2 = int(v * 32768);
                 if (v2 > 32767) v2 = 32767;
                 if (v2 < -32768) v2 = -32768;
-                fad->pcmdata[i * _channels] = int16_t(v2);
-                if (_channels > 1) fad->pcmdata[i * _channels + 1] = int16_t(v2);
+                fad->pcmdata[i * ch] = int16_t(v2);
+                if (ch > 1) fad->pcmdata[i * ch + 1] = int16_t(v2);
             }
         } else {
             spdlog::info("VOCALS: mono / aliased channel; falling back to raw waveform");
-            for (int i = 0; i < _trackSize; ++i) {
+            const long ch = (long)_channels;
+            for (long i = 0; i < _trackSize; ++i) {
                 float v = srcL[i];
                 fad->data0[i] = v;
                 if (fad->data1) fad->data1[i] = v;
                 int v2 = (int)(v * 32768);
-                fad->pcmdata[i * _channels] = v2;
-                if (_channels > 1) fad->pcmdata[i * _channels + 1] = v2;
+                if (v2 > 32767) v2 = 32767;
+                if (v2 < -32768) v2 = -32768;
+                fad->pcmdata[i * ch] = (int16_t)v2;
+                if (ch > 1) fad->pcmdata[i * ch + 1] = (int16_t)v2;
             }
         }
         fad->lowNote = 0;
@@ -1575,16 +1594,19 @@ void AudioManager::SwitchTo(AUDIOSAMPLETYPE type, int lowNote, int highNote) {
 }
 
 FilteredAudioData* AudioManager::GetFilteredAudioData(AUDIOSAMPLETYPE type, int lowNote, int highNote) {
-    while (_filtered.size() == 0) {
+    for (;;) {
+        std::unique_lock<std::recursive_mutex> flock(_filteredMutex);
+        if (!_filtered.empty()) {
+            for (const auto& it : _filtered) {
+                if ((type == AUDIOSAMPLETYPE::ANY || it->type == type) && (lowNote == -1 || (it->lowNote == lowNote && it->highNote == highNote))) {
+                    return it;
+                }
+            }
+            return nullptr;
+        }
+        flock.unlock();
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
-
-    for (const auto& it : _filtered) {
-        if ((type == AUDIOSAMPLETYPE::ANY || it->type == type) && (lowNote == -1 || (it->lowNote == lowNote && it->highNote == highNote))) {
-            return it;
-        }
-    }
-    return nullptr;
 }
 
 void AudioManager::SetStemData(const std::vector<float>& drumsL, const std::vector<float>& drumsR,
@@ -1596,6 +1618,7 @@ void AudioManager::SetStemData(const std::vector<float>& drumsL, const std::vect
     _stemBassL = bassL;     _stemBassR = bassR;
     _stemOtherL = otherL;   _stemOtherR = otherR;
     _stemVocalsL = vocalsL; _stemVocalsR = vocalsR;
+    std::lock_guard<std::recursive_mutex> flock(_filteredMutex);
     // Evict any cached STEM_* entries so the next
     // `EnsureFilteredAudioData(STEM_X)` rebuilds from the new data.
     for (auto it = _filtered.begin(); it != _filtered.end(); ) {
@@ -1620,6 +1643,7 @@ void AudioManager::SetClassifyGate(const std::string& className,
     _classifyGateClass = className;
     _classifyGateCurve = confidencePerStep;
     _classifyGateTimeStep = timeStepSec > 0 ? timeStepSec : 1.0f;
+    std::lock_guard<std::recursive_mutex> flock(_filteredMutex);
     // Evict any cached CLASSIFIED entry so the next
     // EnsureFilteredAudioData(CLASSIFIED) rebuilds against the new
     // curve.
