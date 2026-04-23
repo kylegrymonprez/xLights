@@ -7,11 +7,11 @@ questions) and links here for the details.
 
 | File | Phase | Status |
 |---|---|---|
-| [phase-b-grid-parity.md](phase-b-grid-parity.md) | B — Effects grid parity with desktop | In progress — all P0s + 20+ P1s landed 2026-04-20/21; 6 P1s + ~40 P2 polish items open |
+| [phase-b-grid-parity.md](phase-b-grid-parity.md) | B — Effects grid parity with desktop | In progress — P0 + P1 closed; ~40 P2 polish items open |
 | [phase-d-preview.md](phase-d-preview.md) | D — Model Preview + preview polish | ✓ complete |
-| [phase-f-window-system.md](phase-f-window-system.md) | F — Window system + Display Elements | Not started |
-| [phase-g-document.md](phase-g-document.md) | G — Document / iCloud polish | Not started |
-| [phase-h-app-store.md](phase-h-app-store.md) | H — App Store readiness | Not started |
+| [phase-f-window-system.md](phase-f-window-system.md) | F — Window system + Display Elements | ✓ complete |
+| [phase-g-document.md](phase-g-document.md) | G — Document / iCloud polish | ✓ complete |
+| [phase-h-app-store.md](phase-h-app-store.md) | H — App Store readiness | H-0 through H-3 ✓ complete; H-4 / H-5 (TestFlight external group + submission metadata) remaining |
 | [followups.md](followups.md) | Cross-phase small items | In progress |
 | [future-effect-presets.md](future-effect-presets.md) | Deferred — G12 effect presets | Not first-pass |
 | [future-pictures-frame-editor.md](future-pictures-frame-editor.md) | Deferred — G6 Pictures / GIF frame-timing editor | Desktop needs redesign too |
@@ -20,27 +20,28 @@ questions) and links here for the details.
 | [future-palette-drag.md](future-palette-drag.md) | Deferred — G18 drag colours between palette slots | Low impact |
 | [future-layout-editing.md](future-layout-editing.md) | Deferred — layout-editing overlays / model manipulation | Post-MVP |
 
-Phase A (core-path hardening), B-Metal (grid render pipeline
-migration), C (effect settings inspector), D (Model Preview
-polish), and E (sequence management) are complete and have no
-pending items. Phase B has the Metal-backed grid + every original
-P0 (multi-select marquee, align family, split, timing-mark
-editing, loop region, lyric sub-layer rendering + word breakdown,
-follow-playhead, trackpad scroll) and 20+ P1s (waveform filter
-variants, `.xtiming` I/O, import lyrics + auto-label, cut-copy
-row/model, multi-effect clipboard, pointer hover, column resize,
-etc.) shipped across 2026-04-20/21. Six P1s remain — tags
-(B34/B35), randomize/reset (B15), presets menu stub (B19),
-export model (B49), visible scrollbars (B94) — plus ~40 P2
-polish items tracked in
-[phase-b-grid-parity.md](phase-b-grid-parity.md). Phase C closed
-2026-04-21 — C4 multi-effect ops, C5 media management, C6 value-
-curve presets, and C7 specialised editors (Sketch / Morph /
-Moving Head / DMX) all landed. Phase E closed 2026-04-21 — E-1
-through E-6 landed (Save-As UI, New Sequence wizard, Sequence
-Settings dialog, migration banner, Recent documents, autosave
-with `.xbkp` recovery); deferred tabs + `.fseq` emission live in
-`followups.md`. Cross-phase odds and ends also live in
+Phases A, B-Metal, C, D, E, F, and G are complete. Phase B's
+P0 + P1 buckets closed across 2026-04-20/22 (Metal grid, multi-
+select marquee, align family, split, timing-mark editing, loop
+region, lyric sub-layer rendering + word breakdown, follow-
+playhead, trackpad scroll, waveform filter variants, `.xtiming`
+I/O, import lyrics + auto-label, cut-copy row/model, multi-
+effect clipboard, pointer hover, column resize, tags B34/B35,
+randomize/reset B15, presets stub B19, export B49, scrollbars
+B94). ~40 P2 polish items remain in
+[phase-b-grid-parity.md](phase-b-grid-parity.md). Phase F
+landed F-1 through F-6 (Display Elements editor, menu bar /
+`.commands`, scene-level split for detachable preview +
+inspector, size-class responsive layout, docked layout, detach-
+state persistence). Phase G landed G-1/2/3/4 (file coordination,
+iCloud ubiquity badges, `.xsq` + `.xsqz` document registration,
+clean background shutdown) plus the shared desktop/iPad
+`SequencePackage::Pack` refactor and the iCloud-Drive sandbox
+round-trip on iPad. Phase H has H-0/1/2/3 shipped (unified
+bundle ID, Liquid Glass icon + launch screen, privacy manifest,
+network usage strings, export compliance, Xcode Cloud builds);
+only H-4 TestFlight external group + H-5 submission metadata
+remain — both organizational. Cross-phase odds and ends in
 `followups.md`.
 
 Ground rules for sub-plans:

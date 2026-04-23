@@ -39,8 +39,15 @@
     // Font atlas per size (BM-5). `xlFontInfo` holds a black-on-alpha
     // bitmap; we keep a white-on-alpha copy here so `drawTexture` with
     // a color multiplier tints glyphs to arbitrary colors. One texture
-    // per size; built lazily on first use of that size.
+    // per size; built lazily on first use of that size. The keys are
+    // *pixel* sizes: on a 2x screen a 9pt text call maps to atlas 18.
     std::unordered_map<int, xlTexture*> _fontTextures;
+    // Display scale factor forwarded from the MTKView. Used to pick
+    // retina-resolution font atlases: a fontSize=9 call on a 2x screen
+    // renders the 18-pixel atlas with geometry scale factor 2.0, so
+    // glyphs land pixel-aligned instead of being upscaled by the GPU
+    // (which is what produced the pixelated labels pre-fix).
+    CGFloat _scaleFactor;
 }
 
 - (instancetype)initWithName:(NSString*)name {
@@ -52,6 +59,7 @@
         _rectBatch = nullptr;
         _lineBatch = nullptr;
         _bgBatch = nullptr;
+        _scaleFactor = 2.0;  // sensible iPad default; updated via setDrawableSize:scale:
 
         // Tier 1 memory mitigation — drop our effect-icon / text /
         // font textures on memory warning. iPad's grid holds per-
@@ -74,6 +82,7 @@
 }
 
 - (void)setDrawableSize:(CGSize)size scale:(CGFloat)scale {
+    _scaleFactor = scale > 0 ? scale : 2.0;
     _preview->SetDrawableSize((int)size.width, (int)size.height, (double)scale);
 }
 
@@ -438,9 +447,16 @@ static bool _isAsciiPrintable(NSString* text) {
 - (CGSize)sizeOfText:(NSString*)text fontSize:(CGFloat)fontSize {
     if (!text || text.length == 0) return CGSizeZero;
     if (_isAsciiPrintable(text)) {
-        const xlFontInfo& font = xlFontInfo::FindFont((int)fontSize);
+        // Pick the atlas at `fontSize × scale` pixels so the glyphs
+        // render pixel-exact on retina, then report geometry in
+        // points (divide by scale). `widthOf(s, factor)` and
+        // `getSize()` are atlas-pixel values — `factor=scale` gives
+        // point-space back.
+        CGFloat scale = _scaleFactor > 0 ? _scaleFactor : 2.0;
+        const xlFontInfo& font = xlFontInfo::FindFont((int)(fontSize * scale));
         std::string s([text UTF8String]);
-        return CGSizeMake(ceil(font.widthOf(s, 1.0f)), (CGFloat)font.getSize());
+        return CGSizeMake(ceil(font.widthOf(s, (float)scale)),
+                          (CGFloat)font.getSize() / scale);
     }
     UIFont* font = [self _gridFontForSize:fontSize];
     NSDictionary* attrs = @{ NSFontAttributeName: font };
@@ -467,16 +483,27 @@ static bool _isAsciiPrintable(NSString* text) {
     [self flushEffectBackgroundBatch];
 
     if (_isAsciiPrintable(text)) {
-        xlTexture* atlas = [self _fontTextureForSize:(int)fontSize];
+        // Retina-aware atlas selection: on a 2x screen a fontSize=9
+        // call uses the 18-pixel atlas (one of 8/9/10/11/12/14/16/
+        // 18/20/22/24/28/… pre-baked), then passes `factor=scale`
+        // to `populate` so the emitted quad geometry is in point
+        // space. Without this the 9-pixel atlas would be sampled
+        // into an 18-pixel on-screen quad, producing the
+        // pixelated / blurry text that prompted the fix.
+        CGFloat scale = _scaleFactor > 0 ? _scaleFactor : 2.0;
+        int pixelSize = (int)(fontSize * scale);
+        xlTexture* atlas = [self _fontTextureForSize:pixelSize];
         if (atlas) {
-            const xlFontInfo& font = xlFontInfo::FindFont((int)fontSize);
+            const xlFontInfo& font = xlFontInfo::FindFont(pixelSize);
             std::string s([text UTF8String]);
             // `y` is the top of the text rect; `populate` takes the
-            // bottom baseline. Add the font height to convert.
-            float yBase = (float)y + (float)font.getSize();
+            // bottom baseline. Add the font height (in points) to
+            // convert — getSize() is in atlas pixels so divide by
+            // the scale factor.
+            float yBase = (float)y + (float)font.getSize() / (float)scale;
             std::unique_ptr<xlVertexTextureAccumulator> vac(
                 _ctx->createVertexTextureAccumulator());
-            font.populate(*vac, (float)x, yBase, s, 1.0f);
+            font.populate(*vac, (float)x, yBase, s, (float)scale);
             if (vac->getCount() > 0) {
                 xlColor color((uint8_t)(red   * 255),
                               (uint8_t)(green * 255),
