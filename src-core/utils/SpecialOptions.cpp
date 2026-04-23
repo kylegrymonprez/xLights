@@ -66,26 +66,33 @@ std::string SpecialOptions::GetOption(const std::string& option, const std::stri
     if (!__loaded) {
         pugi::xml_document doc;
         auto result = doc.load_file(file.c_str());
-        if (result && doc.document_element()) {
+        if (!result) {
+            spdlog::error("SpecialOptions: failed to parse '{}': {} (offset {})",
+                          file, result.description(), result.offset);
             __loaded = true;
-            if (file == showFile) {
-                spdlog::info("SpecialOptions: loaded from show folder '{}'", file);
-            } else {
-                spdlog::info("SpecialOptions: loaded from exe folder '{}'", file);
-            }
-            for (pugi::xml_node n = doc.document_element().first_child(); n; n = n.next_sibling()) {
-                std::string nodeName = n.name();
-                std::transform(nodeName.begin(), nodeName.end(), nodeName.begin(), ::tolower);
-                if (nodeName == "option") {
-                    std::string name = Trim(n.attribute("name").as_string());
-                    std::string value = n.attribute("value").as_string();
-                    if (name != "") {
-                        __cache[name] = value;
-                    }
+            return defaultValue;
+        }
+        if (!doc.document_element()) {
+            spdlog::error("SpecialOptions: '{}' parsed but has no root element (file may be empty)", file);
+            __loaded = true;
+            return defaultValue;
+        }
+        __loaded = true;
+        if (file == showFile) {
+            spdlog::info("SpecialOptions: loaded from show folder '{}'", file);
+        } else {
+            spdlog::info("SpecialOptions: loaded from exe folder '{}'", file);
+        }
+        for (pugi::xml_node n = doc.document_element().first_child(); n; n = n.next_sibling()) {
+            std::string nodeName = n.name();
+            std::transform(nodeName.begin(), nodeName.end(), nodeName.begin(), ::tolower);
+            if (nodeName == "option") {
+                std::string name = Trim(n.attribute("name").as_string());
+                std::string value = n.attribute("value").as_string();
+                if (name != "") {
+                    __cache[name] = value;
                 }
             }
-        } else {
-            return defaultValue;
         }
     }
 
