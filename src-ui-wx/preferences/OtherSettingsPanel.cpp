@@ -124,9 +124,9 @@ OtherSettingsPanel::OtherSettingsPanel(wxWindow* parent, xLightsFrame* f, wxWind
     GridBagSizer1->Add(StaticBoxSizer2, wxGBPosition(1, 1), wxGBSpan(4, 1), wxALL|wxEXPAND, 0);
     StaticBoxSizer1 = new wxStaticBoxSizer(wxHORIZONTAL, this, _("Packaging Sequences"));
     GridBagSizer2 = new wxGridBagSizer(0, 0);
-    ExcludePresetsCheckBox = new wxCheckBox(this, ID_CHECKBOX2, _("Exclude Presets"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_CHECKBOX2"));
-    ExcludePresetsCheckBox->SetValue(false);
-    GridBagSizer2->Add(ExcludePresetsCheckBox, wxGBPosition(0, 0), wxDefaultSpan, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
+    ExcludeVideosCheckBox = new wxCheckBox(this, ID_CHECKBOX2, _("Exclude Videos"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_CHECKBOX2"));
+    ExcludeVideosCheckBox->SetValue(false);
+    GridBagSizer2->Add(ExcludeVideosCheckBox, wxGBPosition(0, 0), wxDefaultSpan, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
     ExcludeAudioCheckBox = new wxCheckBox(this, ID_CHECKBOX3, _("Exclude Audio"), wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, _T("ID_CHECKBOX3"));
     ExcludeAudioCheckBox->SetValue(false);
     GridBagSizer2->Add(ExcludeAudioCheckBox, wxGBPosition(0, 1), wxDefaultSpan, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
@@ -255,7 +255,7 @@ OtherSettingsPanel::~OtherSettingsPanel()
 
 bool OtherSettingsPanel::TransferDataFromWindow() {
     frame->SetExcludeAudioFromPackagedSequences(ExcludeAudioCheckBox->IsChecked());
-    frame->SetExcludePresetsFromPackagedSequences(ExcludePresetsCheckBox->IsChecked());
+    frame->SetExcludeVideosFromPackagedSequences(ExcludeVideosCheckBox->IsChecked());
     frame->SetHardwareVideoAccelerated(HardwareVideoDecodingCheckBox->IsChecked());
 #ifdef __WXMSW__
     frame->SetHardwareVideoRenderer(HardwareVideoRenderChoice->GetSelection());
@@ -280,7 +280,7 @@ bool OtherSettingsPanel::TransferDataFromWindow() {
 
 bool OtherSettingsPanel::TransferDataToWindow() {
     ExcludeAudioCheckBox->SetValue(frame->ExcludeAudioFromPackagedSequences());
-    ExcludePresetsCheckBox->SetValue(frame->ExcludePresetsFromPackagedSequences());
+    ExcludeVideosCheckBox->SetValue(frame->ExcludeVideosFromPackagedSequences());
     HardwareVideoDecodingCheckBox->SetValue(frame->HardwareVideoAccelerated());
 #ifdef __WXMSW__
     HardwareVideoRenderChoice->SetSelection(frame->HardwareVideoRenderer());

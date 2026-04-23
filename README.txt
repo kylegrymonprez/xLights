@@ -11,6 +11,15 @@ Issue Tracker is found here: www.github.com/xLightsSequencer/xLights/issues
 XLIGHTS/NUTCRACKER RELEASE NOTES
 ---------------------------------
 2026.07  April ??, 2026
+    -change (dkulp)             Package Sequence: rewritten to walk SequenceMedia + every model/view-object's file
+                                references + Matrix face images so shaders, custom images, videos, meshes, and
+                                face/state assets are actually included. Show-relative paths preserved where possible;
+                                external files relocated under typed subdirs (Images/ Videos/ Shaders/ Glediators/
+                                Meshes/ Faces/) with folder-based disambiguation on basename collisions so packaged
+                                filenames can't mimic PicturesEffect's animation-sequence detection. No more _lost/
+                                dumping;
+    -change (dkulp)             Packaging preferences: "Exclude Presets" renamed to "Exclude Videos" — the old option
+                                stripped a rgbeffects element that no longer carries presets, so it was a no-op; 
     -enh (dkulp)                Waveform (macOS 12+): four new "Stem — Drums / Bass / Other / Vocals (ML)" right-click
                                 filters run Apple CoreML inference against HTDemucs to split the audio into its constituent
                                 parts. Both the waveform and the playback signal follow the picked stem — so "Stem — Drums"

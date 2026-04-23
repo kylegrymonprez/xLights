@@ -594,7 +594,6 @@
 		<Unit filename="../src-core/XmlSerializer/XmlSerializer.h" />
 		<Unit filename="../src-core/XmlSerializer/XmlSerializingVisitor.cpp" />
 		<Unit filename="../src-core/XmlSerializer/XmlSerializingVisitor.h" />
-		<Unit filename="../src-core/ai/aiBase.cpp" />
 		<Unit filename="../src-core/ai/aiBase.h" />
 		<Unit filename="../src-core/ai/aiPlugin.h" />
 		<Unit filename="../src-core/ai/aiType.h" />

@@ -206,12 +206,18 @@
 - (BOOL)openPackagedSequence:(NSString*)pkgPath {
     if (!_context || pkgPath.length == 0) return NO;
     std::string pkgStr([pkgPath UTF8String]);
-    if (!FileExists(pkgStr)) {
-        printf("openPackagedSequence: '%s' does not exist\n", pkgStr.c_str());
-        return NO;
-    }
-    // Ensure we have writable scope — we'll repack into this URL on save.
+
+    // Obtain access BEFORE the existence probe — on iOS, paths from
+    // iCloud Drive / external Files providers need the security-scope
+    // bookmark re-resolved to reactivate scope in this thread before
+    // anything (even `getattrlist`) will work. The Swift-side handler
+    // copies the package into the app sandbox before calling us, so
+    // the path we see here is always inside our container — but keep
+    // this call ordered first anyway for the (rare) case a caller
+    // passes us a path needing bookmark resolution.
     ObtainAccessToURL(pkgStr, /*enforceWritable=*/true);
+
+    if (!FileExists(pkgStr)) return NO;
 
     // Drop any currently-loaded sequence + previously-open package
     // before we set up the new one. Doing this via closeSequence
@@ -249,11 +255,17 @@
 
     // The extracted temp dir is a self-contained show folder (the
     // package carries the subset of xlights_rgbeffects / models /
-    // media needed by the sequence). Load it so the inner .xsq
-    // resolves its models + relative media paths correctly.
-    const std::string tempDir = pkg->GetTempDir();
-    if (!_context->LoadShowFolder(tempDir)) {
-        printf("openPackagedSequence: LoadShowFolder('%s') failed\n", tempDir.c_str());
+    // media needed by the sequence). Use `GetTempShowFolder` — the
+    // dir containing `xlights_rgbeffects.xml` — rather than the
+    // outer temp dir. Older desktop-authored .xsqz files nest
+    // everything under a `<showname>/` subfolder, so the outer
+    // temp dir is one level too high; GetTempShowFolder auto-
+    // adjusts to whatever level the rgbeffects file was extracted
+    // at. New packages produced by `Pack()` put files at the zip
+    // root, so the two levels coincide.
+    const std::string tempShowDir = pkg->GetTempShowFolder();
+    if (!_context->LoadShowFolder(tempShowDir)) {
+        printf("openPackagedSequence: LoadShowFolder('%s') failed\n", tempShowDir.c_str());
         if (!_previousShowFolder.empty()) {
             _context->LoadShowFolder(_previousShowFolder);
             _previousShowFolder.clear();

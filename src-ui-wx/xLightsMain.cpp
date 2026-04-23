@@ -68,6 +68,7 @@
 #include "diagnostics/FindDataPanel.h"
 #include "render/GPURenderUtils.h"
 #include "render/SequenceMedia.h"
+#include "render/SequencePackage.h"
 #include "shared/utils/wxUtilities.h"
 #include "graphics/wxTextDrawingContext.h"
 #include "utils/AppCallbacks.h"
@@ -1809,8 +1810,14 @@ xLightsFrame::xLightsFrame(wxWindow* parent, int ab, wxWindowID id, bool renderO
     config->Read("xLightsBackupSubdirectories", &_backupSubfolders, true);
     spdlog::debug("Backup subdirectories: {}.", toStr(_backupSubfolders));
 
-    config->Read("xLightsExcludePresetsPkgSeq", &_excludePresetsFromPackagedSequences, false);
-    spdlog::debug("Exclude Presets From Packaged Sequences: {}.", toStr(_excludePresetsFromPackagedSequences));
+    // Previously `xLightsExcludePresetsPkgSeq` — that option stripped
+    // the `<effects>` node from packaged rgbeffects, but presets now
+    // live under a different element so the strip was a no-op. Replaced
+    // with "Exclude Videos" which covers the legitimate concern
+    // (copyright) that the old label was trying to address. Old config
+    // value is silently discarded — semantics don't translate.
+    config->Read("xLightsExcludeVideosPkgSeq", &_excludeVideosFromPackagedSequences, false);
+    spdlog::debug("Exclude Videos From Packaged Sequences: {}.", toStr(_excludeVideosFromPackagedSequences));
 
     config->Read("xLightsPromptBatchRenderIssues", &_promptBatchRenderIssues, true);
     spdlog::debug("Prompt for issues during batch render: {}.", toStr(_promptBatchRenderIssues));
@@ -2335,7 +2342,7 @@ xLightsFrame::~xLightsFrame()
     config->Write("xLightsRenderOnSave", mRenderOnSave);
     config->Write("xLightsSaveFseqOnSave", mSaveFseqOnSave);
     config->Write("xLightsBackupSubdirectories", _backupSubfolders);
-    config->Write("xLightsExcludePresetsPkgSeq", _excludePresetsFromPackagedSequences);
+    config->Write("xLightsExcludeVideosPkgSeq", _excludeVideosFromPackagedSequences);
     config->Write("xLightsPromptBatchRenderIssues", _promptBatchRenderIssues);
     config->Write("xLightsIgnoreVendorModelRecommendations2", _ignoreVendorModelRecommendations);
     config->Write("xLightsControllerPingInterval", _controllerPingInterval);
@@ -7443,131 +7450,13 @@ void xLightsFrame::ShiftSelectedEffectsOnLayer(EffectLayer* el, int milliseconds
     }
 }
 
-// returns the lost files path if required
-std::string AddFileToZipFile(const std::string& baseDirectory, const std::string& file, wxZipOutputStream& zip, std::list<std::string>& zippedFiles, const std::string& actualfile = "")
-{
-
-    bool dozip = std::find(begin(zippedFiles), end(zippedFiles), file) == end(zippedFiles);
-
-    if (dozip) {
-        zippedFiles.push_back(file);
-    }
-
-    std::string filetoactuallyzip = actualfile;
-    if (actualfile == "")
-        filetoactuallyzip = file;
-
-    std::string lost = "";
-    if (FileExists(filetoactuallyzip)) {
-        wxFileName bd(baseDirectory);
-        std::string showdir = bd.GetName().ToStdString();
-
-        wxFileName fn(file);
-        wxString f(file);
-#ifdef __WXMSW__
-        // Windows doesnt care about case so we can be more permissive
-        if (f.Lower().StartsWith(wxString(baseDirectory).Lower()))
-#else
-        if (f.StartsWith(baseDirectory))
-#endif
-        {
-            if (dozip) {
-                // this is in our folder
-                std::string tgt = file.substr(baseDirectory.length());
-                if (tgt != "" && (tgt[0] == '\\' || tgt[0] == '/')) {
-                    tgt = tgt.substr(1);
-                }
-                tgt = showdir + "/" + tgt;
-                if (zip.PutNextEntry(tgt)) {
-                    wxFileInputStream fis(filetoactuallyzip);
-                    if (fis.IsOk()) {
-                        zip.Write(fis);
-                    } else {
-                        spdlog::warn("Error adding {} to {} due to failure to create input stream.", (const char*)file.c_str(), (const char*)tgt.c_str());
-                    }
-                    zip.CloseEntry();
-                } else {
-                    spdlog::warn("    Error zipping {} to {}.", (const char*)file.c_str(), (const char*)tgt.c_str());
-                }
-            }
-        } else {
-            // this isnt
-            std::string tgt = "_lost/" + fn.GetName().ToStdString() + "." + fn.GetExt().ToStdString();
-            tgt = showdir + "/" + tgt;
-            lost = tgt;
-            if (dozip) {
-                if (zip.PutNextEntry(tgt)) {
-                    wxFileInputStream fis(filetoactuallyzip);
-                    zip.Write(fis);
-                    zip.CloseEntry();
-                } else {
-                    spdlog::warn("    Error zipping {} to {}.", (const char*)file.c_str(), (const char*)tgt.c_str());
-                }
-            }
-        }
-    }
-    return lost;
-}
-
-std::string FixFile(const std::string& showdir, const std::string& sourcefile, const std::map<std::string, std::string>& lostfiles)
-{
-    std::string newfile = "";
-
-    if (lostfiles.size() > 0) {
-        // create a temporary file
-        newfile = wxFileName::CreateTempFileName("rgbe").ToStdString();
-
-        // read all of the existing file into memory
-        wxFile in(sourcefile);
-        wxString data;
-        in.ReadAll(&data);
-        in.Close();
-
-        // use regex to search and replace all the lost file locations
-        for (auto it = lostfiles.begin(); it != lostfiles.end(); ++it) {
-            // strip off the show folder
-            wxString replace(it->second);
-            wxString newreplace = replace.AfterFirst('/');
-            if (newreplace == replace) {
-                newreplace = replace.AfterFirst('\\');
-            }
-
-            data.Replace(it->first, showdir + "/" + newreplace, true);
-        }
-
-        // write the file out
-        wxFile out(newfile, wxFile::write);
-        out.Write(data);
-        out.Close();
-    }
-
-    return newfile;
-}
-
-std::string StripPresets(const std::string& sourcefile)
-{
-    std::string newfile = wxFileName::CreateTempFileName("rgbe").ToStdString();
-
-    // read all of the existing file into memory
-    wxFile in(sourcefile);
-    wxString data;
-    in.ReadAll(&data);
-    in.Close();
-
-    int start = data.Find("<effects version=\"");
-    int end = data.Find("</effects>") + 10;
-
-    if (end >= 10) {
-        data = data.substr(0, start) + "<effects version=\"0006\"/>" + data.substr(end);
-    }
-
-    // write the file out
-    wxFile out(newfile, wxFile::write);
-    out.Write(data);
-    out.Close();
-
-    return newfile;
-}
+// Former helpers `AddFileToZipFile`, `FixFile`, and `StripPresets`
+// were removed when `PackageSequence` moved to
+// `SequencePackage::Pack` in `src-core/render/`. The new packager
+// walks SequenceMedia / ModelManager / ViewObjectManager directly,
+// preserves show-relative paths, and rewrites external references
+// on in-memory copies of rgbeffects + .xsq — no `_lost/` dumping
+// and no on-disk temp files.
 
 #pragma region Tools Menu
 
@@ -7608,7 +7497,6 @@ void xLightsFrame::OnMenuItem_PackageSequenceSelected(wxCommandEvent& event)
 
 std::string xLightsFrame::PackageSequence(bool showDialogs)
 {
-
     wxLogNull logNo; // kludge: avoid "error 0" message from wxWidgets after new file is written
 
     if (mSavedChangeCount != _sequenceElements.GetChangeCount() && showDialogs) {
@@ -7621,7 +7509,6 @@ std::string xLightsFrame::PackageSequence(bool showDialogs)
 
     if (showDialogs) {
         wxFileDialog fd(this, "Zip file to create.", CurrentDir, filename, "zip file(*.zip;*.xsqz)|*.xsqz;*.zip", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
-
         if (fd.ShowModal() == wxID_CANCEL) {
             return "";
         }
@@ -7633,190 +7520,101 @@ std::string xLightsFrame::PackageSequence(bool showDialogs)
     }
     RecalcModels();
 
-    wxFileName fnZip(filePath);
-    spdlog::debug("Packaging sequence into {}.", (const char*)fnZip.GetFullPath().c_str());
-
-    wxFFileOutputStream out(fnZip.GetFullPath());
-    wxZipOutputStream zip(out);
+    spdlog::debug("Packaging sequence into {}.", (const char*)filePath.c_str());
 
     wxProgressDialog prog("Package Sequence", "", 100, this, wxPD_APP_MODAL | wxPD_AUTO_HIDE);
     prog.Show();
 
-    std::map<std::string, std::string> lostfiles;
-    std::list<std::string> zippedfiles;
-
-    wxFileName fnNetworks(CurrentDir, OutputManager::GetNetworksFileName());
-    prog.Update(1, fnNetworks.GetFullName());
-    AddFileToZipFile(CurrentDir.ToStdString(), fnNetworks.GetFullPath().ToStdString(), zip, zippedfiles);
-
-    // Add house image
-    wxFileName fnHouse(mBackgroundImage);
-    prog.Update(5, fnHouse.GetFullName());
-    auto lost = AddFileToZipFile(CurrentDir.ToStdString(), fnHouse.GetFullPath().ToStdString(), zip, zippedfiles);
-    if (lost != "") {
-        lostfiles[fnHouse.GetFullPath().ToStdString()] = lost;
+    // Collect the desktop-specific extras: house background image
+    // and any data-layer `.iseq` sources the sequence references.
+    // Pack() derives xlights_rgbeffects.xml and xlights_networks.xml
+    // itself from showDir; the SequenceMedia + model / view-object
+    // walks cover everything else.
+    std::vector<std::string> extras;
+    if (!mBackgroundImage.empty()) {
+        extras.push_back(mBackgroundImage);
     }
-
-    prog.Update(10);
-
-    std::list<std::string> facesUsed;
-    for (size_t j = 0; j < _sequenceElements.GetElementCount(0); j++) {
-        Element* e = _sequenceElements.GetElement(j);
-        facesUsed.splice(end(facesUsed), e->GetFacesUsed(effectManager));
-
-        if (dynamic_cast<ModelElement*>(e) != nullptr) {
-            for (int s = 0; s < dynamic_cast<ModelElement*>(e)->GetSubModelAndStrandCount(); s++) {
-                SubModelElement* se = dynamic_cast<ModelElement*>(e)->GetSubModel(s);
-                facesUsed.splice(end(facesUsed), se->GetFacesUsed(effectManager));
-            }
-            for (int s = 0; s < dynamic_cast<ModelElement*>(e)->GetStrandCount(); s++) {
-                StrandElement* se = dynamic_cast<ModelElement*>(e)->GetStrand(s);
-                facesUsed.splice(end(facesUsed), se->GetFacesUsed(effectManager));
-            }
-        }
-    }
-    facesUsed.sort();
-    facesUsed.unique();
-
-    // Add any model images
-    std::list<std::string> modelfiles;
-    for (const auto& m : AllModels) {
-        modelfiles.splice(end(modelfiles), m.second->GetFaceFiles(facesUsed, false, false));
-        modelfiles.splice(end(modelfiles), m.second->GetFileReferences());
-    }
-    for (const auto& o : AllObjects) {
-        modelfiles.splice(end(modelfiles), o.second->GetFileReferences());
-    }
-    modelfiles.sort();
-    modelfiles.unique();
-
-    float i = 0;
-    for (const auto& f : modelfiles) {
-        i++;
-        wxFileName fnf(f);
-        if (FileExists(fnf)) {
-            prog.Update(10 + (int)(10.0 * i / (float)modelfiles.size()), fnf.GetFullName());
-            lost = AddFileToZipFile(CurrentDir.ToStdString(), fnf.GetFullPath().ToStdString(), zip, zippedfiles);
-            if (lost != "") {
-                lostfiles[fnf.GetFullPath().ToStdString()] = lost;
-            }
-        } else {
-            prog.Update(10 + (int)(10.0 * i / (float)modelfiles.size()));
+    DataLayerSet& dataLayers = CurrentSeqXmlFile->GetDataLayers();
+    for (int j = 0; j < dataLayers.GetNumLayers(); ++j) {
+        DataLayer* dl = dataLayers.GetDataLayer(j);
+        if (dl && dl->GetName() != "Nutcracker") {
+            extras.push_back(dl->GetDataSource());
         }
     }
 
-    wxFileName fnRGBEffects(CurrentDir, "xlights_rgbeffects.xml");
-    std::string fixfile = FixFile(CurrentDir.ToStdString(), fnRGBEffects.GetFullPath().ToStdString(), lostfiles);
-
-    if (_excludePresetsFromPackagedSequences) {
-        if (fixfile == "") {
-            fixfile = StripPresets(fnRGBEffects.GetFullPath().ToStdString());
-        } else {
-            auto oldfile = fixfile;
-            fixfile = StripPresets(fixfile);
-            wxRemoveFile(oldfile);
+    // Alt audio tracks — gated inside Pack() by excludeAudio.
+    std::vector<std::string> altAudio;
+    for (int j = 0; j < CurrentSeqXmlFile->GetAltTrackCount(); ++j) {
+        const auto& track = CurrentSeqXmlFile->GetAltTrack(j);
+        if (!track.path.empty()) {
+            altAudio.push_back(track.path);
         }
     }
 
-    prog.Update(25, fnRGBEffects.GetFullName());
-    AddFileToZipFile(CurrentDir.ToStdString(), fnRGBEffects.GetFullPath().ToStdString(), zip, zippedfiles, fixfile);
-    if (fixfile != "") {
-        wxRemoveFile(fixfile);
-    }
+    SequencePackOptions opts;
+    opts.excludeAudio  = _excludeAudioFromPackagedSequences;
+    opts.excludeVideos = _excludeVideosFromPackagedSequences;
 
-    lostfiles.clear();
-
-    if (!_excludeAudioFromPackagedSequences) {
-        // Add the media file
-        wxFileName fnMedia(CurrentSeqXmlFile->GetMediaFile());
-        prog.Update(30, fnMedia.GetFullName());
-        lost = AddFileToZipFile(CurrentDir.ToStdString(), fnMedia.GetFullPath().ToStdString(), zip, zippedfiles);
-        if (lost != "") {
-            lostfiles[fnMedia.GetFullPath().ToStdString()] = lost;
-        }
-        prog.Update(35, fnMedia.GetFullName());
-
-        // Add alternate audio tracks
-        for (int i = 0; i < CurrentSeqXmlFile->GetAltTrackCount(); ++i) {
-            const auto& track = CurrentSeqXmlFile->GetAltTrack(i);
-            if (!track.path.empty()) {
-                wxFileName fnAlt(track.path);
-                lost = AddFileToZipFile(CurrentDir.ToStdString(), fnAlt.GetFullPath().ToStdString(), zip, zippedfiles);
-                if (lost != "") {
-                    lostfiles[fnAlt.GetFullPath().ToStdString()] = lost;
-                }
-            }
-        }
-    } else {
-        prog.Update(35, "Skipping audio.");
-    }
-
-    // Add any iseq files
-    DataLayerSet& data_layers = CurrentSeqXmlFile->GetDataLayers();
-    for (int j = 0; j < data_layers.GetNumLayers(); ++j) {
-        DataLayer* dl = data_layers.GetDataLayer(j);
-
-        if (dl->GetName() != "Nutcracker") {
-            wxFileName fndl(dl->GetDataSource());
-
-            lost = AddFileToZipFile(CurrentDir.ToStdString(), fndl.GetFullPath().ToStdString(), zip, zippedfiles);
-            if (lost != "") {
-                lostfiles[fndl.GetFullPath().ToStdString()] = lost;
-            }
-        }
-    }
-
-    // Add any effects images/videos/glediator files
-    std::list<std::string> effectfiles;
-    for (size_t j = 0; j < _sequenceElements.GetElementCount(0); j++) {
-        Element* e = _sequenceElements.GetElement(j);
-        Model* m = AllModels[e->GetModelName()];
-        effectfiles.splice(end(effectfiles), e->GetFileReferences(m, effectManager));
-
-        if (dynamic_cast<ModelElement*>(e) != nullptr) {
-            for (int s = 0; s < dynamic_cast<ModelElement*>(e)->GetSubModelAndStrandCount(); s++) {
-                SubModelElement* se = dynamic_cast<ModelElement*>(e)->GetSubModel(s);
-                effectfiles.splice(end(effectfiles), se->GetFileReferences(m, effectManager));
-            }
-            for (int s = 0; s < dynamic_cast<ModelElement*>(e)->GetStrandCount(); s++) {
-                StrandElement* se = dynamic_cast<ModelElement*>(e)->GetStrand(s);
-                effectfiles.splice(end(effectfiles), se->GetFileReferences(m, effectManager));
-            }
-        }
-    }
-    effectfiles.sort();
-    effectfiles.unique();
-
-    i = 0;
-    for (auto f : effectfiles) {
-        i++;
-        wxFileName fnf(f);
-        if (FileExists(fnf)) {
-            prog.Update(35 + (int)(59.0 * i / (float)effectfiles.size()), fnf.GetFullName());
-            lost = AddFileToZipFile(CurrentDir.ToStdString(), fnf.GetFullPath().ToStdString(), zip, zippedfiles);
-            if (lost != "") {
-                lostfiles[fnf.GetFullPath().ToStdString()] = lost;
-            }
-        } else {
-            prog.Update(30 + (int)(64.0 * i / (float)effectfiles.size()));
-        }
-    }
-
-    fixfile = FixFile(CurrentDir.ToStdString(), CurrentSeqXmlFile->GetFullPath(), lostfiles);
-
-    prog.Update(95, CurrentSeqXmlFile->GetFullName());
-    AddFileToZipFile(CurrentDir.ToStdString(), CurrentSeqXmlFile->GetFullPath(), zip, zippedfiles, fixfile);
-    if (fixfile != "") {
-        wxRemoveFile(fixfile);
-    }
-
-    if (!zip.Close()) {
-        spdlog::warn("Error packaging sequence into {}.", (const char*)filePath.c_str());
-    }
-    out.Close();
+    std::vector<std::string> packWarnings;
+    bool ok = SequencePackage::Pack(
+        std::filesystem::path(filePath.ToStdString()),
+        CurrentDir.ToStdString(),
+        CurrentSeqXmlFile->GetFullPath(),
+        CurrentSeqXmlFile->GetMediaFile(),
+        altAudio,
+        extras,
+        _sequenceElements.GetSequenceMedia(),
+        AllModels,
+        AllObjects,
+        opts,
+        &packWarnings,
+        [&prog](int pct) -> bool {
+            prog.Update(pct);
+            return false;
+        });
 
     prog.Update(100);
 
+    if (!ok) {
+        spdlog::warn("Error packaging sequence into {}.", (const char*)filePath.c_str());
+        if (showDialogs) {
+            wxString msg = "Failed to create sequence package. See the log for details.";
+            if (!packWarnings.empty()) {
+                msg += "\n\nIncomplete list of problems encountered:\n";
+                int shown = 0;
+                for (const auto& w : packWarnings) {
+                    if (shown++ >= 8) { msg += wxString::Format("  … and %zu more", packWarnings.size() - 8); break; }
+                    msg += "  • " + wxString(w) + "\n";
+                }
+            }
+            DisplayWarning(msg, this);
+        }
+        return "";
+    }
+
+    // Per-file problems (missing referenced files, permission-denied
+    // reads on files outside the sandbox's bookmark set, etc.) don't
+    // abort the pack — Pack produces the best package it can and
+    // returns the list of things it skipped. Surface that to the user
+    // so they know the .xsqz they just created may be missing assets.
+    if (showDialogs && !packWarnings.empty()) {
+        wxString msg = wxString::Format(
+            "The sequence was packaged but %zu file%s couldn't be included:\n\n",
+            packWarnings.size(), packWarnings.size() == 1 ? "" : "s");
+        int shown = 0;
+        for (const auto& w : packWarnings) {
+            if (shown++ >= 15) {
+                msg += wxString::Format("\n  … and %zu more — see the log for the full list",
+                                        packWarnings.size() - 15);
+                break;
+            }
+            msg += "  • " + wxString(w) + "\n";
+        }
+        msg += "\nThe resulting package may be incomplete. Files outside the show "
+               "folder and any configured media folders can't be packaged unless "
+               "they're moved or copied into one of those locations first.";
+        DisplayWarning(msg, this);
+    }
     return filePath;
 }
 

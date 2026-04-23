@@ -40,7 +40,7 @@ class OtherSettingsPanel: public wxPanel
 		wxCheckBox* CheckBox_RecycleTips;
 		wxCheckBox* CheckBox_ShowZoneIndicator;
 		wxCheckBox* ExcludeAudioCheckBox;
-		wxCheckBox* ExcludePresetsCheckBox;
+		wxCheckBox* ExcludeVideosCheckBox;
 		wxCheckBox* GPURenderCheckbox;
 		wxCheckBox* HardwareVideoDecodingCheckBox;
 		wxCheckBox* ShaderCheckbox;

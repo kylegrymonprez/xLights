@@ -1137,7 +1137,7 @@ public:
     int effGridPrevX;
     int effGridPrevY;
     bool _backupSubfolders = true;
-    bool _excludePresetsFromPackagedSequences = true;
+    bool _excludeVideosFromPackagedSequences = false;
     bool _excludeAudioFromPackagedSequences = true;
     bool _promptBatchRenderIssues = true;
     bool _disablePromptBatchRenderIssues = false;
@@ -1305,8 +1305,8 @@ public:
     int GetTimelineZooming() const { return _timelineZooming; }
     void SetTimelineZooming(int choice) { _timelineZooming = choice; }
 
-    bool ExcludePresetsFromPackagedSequences() const { return _excludePresetsFromPackagedSequences;}
-    void SetExcludePresetsFromPackagedSequences(bool b) {_excludePresetsFromPackagedSequences = b;}
+    bool ExcludeVideosFromPackagedSequences() const { return _excludeVideosFromPackagedSequences;}
+    void SetExcludeVideosFromPackagedSequences(bool b) {_excludeVideosFromPackagedSequences = b;}
 
     bool ExcludeAudioFromPackagedSequences() const { return _excludeAudioFromPackagedSequences;}
     void SetExcludeAudioFromPackagedSequences(bool b) {_excludeAudioFromPackagedSequences = b;}
@@ -1327,9 +1327,9 @@ public:
 
     bool GetPurgeDownloadCacheOnStart() const { return _purgeDownloadCacheOnStart; }
     void SetPurgeDownloadCacheOnStart(bool b) { _purgeDownloadCacheOnStart = b; }
-    bool GetEnablePositionZones() const { return _enablePositionZones; }
+    bool GetEnablePositionZones() const override { return _enablePositionZones; }
     void SetEnablePositionZones(bool b) { _enablePositionZones = b; }
-    bool GetShowZoneIndicator() const { return _showZoneIndicator; }
+    bool GetShowZoneIndicator() const override { return _showZoneIndicator; }
     void SetShowZoneIndicator(bool b) { _showZoneIndicator = b; }
 
     bool GetRecycleTips() const;

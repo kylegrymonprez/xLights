@@ -15,6 +15,18 @@ class SequencerViewModel {
     /// on this; extraction of a multi-MB package with embedded
     /// media takes long enough (seconds) to warrant a spinner.
     var isExtractingPackage = false
+    /// For iOS packages opened from iCloud Drive / external Files
+    /// providers: the original URL the user tapped. We copy the
+    /// package into the app sandbox before extract (path-based ops
+    /// can't read `~/Library/Mobile Documents` without iCloud
+    /// entitlements) and copy the repacked package back to this URL
+    /// on save so edits land in the original file. Nil for packages
+    /// opened from inside the sandbox already.
+    @ObservationIgnored var packageOriginalURL: URL?
+    /// Sandbox directory holding the incoming-copy of an opened
+    /// `.xsqz`. Wiped in closeSequence so repeated opens don't leak
+    /// tmp dirs.
+    @ObservationIgnored var packageSandboxDir: URL?
     /// Dirty marker mirrored from `XLSequenceDocument.isSequenceDirty`.
     /// Updated by the dirty-poll timer (500ms) while a sequence is
     /// loaded — toolbar Save / close-with-prompt key off it. Poll
@@ -529,11 +541,35 @@ class SequencerViewModel {
     /// unzip, and the main queue is the SwiftUI update thread.
     /// `isExtractingPackage` flips to true for the duration so UI
     /// shells can show a progress affordance.
+    /// Primary entry point for opening an `.xsqz` already located
+    /// inside the app sandbox (no iCloud / Files-provider plumbing
+    /// needed). Used by the internal Repack + Extract paths where
+    /// the sandbox constraint doesn't apply. iOS callers coming in
+    /// from a Files tap should use `openPackagedSequence(sandboxPath:
+    /// originalURL:)` below, which handles the copy-in + copy-out
+    /// book-ending.
     func openPackagedSequence(path: String) {
+        openPackagedSequence(sandboxPath: path, originalURL: nil)
+    }
+
+    /// Open an `.xsqz` that was copied into the app sandbox from a
+    /// Files-provider URL. `originalURL` is the user-tapped URL we
+    /// should copy back to on save — iCloud Drive / external items
+    /// need this round-trip because their path-based filesystem
+    /// access is denied without special entitlements. Pass nil when
+    /// the package already lives inside the sandbox.
+    func openPackagedSequence(sandboxPath: String, originalURL: URL?) {
         guard !isExtractingPackage else { return }
         isExtractingPackage = true
 
+        // Remember the book-ending info so `saveSequence` can copy
+        // the freshly-repacked sandbox file back to the original URL
+        // and `closeSequence` can wipe the sandbox scratch dir.
+        packageOriginalURL = originalURL
+        packageSandboxDir = URL(fileURLWithPath: sandboxPath).deletingLastPathComponent()
+
         let doc = document
+        let path = sandboxPath
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let ok = doc.openPackagedSequence(atPath: path)
             DispatchQueue.main.async { [weak self] in
@@ -546,6 +582,21 @@ class SequencerViewModel {
                 // inner `.xsq` loaded. If the two paths ever
                 // grow more shared work than differs, refactor
                 // the body into a `finishSequenceLoaded` helper.
+                //
+                // Flip `isShowFolderLoaded` true here even when the
+                // user hadn't configured a show folder yet (fresh
+                // install / App-Store-review case). The bridge's
+                // context is now pointing at the extracted temp
+                // dir, which is a valid self-contained show folder.
+                // Without this the ContentView keeps rendering
+                // ShowFolderSetupView forever because the sequencer
+                // branch is gated behind isShowFolderLoaded.
+                // Mirror the bridge's show-dir path into
+                // showFolderPath so any UI that displays the
+                // current show folder shows something sensible
+                // during the package session.
+                self.showFolderPath = self.document.showFolderPath() ?? ""
+                self.isShowFolderLoaded = true
                 self.isSequenceLoaded = true
                 self.isDirty = false
                 self.sequenceName = self.document.sequenceName()
@@ -560,10 +611,16 @@ class SequencerViewModel {
                 self.startBackgroundRender()
                 self.startDirtyPolling()
                 self.scheduleBrokenMediaScan()
-                // Record the `.xsqz` (not the temp `.xsq`) in recents —
-                // that's the user-meaningful file and the one that'll
-                // still exist on the next launch.
-                RecentSequences.record(path: path)
+                // Record the user-meaningful path in recents. For
+                // Files-provider opens that went through the
+                // sandbox round-trip, the sandbox path is ephemeral
+                // (wiped on close) so record the original URL path
+                // instead — re-opening from recents will only work
+                // if a persistent bookmark was minted for that URL,
+                // but at worst the user gets a "can't open" and
+                // re-taps from Files.
+                let recordPath = originalURL?.path ?? path
+                RecentSequences.record(path: recordPath)
                 self.startAutosaveTimer()
             }
         }
@@ -608,6 +665,26 @@ class SequencerViewModel {
             document.saveSequence()
         }
         if ok {
+            // For Files-provider `.xsqz` opens: the bridge just
+            // repacked the sandbox copy. Copy it back to the
+            // original URL (iCloud Drive / external provider) so
+            // the user's edits land in the file they actually
+            // tapped. Uses URL-based APIs + NSFileCoordinator so
+            // the security scope on the original URL (re-resolved
+            // from the persistent bookmark) is honoured. A failure
+            // here is a genuine save failure — surface it by
+            // flipping `ok` false so isDirty stays set and the
+            // caller knows.
+            if let originalURL = packageOriginalURL,
+               document.isPackagedSequence() {
+                let sandboxPkgPath = document.packagePath() ?? ""
+                if sandboxPkgPath.isEmpty { return false }
+                let sandboxURL = URL(fileURLWithPath: sandboxPkgPath)
+                if !copySandboxBackToOriginal(sandboxURL: sandboxURL,
+                                               originalURL: originalURL) {
+                    return false
+                }
+            }
             isDirty = false
             // Tier 1 memory mitigation — post-save is a safe
             // checkpoint to drop the undo / redo history.
@@ -618,6 +695,47 @@ class SequencerViewModel {
             document.clearUndoHistory()
         }
         return ok
+    }
+
+    /// Copy a freshly-repacked sandbox `.xsqz` back to the Files-
+    /// provider URL the user originally tapped. Uses
+    /// NSFileCoordinator for write coordination and URL-based
+    /// FileManager APIs so iCloud Drive writes propagate properly.
+    private func copySandboxBackToOriginal(sandboxURL: URL, originalURL: URL) -> Bool {
+        // Re-activate scope via the persistent bookmark minted at
+        // open time. `obtainAccess(toPath:)` resolves the bookmark
+        // and starts a fresh scope on a resolved URL that backs the
+        // subsequent file-coordinator call.
+        _ = XLSequenceDocument.obtainAccess(toPath: originalURL.path,
+                                             enforceWritable: true)
+        let scopeStarted = originalURL.startAccessingSecurityScopedResource()
+        defer {
+            if scopeStarted {
+                originalURL.stopAccessingSecurityScopedResource()
+            }
+        }
+        var coordErr: NSError?
+        var writeErr: Error?
+        let coordinator = NSFileCoordinator()
+        coordinator.coordinate(writingItemAt: originalURL,
+                                options: .forReplacing,
+                                error: &coordErr) { writeURL in
+            do {
+                // .forReplacing hands us a scratch URL to write
+                // into; the coordinator atomically swaps it for the
+                // real item when the block returns successfully.
+                if FileManager.default.fileExists(atPath: writeURL.path) {
+                    try FileManager.default.removeItem(at: writeURL)
+                }
+                try FileManager.default.copyItem(at: sandboxURL, to: writeURL)
+            } catch {
+                writeErr = error
+            }
+        }
+        if coordErr != nil || writeErr != nil {
+            return false
+        }
+        return true
     }
 
     /// Save to a new path. Caller is responsible for invoking a
@@ -869,7 +987,33 @@ class SequencerViewModel {
         // hold pointers into those structures and would crash on next
         // frame access if we proceeded with close while they're busy.
         _ = document.abortRenderAndWait(5.0)
+        let wasPackaged = packageSandboxDir != nil
         document.closeSequence()
+
+        // Wipe the sandbox scratch dir used for Files-provider
+        // `.xsqz` opens (if any). The bridge's closeSequence wiped
+        // the *extraction* temp dir; this wipes the separate
+        // "incoming copy" dir that held the sandbox `.xsqz` itself.
+        if let sandbox = packageSandboxDir {
+            try? FileManager.default.removeItem(at: sandbox)
+        }
+        packageSandboxDir = nil
+        packageOriginalURL = nil
+
+        // Post-package cleanup: if we opened an `.xsqz` on a fresh
+        // install with no pre-existing show folder, the bridge's
+        // show dir was pointed at the (now-wiped) temp dir. There's
+        // nothing sensible to route the user to, so drop back to
+        // the show-folder setup screen. FolderConfig.showFolder
+        // (the persisted config) tells us whether a "real" show
+        // folder was ever configured — if so, the bridge's
+        // closeSequence already re-loaded it and we leave
+        // isShowFolderLoaded true.
+        if wasPackaged && FolderConfig.showFolder == nil {
+            isShowFolderLoaded = false
+            showFolderPath = ""
+        }
+
         isSequenceLoaded = false
         isDirty = false
         isRenderDone = false

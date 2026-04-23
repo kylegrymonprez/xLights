@@ -1057,9 +1057,6 @@
     <ClCompile Include="..\src-ui-wx\ai\AIColorPaletteDialog.cpp">
       <Filter>ai</Filter>
     </ClCompile>
-    <ClCompile Include="..\src-core\ai\aiBase.cpp">
-      <Filter>ai</Filter>
-    </ClCompile>
     <ClCompile Include="..\src-core\ai\chatGPT.cpp">
       <Filter>ai</Filter>
     </ClCompile>

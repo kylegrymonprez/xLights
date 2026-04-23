@@ -437,7 +437,6 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="..\src-core\utils\FileUtils.cpp" />
     <ClCompile Include="..\src-core\utils\NodeUtils.cpp" />
     <ClCompile Include="..\src-ui-wx\app-shell\AboutDialog.cpp" />
-    <ClCompile Include="..\src-core\ai\aiBase.cpp" />
     <ClCompile Include="..\src-core\ai\chatGPT.cpp" />
     <ClCompile Include="..\src-core\ai\claude.cpp" />
     <ClCompile Include="..\src-core\ai\gemini.cpp" />

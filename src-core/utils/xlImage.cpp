@@ -194,7 +194,12 @@ AnimatedImageData LoadAnimatedGIFFromMemory(const uint8_t* data, size_t len) {
                     currDisposal  = (ef >> 2) & 0x07;
                     int deciSecs  = r16();
                     currDelay     = (deciSecs > 0) ? deciSecs * 10 : 100;
-                    currTranspIdx = (ef & 0x01) ? (int)r8() : (r8(), -1);
+                    if (ef & 0x01) {
+                        currTranspIdx = (int)r8();
+                    } else {
+                        r8(); // consume the byte (always present in the 4-byte block)
+                        currTranspIdx = -1;
+                    }
                     bsz -= 4;
                 }
                 if (bsz > 0) pos += bsz;

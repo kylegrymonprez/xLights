@@ -186,6 +186,12 @@ struct ContentView: View {
     /// `viewModel.isShowFolderLoaded` onChange below.
     @State private var pendingOpenURL: URL? = nil
 
+    /// User-facing error when an incoming package (`.xsqz` tapped
+    /// in Files) can't be copied into the app sandbox. Non-nil
+    /// values surface an alert; the caller sets this from the
+    /// URL-handling path.
+    @State private var openURLErrorMessage: String? = nil
+
     var body: some View {
         VStack(spacing: 0) {
             if viewModel.memoryWarning {
@@ -239,6 +245,18 @@ struct ContentView: View {
         .onChange(of: viewModel.isSequenceLoaded) { _, loaded in
             if loaded {
                 checkAutosaveRecovery()
+                // `.onAppear` opens the folder-config sheet for
+                // fresh-install cases (no show folder configured).
+                // When an `.xsqz` Files-tap races the launch and
+                // opens a packaged sequence first, the auto-open
+                // sheet is still visible on top of the sequencer —
+                // the user has to manually tap Cancel. Detecting
+                // isSequenceLoaded true is the clean signal that
+                // the setup prompt is no longer needed; dismiss it
+                // so the App-Store-review flow is a single tap.
+                if showFolderConfig {
+                    showFolderConfig = false
+                }
             } else {
                 autosaveRecoveryDate = nil
                 lastCheckedSequencePath = ""
@@ -331,6 +349,15 @@ struct ContentView: View {
             guard newPhase == .background else { return }
             snapshotDetachState()
         }
+        .alert("Couldn't open package",
+               isPresented: Binding(
+                get: { openURLErrorMessage != nil },
+                set: { if !$0 { openURLErrorMessage = nil } }
+               )) {
+            Button("OK", role: .cancel) { openURLErrorMessage = nil }
+        } message: {
+            Text(openURLErrorMessage ?? "")
+        }
         .alert("Recover Autosave Backup?",
                isPresented: Binding(
                 get: { autosaveRecoveryDate != nil },
@@ -406,17 +433,95 @@ struct ContentView: View {
     private func handleIncomingSequenceURL(_ url: URL) {
         let path = url.path
         guard !path.isEmpty else { return }
-        _ = XLSequenceDocument.obtainAccess(toPath: path,
-                                             enforceWritable: true)
+
         if isPackageURL(url) {
-            viewModel.openPackagedSequence(path: path)
+            // `.xsqz` on iOS: the URL typically points at
+            // `~/Library/Mobile Documents/...` (iCloud Drive) or
+            // another Files-provider location outside our sandbox.
+            // Security scope grants URL-based read access, but the
+            // bridge's minizip-backed extract uses path-based POSIX
+            // syscalls which the sandbox rejects with EPERM for those
+            // locations (unless the app holds iCloud-documents
+            // entitlements, which we don't). Copy the package into
+            // our app sandbox using NSFileCoordinator + URL-based
+            // FileManager APIs — both of which honour the temporary
+            // security scope — and hand the sandboxed path to the
+            // extractor. On save, we copy the freshly-repacked
+            // package back to the original URL (also URL-based, same
+            // scope mechanism) so the user's edits land in the
+            // original `.xsqz` they tapped.
+            guard let sandboxURL = copyPackageToSandbox(originalURL: url) else {
+                openURLErrorMessage =
+                    "Couldn't open \(url.lastPathComponent). "
+                    + "xLights was unable to read the file from its source — if it lives in iCloud Drive, "
+                    + "make sure the item is downloaded and try again."
+                return
+            }
+            viewModel.openPackagedSequence(sandboxPath: sandboxURL.path,
+                                            originalURL: url)
             return
         }
+
+        // Non-package (.xsq) path — obtain access normally. iCloud
+        // Drive .xsq taps have the same sandbox limitation in
+        // theory, but in practice .xsq files almost always live
+        // inside an already-bookmarked show folder whose ancestor
+        // bookmark covers the child path. Leaving that branch as-is.
+        let scopeStarted = url.startAccessingSecurityScopedResource()
+        _ = XLSequenceDocument.obtainAccess(toPath: path,
+                                             enforceWritable: true)
+        if scopeStarted {
+            url.stopAccessingSecurityScopedResource()
+        }
+
         if viewModel.isShowFolderLoaded {
             viewModel.openSequence(path: path)
         } else {
             pendingOpenURL = url
         }
+    }
+
+    /// Copy a Files-provider `.xsqz` into the app sandbox so the
+    /// bridge's path-based extract APIs work. iCloud Drive items are
+    /// downloaded on demand by NSFileCoordinator; non-iCloud items
+    /// are just byte-copied. Returns the sandboxed URL on success.
+    private func copyPackageToSandbox(originalURL: URL) -> URL? {
+        let scopeStarted = originalURL.startAccessingSecurityScopedResource()
+        defer {
+            if scopeStarted {
+                originalURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        // Use a per-open subdirectory so closeSequence can wipe just
+        // this session's copy without disturbing any concurrent open.
+        let sandboxDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("xsqz-incoming", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(at: sandboxDir,
+                                                     withIntermediateDirectories: true)
+        } catch {
+            return nil
+        }
+        let dest = sandboxDir.appendingPathComponent(originalURL.lastPathComponent)
+
+        var coordErr: NSError?
+        var copyErr: Error?
+        let coordinator = NSFileCoordinator()
+        coordinator.coordinate(readingItemAt: originalURL,
+                                options: [],
+                                error: &coordErr) { readURL in
+            do {
+                try FileManager.default.copyItem(at: readURL, to: dest)
+            } catch {
+                copyErr = error
+            }
+        }
+        if coordErr != nil || copyErr != nil {
+            return nil
+        }
+        return dest
     }
 
     /// True iff the URL's pathExtension marks it as a sequence
