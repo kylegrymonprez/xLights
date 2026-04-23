@@ -2694,6 +2694,7 @@ void SelectMediaDialog::OnAddFromDisk(wxCommandEvent& event)
         case MediaType::Shader:   _panel->_sequenceMedia->GetShader(path); break;
         case MediaType::TextFile: _panel->_sequenceMedia->GetTextFile(path); break;
         case MediaType::BinaryFile: _panel->_sequenceMedia->GetBinaryFile(path); break;
+        case MediaType::Audio:    _panel->_sequenceMedia->GetAudio(path); break;
     }
 
     _panel->Populate(path);

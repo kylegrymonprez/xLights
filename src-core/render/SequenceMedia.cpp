@@ -1599,7 +1599,22 @@ std::shared_ptr<AudioMediaCacheEntry> SequenceMedia::GetAudio(const std::string&
     std::unique_lock lock(_cacheMutex);
     auto it = _audioCache.find(filepath);
     if (it != _audioCache.end()) {
-        return it->second;
+        auto ret = it->second;
+        if (!ret->isLoaded()) {
+            lock.unlock();
+            ret->Load();
+        }
+        ret->ReloadIfChanged();
+        return ret;
+    }
+    // Check if the resolved path matches an existing entry
+    std::string resolved = ResolvePath(filepath);
+    for (auto& [key, entry] : _audioCache) {
+        if (entry->GetFilePath() == resolved || ResolvePath(key) == resolved) {
+            if (!entry->isLoaded()) { lock.unlock(); entry->Load(); }
+            entry->ReloadIfChanged();
+            return entry;
+        }
     }
     auto np = std::make_shared<AudioMediaCacheEntry>(filepath);
     _audioCache.emplace(filepath, np);
