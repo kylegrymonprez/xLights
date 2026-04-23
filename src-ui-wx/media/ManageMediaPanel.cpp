@@ -53,6 +53,22 @@ static std::string MediaTypeName(MediaType t) {
     return "Unknown";
 }
 
+// Filesystem subdirectory name for copying files into the show folder.
+// Separate from MediaTypeName so display labels and path segments stay consistent
+// with established show-folder conventions (Images/, Videos/, Shaders/, Glediators/, …).
+static std::string SubdirForMediaType(MediaType t) {
+    switch (t) {
+        case MediaType::Image:      return "Images";
+        case MediaType::SVG:        return "SVGs";
+        case MediaType::Shader:     return "Shaders";
+        case MediaType::TextFile:   return "Text";
+        case MediaType::BinaryFile: return "Glediators";
+        case MediaType::Video:      return "Videos";
+        case MediaType::Audio:      return "Audio";
+    }
+    return "Media";
+}
+
 // Returns <showDirectory>/ImportedMedia/<seqStem>/<subFolder>, or empty if no
 // sequence is loaded or no show directory is set.
 // NOTE: GetSeqXmlFileName() may return the show directory path when the sequence
@@ -95,18 +111,19 @@ static wxString WildcardForMediaType(std::optional<MediaType> type) {
         return "All Media Files|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tiff;*.tga;*.pcx;*.ico;"
                "*.avi;*.mp4;*.mkv;*.mov;*.asf;*.flv;*.mpg;*.mpeg;*.m4v;*.wmv;"
                "*.mp3;*.ogg;*.m4a;*.wav;*.flac;*.aac;*.wma;"
-               "*.svg;*.fs;*.txt|"
+               "*.svg;*.fs;*.txt;*.gled;*.out;*.csv|"
                "Image Files|*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tiff;*.tga;*.pcx;*.ico|"
                "Video Files|*.avi;*.mp4;*.mkv;*.mov;*.asf;*.flv;*.mpg;*.mpeg;*.m4v;*.wmv|"
                "Audio Files|*.mp3;*.ogg;*.m4a;*.wav;*.flac;*.aac;*.wma|"
                "SVG Files|*.svg|"
                "Shader Files|*.fs|"
                "Text Files|*.txt|"
+               "Glediator Files|*.gled;*.out;*.csv|"
                "All files (*.*)|*.*";
     }
     switch (*type) {
         case MediaType::Image: return wxImage::GetImageExtWildcard();
-        case MediaType::Video: return "Video Files|*.avi;*.mp4;*.mkv;*.mov;*.asf;*.flv;*.mpg;*.mpeg;*.m4v;*.wmv;*.gif";
+        case MediaType::Video: return "Video Files|*.avi;*.mp4;*.mkv;*.mov;*.asf;*.flv;*.mpg;*.mpeg;*.m4v;*.wmv";
         case MediaType::Shader: return "Shader Files (*.fs)|*.fs";
         case MediaType::SVG: return "SVG Files (*.svg)|*.svg";
         case MediaType::TextFile: return "Text Files (*.txt)|*.txt";
@@ -210,6 +227,8 @@ static MediaType MediaTypeFromPath(const std::string& path)
         return MediaType::SVG;
     if (ext == "txt")
         return MediaType::TextFile;
+    if (ext == "gled" || ext == "out" || ext == "csv")
+        return MediaType::BinaryFile;
     if (ext == "avi" || ext == "mp4" || ext == "mkv" || ext == "mov" ||
         ext == "asf" || ext == "flv" || ext == "mpg" || ext == "mpeg" ||
         ext == "m4v" || ext == "wmv")
@@ -1797,7 +1816,7 @@ void ManageMediaPanel::OnAddButtonClick(wxCommandEvent& event)
     for (const auto& p : paths) {
         std::string path = ToStdString(p);
         MediaType type = MediaTypeFromPath(path);
-        std::string subDirName = MediaTypeName(type);
+        std::string subDirName = SubdirForMediaType(type);
 
         // For videos, check AVFoundation compatibility up front.
         if (type == MediaType::Video) {
@@ -1806,7 +1825,7 @@ void ManageMediaPanel::OnAddButtonClick(wxCommandEvent& event)
             path = maybe;
             // Re-detect after transcoding in case the output extension changed
             type = MediaTypeFromPath(path);
-            subDirName = MediaTypeName(type);
+            subDirName = SubdirForMediaType(type);
         }
 
         // If the file is outside the show/media folders, require the user to
@@ -1827,13 +1846,18 @@ void ManageMediaPanel::OnAddButtonClick(wxCommandEvent& event)
                 }
             }
 
-            // Shaders are always loaded from disk; no ImportedMedia option for them
+            // Shaders are always loaded from disk; no ImportedMedia option for them.
+            // Non-embeddable types (Video/Audio/BinaryFile) skip the embed option.
+            bool typeIsEmbeddable = (type != MediaType::Video &&
+                                     type != MediaType::Audio &&
+                                     type != MediaType::BinaryFile);
             std::string importedMediaDir;
             if (type != MediaType::Shader)
                 importedMediaDir = ImportedMediaPath(_xlFrame, _showDirectory, subDirName);
 
             wxArrayString choices;
-            choices.Add("Embed in sequence");
+            if (typeIsEmbeddable)
+                choices.Add("Embed in sequence");
             if (!importedMediaDir.empty())
                 choices.Add("Copy to ImportedMedia: " + wxString(importedMediaDir));
             for (const auto& dir : copyTargets)
@@ -1847,10 +1871,10 @@ void ManageMediaPanel::OnAddButtonClick(wxCommandEvent& event)
 
             int sel = choiceDlg.GetSelection();
             bool hasImported = !importedMediaDir.empty();
-            // choices: 0=Embed, 1=ImportedMedia (if present), 1or2+=Copy to dirs
-            int copyOffset = 1 + (hasImported ? 1 : 0);
+            int embedOffset = typeIsEmbeddable ? 1 : 0;
+            int copyOffset = embedOffset + (hasImported ? 1 : 0);
 
-            if (sel == 0) {
+            if (typeIsEmbeddable && sel == 0) {
                 // Embed in sequence — images use the typed-key embed scheme;
                 // all other types embed in place via the cross-type API.
                 if (type == MediaType::Image) {
@@ -1899,7 +1923,7 @@ void ManageMediaPanel::OnAddButtonClick(wxCommandEvent& event)
                     lastPath = path;
                 }
                 continue;
-            } else if (hasImported && sel == 1) {
+            } else if (hasImported && sel == embedOffset) {
                 // Copy to ImportedMedia/<seqStem>/<type>
                 std::string newPath = CopyToDir(path, importedMediaDir);
                 if (newPath.empty()) {
@@ -2562,13 +2586,18 @@ void SelectMediaDialog::OnAddFromDisk(wxCommandEvent& event)
             }
         }
 
-        // ImportedMedia option is not shown for shaders
+        // ImportedMedia option is not shown for shaders.
+        // Non-embeddable types (Video/Audio/BinaryFile) skip the embed option.
+        bool regTypeIsEmbeddable = (regType != MediaType::Video &&
+                                    regType != MediaType::Audio &&
+                                    regType != MediaType::BinaryFile);
         std::string importedMediaDir;
         if (regType != MediaType::Shader)
-            importedMediaDir = ImportedMediaPath(_panel->_xlFrame, _panel->_showDirectory, MediaTypeName(regType));
+            importedMediaDir = ImportedMediaPath(_panel->_xlFrame, _panel->_showDirectory, SubdirForMediaType(regType));
 
         wxArrayString choices;
-        choices.Add("Embed in sequence");
+        if (regTypeIsEmbeddable)
+            choices.Add("Embed in sequence");
         if (!importedMediaDir.empty())
             choices.Add("Copy to ImportedMedia: " + wxString(importedMediaDir));
         for (const auto& dir : copyTargets)
@@ -2582,9 +2611,10 @@ void SelectMediaDialog::OnAddFromDisk(wxCommandEvent& event)
 
         int sel = choiceDlg.GetSelection();
         bool hasImported = !importedMediaDir.empty();
+        int embedOffset = regTypeIsEmbeddable ? 1 : 0;
         int importedOffset = hasImported ? 1 : 0;
 
-        if (hasImported && sel == 1) {
+        if (hasImported && sel == embedOffset) {
             // Copy to ImportedMedia/<seqStem>/<type>
             std::string newPath = CopyToDir(path, importedMediaDir);
             if (newPath.empty()) {
@@ -2594,10 +2624,9 @@ void SelectMediaDialog::OnAddFromDisk(wxCommandEvent& event)
             }
             path = newPath;
         } else {
-            int adjustedSel = sel - importedOffset;
-            if (adjustedSel == 0) {
+            int adjustedSel = sel - importedOffset - embedOffset;
+            if (regTypeIsEmbeddable && sel == 0) {
                 // Embed in sequence — register, rename to embedded key, embed
-                std::string subdir = MediaTypeName(regType);
                 // Register with original path first
                 switch (regType) {
                     case MediaType::Image:    _panel->_sequenceMedia->GetImage(path); break;
@@ -2628,9 +2657,9 @@ void SelectMediaDialog::OnAddFromDisk(wxCommandEvent& event)
                 return;
             } else {
                 // Copy to one of the folders
-                std::string targetDir = copyTargets[adjustedSel - 1];
+                std::string targetDir = copyTargets[adjustedSel];
                 std::string newPath;
-                std::string subFolder = sep + MediaTypeName(regType);
+                std::string subFolder = sep + SubdirForMediaType(regType);
                 if (_panel->_xlFrame && targetDir == _panel->_showDirectory) {
                     newPath = _panel->_xlFrame->MoveToShowFolder(path, subFolder);
                 } else {
