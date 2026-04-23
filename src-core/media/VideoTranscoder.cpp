@@ -32,7 +32,9 @@ bool IsUncompressedCodec(AVCodecID id)
     case AV_CODEC_ID_V308:
     case AV_CODEC_ID_V408:
     case AV_CODEC_ID_R210:
+#ifdef FF_API_AYUV_CODECID
     case AV_CODEC_ID_AYUV:
+#endif
     case AV_CODEC_ID_BMP:
         return true;
     default:
