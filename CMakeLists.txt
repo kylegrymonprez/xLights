@@ -92,7 +92,7 @@ find_package(OpenGL REQUIRED)
 
 # ─── FFmpeg (vendored on Windows, system on Linux/macOS) ────────────────────
 find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h
-    HINTS ${XL_INC}/ffmpeg-8/include
+    HINTS ${XL_INC}/ffmpeg-6/include
     PATHS /usr/include /usr/local/include
     NO_DEFAULT_PATH)
 if(NOT FFMPEG_INCLUDE_DIR)
