@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 project(xLights VERSION 2026.04 LANGUAGES C CXX)
 
+set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT xLights)
+
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_EXTENSIONS ON)   # -std=gnu++20
@@ -198,6 +200,7 @@ set(LUA_INCLUDE_DIR ${XL_DEPS}/lua/src)
 # Core (wx-free)
 file(GLOB_RECURSE SRC_CORE
     src-core/XmlSerializer/*.cpp
+    src-core/ai/*.cpp
     src-core/cad/*.cpp
     src-core/controllers/*.cpp
     src-core/discovery/*.cpp
@@ -205,12 +208,18 @@ file(GLOB_RECURSE SRC_CORE
     src-core/graphics/xlFontInfo.cpp
     src-core/graphics/xlGraphicsAccumulators.cpp
     src-core/graphics/xlMesh.cpp
+    src-core/lyrics/*.cpp
     src-core/media/AudioLoader.cpp
     src-core/media/AudioManager.cpp
+    src-core/media/ChordDetector.cpp
     src-core/media/FFmpegAudioDecoder.cpp
     src-core/media/FFmpegVideoReader.cpp
     src-core/media/MediaCompatibility.cpp
+    src-core/media/OnsetDetector.cpp
+    src-core/media/PitchDetector.cpp
     src-core/media/SDLAudioOutput.cpp
+    src-core/media/Spectrogram.cpp
+    src-core/media/TempoDetector.cpp
     src-core/media/VideoReader.cpp
     src-core/media/VideoTranscoder.cpp
     src-core/media/kiss_fft/kiss_fft.c
@@ -225,16 +234,21 @@ file(GLOB_RECURSE SRC_CORE
 )
 if(WIN32)
     list(APPEND SRC_CORE src-core/media/WindowsHardwareVideoReader.cpp)
+    list(REMOVE_ITEM SRC_CORE
+        ${CMAKE_SOURCE_DIR}/src-core/outputs/serial_posix.cpp
+        ${CMAKE_SOURCE_DIR}/src-core/outputs/serial_osx.cpp
+        ${CMAKE_SOURCE_DIR}/src-core/outputs/serial_win32.cpp)
+elseif(APPLE)
+    list(REMOVE_ITEM SRC_CORE
+        ${CMAKE_SOURCE_DIR}/src-core/media/WindowsHardwareVideoReader.cpp
+        ${CMAKE_SOURCE_DIR}/src-core/outputs/serial_win32.cpp
+        ${CMAKE_SOURCE_DIR}/src-core/outputs/serial_posix.cpp)
 else()
     list(REMOVE_ITEM SRC_CORE
         ${CMAKE_SOURCE_DIR}/src-core/media/WindowsHardwareVideoReader.cpp
-        ${CMAKE_SOURCE_DIR}/src-core/outputs/serial_win32.cpp)
+        ${CMAKE_SOURCE_DIR}/src-core/outputs/serial_win32.cpp
+        ${CMAKE_SOURCE_DIR}/src-core/outputs/serial_osx.cpp)
 endif()
-
-    list(REMOVE_ITEM SRC_CORE
-	${CMAKE_SOURCE_DIR}/src-core/outputs/serial_posix.cpp
-	${CMAKE_SOURCE_DIR}/src-core/outputs/serial_osx.cpp
-        ${CMAKE_SOURCE_DIR}/src-core/outputs/serial_win32.cpp)
 
 # uDMX requires libusb — detect here so SRC_CORE can be filtered before add_executable
 find_package(PkgConfig QUIET)
@@ -331,37 +345,31 @@ file(GLOB_RECURSE SRC_UI
     src-ui-wx/xLightsApp.cpp
     src-ui-wx/xLightsMain.cpp
     src-ui-wx/ai/*.cpp
+    src-ui-wx/app-shell/*.cpp
     src-ui-wx/automation/*.cpp
+    src-ui-wx/color/*.cpp
+    src-ui-wx/controllerproperties/*.cpp
+    src-ui-wx/controllers/*.cpp
+    src-ui-wx/diagnostics/*.cpp
+    src-ui-wx/effectpanels/*.cpp
+    src-ui-wx/effects/*.cpp
+    src-ui-wx/graphics/opengl/xlGLCanvas.cpp
+    src-ui-wx/graphics/opengl/xlOGL3GraphicsContext.cpp
+    src-ui-wx/graphics/wxTextDrawingContext.cpp
     src-ui-wx/import_export/*.cpp
-    src-ui-wx/ui/app-shell/*.cpp
-    src-ui-wx/ui/automation/*.cpp
-    src-ui-wx/ui/color/*.cpp
-    src-ui-wx/ui/controllerproperties/*.cpp
-    src-ui-wx/ui/controllers/*.cpp
-    src-ui-wx/ui/diagnostics/*.cpp
-    src-ui-wx/ui/effectpanels/*.cpp
-    src-ui-wx/ui/effectpanels/assist/*.cpp
-    src-ui-wx/ui/effectpanels/MovingHeadPanels/*.cpp
-    src-ui-wx/ui/effects/*.cpp
-    src-ui-wx/ui/graphics/opengl/xlGLCanvas.cpp
-    src-ui-wx/ui/graphics/opengl/xlOGL3GraphicsContext.cpp
-    src-ui-wx/ui/graphics/wxTextDrawingContext.cpp
-    src-ui-wx/ui/import-export/*.cpp
-    src-ui-wx/ui/layout/*.cpp
-    src-ui-wx/ui/media/*.cpp
-    src-ui-wx/ui/model/*.cpp
-    src-ui-wx/ui/modelproperties/*.cpp
-    src-ui-wx/ui/modelproperties/adapters/*.cpp
-    src-ui-wx/ui/modelproperties/helpers/*.cpp
-    src-ui-wx/ui/preferences/*.cpp
-    src-ui-wx/ui/render/*.cpp
-    src-ui-wx/ui/sequencer/*.cpp
-    src-ui-wx/ui/setup/*.cpp
-    src-ui-wx/ui/shared/controls/*.cpp
-    src-ui-wx/ui/shared/dialogs/*.cpp
-    src-ui-wx/ui/shared/utils/*.cpp
-    src-ui-wx/ui/support/*.cpp
+    src-ui-wx/layout/*.cpp
+    src-ui-wx/media/*.cpp
+    src-ui-wx/model/*.cpp
+    src-ui-wx/modelproperties/*.cpp
+    src-ui-wx/preferences/*.cpp
+    src-ui-wx/render/*.cpp
+    src-ui-wx/sequencer/*.cpp
     src-ui-wx/settings/*.cpp
+    src-ui-wx/setup/*.cpp
+    src-ui-wx/shared/controls/*.cpp
+    src-ui-wx/shared/dialogs/*.cpp
+    src-ui-wx/shared/utils/*.cpp
+    src-ui-wx/support/*.cpp
 )
 
 # Vendored third-party sources
