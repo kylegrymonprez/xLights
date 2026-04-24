@@ -551,6 +551,9 @@ if(WIN32)
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             "${CMAKE_SOURCE_DIR}/resources/html"
             "$<TARGET_FILE_DIR:xLights>/html"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CMAKE_SOURCE_DIR}/resources/controllers"
+            "$<TARGET_FILE_DIR:xLights>/controllers"
         COMMENT "Copying DLLs and resources to output directory"
     )
 endif()
