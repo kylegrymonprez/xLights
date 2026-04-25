@@ -664,6 +664,7 @@ void SequenceMedia::Clear()
     _shaderCache.clear();
     _binaryCache.clear();
     _videoCache.clear();
+    _audioCache.clear();
 }
 
 void SequenceMedia::PurgePreviewCaches()
@@ -841,6 +842,7 @@ bool SequenceMedia::RenameMedia(const std::string& oldPath, const std::string& n
     if (rekey(_textCache))   return true;
     if (rekey(_binaryCache)) return true;
     if (rekey(_videoCache))  return true;
+    if (rekey(_audioCache))  return true;
     return false;
 }
 
@@ -859,6 +861,7 @@ bool SequenceMedia::LoadFromXml(const pugi::xml_node& node)
     _shaderCache.clear();
     _binaryCache.clear();
     _videoCache.clear();
+    _audioCache.clear();
 
     for (auto child : node.children()) {
         std::string name = child.name();
@@ -894,6 +897,11 @@ bool SequenceMedia::LoadFromXml(const pugi::xml_node& node)
             if (entry->LoadFromXml(child)) {
                 _videoCache[entry->GetFilePath()] = entry;
             }
+        } else if (name == "Audio") {
+            auto entry = std::make_shared<AudioMediaCacheEntry>();
+            if (entry->LoadFromXml(child)) {
+                _audioCache[entry->GetFilePath()] = entry;
+            }
         }
     }
 
@@ -922,6 +930,13 @@ void SequenceMedia::SaveToXml(pugi::xml_node& parent) const
 
     // Videos are path-only (not embedded) — only save used entries
     for (const auto& pair : _videoCache) {
+        if (pair.second->IsUsed()) {
+            pair.second->SaveToXml(node);
+        }
+    }
+
+    // Audio files are path-only — only save used entries
+    for (const auto& pair : _audioCache) {
         if (pair.second->IsUsed()) {
             pair.second->SaveToXml(node);
         }
@@ -976,6 +991,9 @@ void SequenceMedia::MarkAllUnused() {
         pair.second->MarkIsUsed(false);
     }
     for (const auto& pair : _videoCache) {
+        pair.second->MarkIsUsed(false);
+    }
+    for (const auto& pair : _audioCache) {
         pair.second->MarkIsUsed(false);
     }
 }
@@ -1424,6 +1442,34 @@ void VideoMediaCacheEntry::SaveToXml(pugi::xml_node& parent) const {
 }
 
 // =====================================================================
+// AudioMediaCacheEntry Implementation
+// =====================================================================
+
+AudioMediaCacheEntry::AudioMediaCacheEntry()
+    : MediaCacheEntry(MediaType::Audio) {}
+
+AudioMediaCacheEntry::AudioMediaCacheEntry(const std::string& filePath)
+    : MediaCacheEntry(MediaType::Audio, filePath) {}
+
+void AudioMediaCacheEntry::Load() {
+    // Audio data is loaded by AudioManager in SequenceFile, not here.
+    // Just mark loading done so IsOk() returns true for path-valid entries.
+    _loadingDone = true;
+}
+
+bool AudioMediaCacheEntry::LoadFromXml(const pugi::xml_node& node) {
+    if (!node || strcmp(node.name(), "Audio") != 0) return false;
+    _filePath = node.attribute("path").as_string("");
+    return !_filePath.empty();
+}
+
+void AudioMediaCacheEntry::SaveToXml(pugi::xml_node& parent) const {
+    // Audio files are never embedded — track by path only
+    auto node = parent.append_child("Audio");
+    node.append_attribute("path") = _filePath;
+}
+
+// =====================================================================
 // SequenceMedia — New type-specific retrieval methods
 // =====================================================================
 
@@ -1581,6 +1627,35 @@ std::shared_ptr<VideoMediaCacheEntry> SequenceMedia::GetVideo(const std::string&
     return np;
 }
 
+std::shared_ptr<AudioMediaCacheEntry> SequenceMedia::GetAudio(const std::string& filepath) {
+    if (filepath.empty()) return nullptr;
+    std::unique_lock lock(_cacheMutex);
+    auto it = _audioCache.find(filepath);
+    if (it != _audioCache.end()) {
+        auto ret = it->second;
+        if (!ret->isLoaded()) {
+            lock.unlock();
+            ret->Load();
+        }
+        ret->ReloadIfChanged();
+        return ret;
+    }
+    // Check if the resolved path matches an existing entry
+    std::string resolved = ResolvePath(filepath);
+    for (auto& [key, entry] : _audioCache) {
+        if (entry->GetFilePath() == resolved || ResolvePath(key) == resolved) {
+            if (!entry->isLoaded()) { lock.unlock(); entry->Load(); }
+            entry->ReloadIfChanged();
+            return entry;
+        }
+    }
+    auto np = std::make_shared<AudioMediaCacheEntry>(filepath);
+    _audioCache.emplace(filepath, np);
+    lock.unlock();
+    np->Load();
+    return np;
+}
+
 // =====================================================================
 // SequenceMedia — Cross-type queries
 // =====================================================================
@@ -1589,7 +1664,8 @@ bool SequenceMedia::HasMedia(const std::string& filepath) const {
     std::scoped_lock lock(_cacheMutex);
     return _imageCache.count(filepath) || _textCache.count(filepath) ||
            _svgCache.count(filepath) || _shaderCache.count(filepath) ||
-           _binaryCache.count(filepath) || _videoCache.count(filepath);
+           _binaryCache.count(filepath) || _videoCache.count(filepath) ||
+           _audioCache.count(filepath);
 }
 
 std::pair<bool, bool> SequenceMedia::GetMediaEmbedState(const std::string& filepath) const {
@@ -1606,6 +1682,7 @@ std::pair<bool, bool> SequenceMedia::GetMediaEmbedState(const std::string& filep
     if (auto r = checkCache(_shaderCache)) return *r;
     if (auto r = checkCache(_binaryCache)) return *r;
     if (auto r = checkCache(_videoCache)) return *r;
+    if (auto r = checkCache(_audioCache)) return *r;
     return { false, false };
 }
 
@@ -1617,6 +1694,7 @@ void SequenceMedia::RemoveMedia(const std::string& filepath) {
     _shaderCache.erase(filepath);
     _binaryCache.erase(filepath);
     _videoCache.erase(filepath);
+    _audioCache.erase(filepath);
 }
 
 bool SequenceMedia::ReloadMedia(const std::string& filepath) {
@@ -1661,26 +1739,34 @@ bool SequenceMedia::ReloadMedia(const std::string& filepath) {
         GetVideo(filepath);
         return true;
     }
+    if (found(_audioCache)) {
+        _audioCache.erase(filepath);
+        GetAudio(filepath);
+        return true;
+    }
     return false;
 }
 
 size_t SequenceMedia::GetMediaCount() const {
     std::scoped_lock lock(_cacheMutex);
     return _imageCache.size() + _textCache.size() + _svgCache.size() +
-           _shaderCache.size() + _binaryCache.size() + _videoCache.size();
+           _shaderCache.size() + _binaryCache.size() + _videoCache.size() +
+           _audioCache.size();
 }
 
 std::vector<std::pair<std::string, MediaType>> SequenceMedia::GetAllMediaPaths() const {
     std::scoped_lock lock(_cacheMutex);
     std::vector<std::pair<std::string, MediaType>> paths;
     paths.reserve(_imageCache.size() + _textCache.size() + _svgCache.size() +
-                   _shaderCache.size() + _binaryCache.size() + _videoCache.size());
+                   _shaderCache.size() + _binaryCache.size() + _videoCache.size() +
+                   _audioCache.size());
     for (const auto& p : _imageCache) paths.emplace_back(p.first, MediaType::Image);
     for (const auto& p : _svgCache) paths.emplace_back(p.first, MediaType::SVG);
     for (const auto& p : _shaderCache) paths.emplace_back(p.first, MediaType::Shader);
     for (const auto& p : _textCache) paths.emplace_back(p.first, MediaType::TextFile);
     for (const auto& p : _binaryCache) paths.emplace_back(p.first, MediaType::BinaryFile);
     for (const auto& p : _videoCache) paths.emplace_back(p.first, MediaType::Video);
+    for (const auto& p : _audioCache) paths.emplace_back(p.first, MediaType::Audio);
     return paths;
 }
 

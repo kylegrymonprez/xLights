@@ -33,7 +33,8 @@ enum class MediaType {
     Shader,
     TextFile,
     BinaryFile,
-    Video
+    Video,
+    Audio
 };
 
 /**
@@ -344,6 +345,27 @@ private:
 };
 
 /**
+ * AudioMediaCacheEntry - Path-only entry for audio files (too large to embed)
+ *
+ * Audio files are never embedded in the sequence — they are always referenced
+ * by path. Loading the actual audio data is handled separately by AudioManager
+ * in SequenceFile; this entry exists purely for inventory and file management
+ * purposes within the media panel.
+ */
+class AudioMediaCacheEntry : public MediaCacheEntry
+{
+public:
+    AudioMediaCacheEntry();
+    explicit AudioMediaCacheEntry(const std::string& filePath);
+
+    bool IsEmbeddable() const override { return false; }
+
+    void Load() override;
+    bool LoadFromXml(const pugi::xml_node& node) override;
+    void SaveToXml(pugi::xml_node& parent) const override;
+};
+
+/**
  * SequenceMedia - Manages all media caching for a sequence
  *
  * Provides unified access to images, SVGs, shaders, text files, binary files,
@@ -381,6 +403,7 @@ public:
     std::shared_ptr<ShaderMediaCacheEntry> GetShader(const std::string& filepath);
     std::shared_ptr<BinaryMediaCacheEntry> GetBinaryFile(const std::string& filepath, const std::string& subtype = "");
     std::shared_ptr<VideoMediaCacheEntry> GetVideo(const std::string& filepath);
+    std::shared_ptr<AudioMediaCacheEntry> GetAudio(const std::string& filepath);
 
     // === Cross-type queries ===
     bool HasMedia(const std::string& filepath) const;
@@ -435,6 +458,7 @@ private:
     std::map<std::string, std::shared_ptr<ShaderMediaCacheEntry>> _shaderCache;
     std::map<std::string, std::shared_ptr<BinaryMediaCacheEntry>> _binaryCache;
     std::map<std::string, std::shared_ptr<VideoMediaCacheEntry>> _videoCache;
+    std::map<std::string, std::shared_ptr<AudioMediaCacheEntry>> _audioCache;
 
     mutable std::recursive_mutex _cacheMutex;
 };
