@@ -2554,7 +2554,9 @@ void SelectMediaDialog::OnAddFromDisk(wxCommandEvent& event)
     GetXLightsConfig()->Write(LastDirConfigKey(_filterType), wxFileName(path).GetPath());
     const std::string sep(1, wxFileName::GetPathSeparator());
 
-    // Determine which MediaType to register as
+    // Determine which MediaType to register as. When no explicit filter is set,
+    // infer from the selected path; this can legitimately produce Audio and
+    // downstream registration logic must handle that case as well.
     MediaType regType = _filterType.has_value() ? *_filterType : MediaTypeFromPath(path);
 
     // For videos, check AVFoundation compatibility up front and offer to
