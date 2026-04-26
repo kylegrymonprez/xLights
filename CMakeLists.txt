@@ -413,12 +413,17 @@ set(SRC_DEPS
 )
 
 # ─── Executable ─────────────────────────────────────────────────────────────
+if(WIN32)
+    set(WIN32_RC xLights/resource.rc)
+endif()
+
 add_executable(xLights WIN32 MACOSX_BUNDLE
     ${SRC_CORE}
     ${SRC_EFFECTS}
     ${SRC_UI}
     ${SRC_DEPS}
     ${LUA_SRC}
+    ${WIN32_RC}
 )
 
 # Add ISPC-generated object files to the link step.
@@ -528,6 +533,45 @@ elseif(UNIX AND NOT APPLE)
         target_link_libraries(xLights PRIVATE ${LIBUSB_LIBRARIES})
     endif()
 endif()
+
+# ─── Stem separation backends ───────────────────────────────────────────────
+# onnx runtime options define XLIGHTS_CMAKE_BUILD so StemSeparator.cpp skips
+# the VS-only #pragma comment(lib,...) directives.
+#
+
+find_package(onnxruntime CONFIG
+    HINTS
+        "${CMAKE_SOURCE_DIR}/include/microsoft.ml.onnxruntime.directml.1.19.2"
+        "${CMAKE_SOURCE_DIR}/include/onnxruntime-win-x64-gpu-1.25.0"
+)
+if(onnxruntime_FOUND)
+    target_link_libraries(xLights PRIVATE onnxruntime::onnxruntime)
+    message(STATUS "Stem separation: ONNX Runtime (cmake package)")
+else()
+    # Fallback: probe the vendored directories directly.
+    find_path(ORT_INCLUDE_DIR onnxruntime_cxx_api.h
+        HINTS
+            "${CMAKE_SOURCE_DIR}/include/microsoft.ml.onnxruntime.directml.1.19.2/build/native/include"
+            "${CMAKE_SOURCE_DIR}/include/onnxruntime-win-x64-gpu-1.25.0/include"
+    )
+    find_library(ORT_LIB onnxruntime
+        HINTS
+            "${CMAKE_SOURCE_DIR}/include/microsoft.ml.onnxruntime.directml.1.19.2/runtimes/win-x64/native"
+            "${CMAKE_SOURCE_DIR}/include/onnxruntime-win-x64-gpu-1.25.0/lib"
+    )
+    if(ORT_INCLUDE_DIR AND ORT_LIB)
+        target_include_directories(xLights PRIVATE ${ORT_INCLUDE_DIR})
+        target_link_libraries(xLights PRIVATE ${ORT_LIB})
+        message(STATUS "Stem separation: ONNX Runtime (vendored at ${ORT_LIB})")
+    else()
+        message(FATAL_ERROR
+            "XLIGHTS_USE_ORT=ON but onnxruntime not found.\n"
+            "Install via vcpkg: vcpkg install onnxruntime[directml]\n"
+            "Or set ORT_INCLUDE_DIR and ORT_LIB manually.")
+    endif()
+endif()
+target_compile_definitions(xLights PRIVATE HAVE_ORT XLIGHTS_CMAKE_BUILD)
+
 
 # ─── Windows post-build: copy DLLs and resources to output dir ──────────────
 # Mirrors the PostBuildEvent in xLights/Xlights.vcxproj.

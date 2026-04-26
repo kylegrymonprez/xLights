@@ -103,7 +103,8 @@ void AppendOutputs(const float* src,
 
 #ifdef HAVE_ORT
 #    include <onnxruntime_cxx_api.h>
-#    ifdef _MSC_VER
+// Pragma only needed for the VS-native build; cmake links via target_link_libraries.
+#    if defined(_MSC_VER) && !defined(XLIGHTS_CMAKE_BUILD)
 #        pragma comment(lib, "onnxruntime.lib")
 #    endif
 // Forward-declare DirectML EP entry point — avoids pulling in dml_provider_factory.h
