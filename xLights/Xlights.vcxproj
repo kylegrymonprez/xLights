@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|ARM">
@@ -118,8 +118,8 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
-    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include;..\include\ffmpeg-6\include;$(SolutionDir)\..\src-core;$(SolutionDir)\..\src-ui-wx;$(SolutionDir)\..\src-core\render;$(SolutionDir)\..\src-core\utils;..\include\zlib;..\dependencies;..\dependencies\libxlsxwriter\include;..\dependencies\lua\src;..\include\sol2-3.5.0\;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include;..\dependencies\midifile\include;..\dependencies\liquidfun\liquidfun\Box2D</IncludePath>
-    <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(NETFXKitsDir)Lib\um\x64;..\..\wxWidgets\lib\vc_x64_lib;$(WXWIDGETS_ROOT)\lib\vc_x64_lib;..\lib\windows64;GL;./ffmpeg-dev/lib;$(VCToolsInstallDir)lib\x64;..\dependencies\lua\src;$(Python_ROOT_DIR)\libs</LibraryPath>
+    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include;..\include\ffmpeg-6\include;$(SolutionDir)\..\src-core;$(SolutionDir)\..\src-ui-wx;$(SolutionDir)\..\src-core\render;$(SolutionDir)\..\src-core\utils;..\include\zlib;..\dependencies;..\dependencies\libxlsxwriter\include;..\dependencies\lua\src;..\include\sol2-3.5.0\;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include;..\dependencies\midifile\include;..\dependencies\liquidfun\liquidfun\Box2D;..\include\microsoft.ml.onnxruntime.directml.1.19.2\build\native\include</IncludePath>
+    <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(NETFXKitsDir)Lib\um\x64;..\..\wxWidgets\lib\vc_x64_lib;$(WXWIDGETS_ROOT)\lib\vc_x64_lib;..\lib\windows64;GL;./ffmpeg-dev/lib;$(VCToolsInstallDir)lib\x64;..\dependencies\lua\src;$(Python_ROOT_DIR)\libs;..\include\microsoft.ml.onnxruntime.directml.1.19.2\runtimes\win-x64\native</LibraryPath>
     <EnableClangTidyCodeAnalysis>true</EnableClangTidyCodeAnalysis>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64EC'">
@@ -136,8 +136,8 @@
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
-    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include\ffmpeg-6\include;..\include;$(SolutionDir)\..\src-core;$(SolutionDir)\..\src-ui-wx;$(SolutionDir)\..\src-core\render;$(SolutionDir)\..\src-core\utils;..\include\zlib;..\dependencies;..\dependencies\libxlsxwriter\include;..\include\sol2-3.5.0\;..\dependencies\lua\src;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include;..\dependencies\midifile\include;..\dependencies\liquidfun\liquidfun\Box2D</IncludePath>
-    <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(NETFXKitsDir)Lib\um\x64;..\..\wxWidgets\lib\vc_x64_lib;$(WXWIDGETS_ROOT)\lib\vc_x64_lib;..\lib\windows64;GL;..\dependencies\lua\src;$(Python_ROOT_DIR)\libs</LibraryPath>
+    <IncludePath>$(WXWIDGETS_ROOT)\include;$(WXWIDGETS_ROOT)\include\msvc;$(WXWIDGETS_ROOT)\3rdparty;..\..\wxWidgets\include;..\..\wxWidgets\include\msvc;..\..\wxWidgets\3rdparty;$(IncludePath);..\include\ffmpeg-6\include;..\include;$(SolutionDir)\..\src-core;$(SolutionDir)\..\src-ui-wx;$(SolutionDir)\..\src-core\render;$(SolutionDir)\..\src-core\utils;..\include\zlib;..\dependencies;..\dependencies\libxlsxwriter\include;..\include\sol2-3.5.0\;..\dependencies\lua\src;..\dependencies\pybind11\include;..\dependencies\pugixml\src;$(Python_ROOT_DIR)\include;..\dependencies\spdlog\include;..\dependencies\midifile\include;..\dependencies\liquidfun\liquidfun\Box2D;..\include\microsoft.ml.onnxruntime.directml.1.19.2\build\native\include</IncludePath>
+    <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(NETFXKitsDir)Lib\um\x64;..\..\wxWidgets\lib\vc_x64_lib;$(WXWIDGETS_ROOT)\lib\vc_x64_lib;..\lib\windows64;GL;..\dependencies\lua\src;$(Python_ROOT_DIR)\libs;..\include\microsoft.ml.onnxruntime.directml.1.19.2\runtimes\win-x64\native</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64EC'">
     <LinkIncremental>false</LinkIncremental>
@@ -158,7 +158,7 @@
       </PrecompiledHeader>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>_DEBUG;_WINDOWS;%(PreprocessorDefinitions);WXDEBUG;__WXDEBUG__;_CRT_SECURE_NO_WARNINGS;IGNORE_VENDORS;$(DefineConstants);wxUSE_WEBP</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;%(PreprocessorDefinitions);WXDEBUG;__WXDEBUG__;_CRT_SECURE_NO_WARNINGS;IGNORE_VENDORS;$(DefineConstants);wxUSE_WEBP;HAVE_ORT</PreprocessorDefinitions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/D "NOMINMAX" /utf-8 /bigobj</AdditionalOptions>
@@ -275,7 +275,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
-      <PreprocessorDefinitions>NDEBUG;_WINDOWS;%(PreprocessorDefinitions);_CRT_SECURE_NO_WARNINGS;IGNORE_VENDORS;$(DefineConstants)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;%(PreprocessorDefinitions);_CRT_SECURE_NO_WARNINGS;IGNORE_VENDORS;$(DefineConstants);HAVE_ORT</PreprocessorDefinitions>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <AdditionalOptions>/D "NOMINMAX" /utf-8 /bigobj %(AdditionalOptions)</AdditionalOptions>
@@ -431,6 +431,7 @@ xcopy "$(SolutionDir)..\bin64\Vamp\" "$(TargetDir)Vamp\" /e /y /i /r
     <ClCompile Include="..\dependencies\wxJSON\jsonval.cpp" />
     <ClCompile Include="..\dependencies\wxJSON\jsonwriter.cpp" />
     <ClCompile Include="..\src-core\controllers\PowerDMX.cpp" />
+    <ClCompile Include="..\src-core\media\StemSeparator.cpp" />
     <ClCompile Include="..\src-core\settings\XLightsSettings.cpp" />
     <ClCompile Include="..\src-ui-wx\settings\XLightsConfigAdapter.cpp" />
     <ClCompile Include="..\src-ui-wx\modelproperties\adapters\PositionZoneDialog.cpp" />

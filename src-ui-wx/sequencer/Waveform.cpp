@@ -37,9 +37,11 @@
 #include "media/AIModelStore.h"
 #ifdef __APPLE__
 #include "media/SoundClassifier.h"
-#include "media/StemSeparator.h"
 #include <wx/zipstrm.h>
 #include <wx/wfstream.h>
+#endif
+#if defined(__APPLE__) || defined(HAVE_OPENVINO) || defined(HAVE_ORT)
+#include "media/StemSeparator.h"
 #include <wx/progdlg.h>
 #include "utils/CurlManager.h"
 #include <atomic>
@@ -78,7 +80,7 @@ const long Waveform::ID_WAVE_MNU_DOUBLEHEIGHT = wxNewId();
 const long Waveform::ID_WAVE_MNU_SHOW_ONSETS = wxNewId();
 const long Waveform::ID_WAVE_MNU_SHOW_PITCH = wxNewId();
 const long Waveform::ID_WAVE_MNU_SHOW_SPECTROGRAM = wxNewId();
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(HAVE_OPENVINO) || defined(HAVE_ORT)
 const long Waveform::ID_WAVE_MNU_STEM_DRUMS = wxNewId();
 const long Waveform::ID_WAVE_MNU_STEM_BASS = wxNewId();
 const long Waveform::ID_WAVE_MNU_STEM_OTHER = wxNewId();
@@ -280,6 +282,17 @@ void Waveform::rightClick(wxMouseEvent& event)
             mnuWave.AppendRadioItem(ID_WAVE_MNU_STEM_VOCALS, "Stem — Vocals (ML)")
                 ->Check(_type == AUDIOSAMPLETYPE::STEM_VOCALS);
         }
+#elif defined(HAVE_OPENVINO) || defined(HAVE_ORT)
+        mnuWave.AppendRadioItem(ID_WAVE_MNU_STEM_DRUMS, "Stem — Drums")
+            ->Check(_type == AUDIOSAMPLETYPE::STEM_DRUMS);
+        mnuWave.AppendRadioItem(ID_WAVE_MNU_STEM_BASS, "Stem — Bass")
+            ->Check(_type == AUDIOSAMPLETYPE::STEM_BASS);
+        mnuWave.AppendRadioItem(ID_WAVE_MNU_STEM_OTHER, "Stem — Other")
+            ->Check(_type == AUDIOSAMPLETYPE::STEM_OTHER);
+        mnuWave.AppendRadioItem(ID_WAVE_MNU_STEM_VOCALS, "Stem — Vocals (ML)")
+            ->Check(_type == AUDIOSAMPLETYPE::STEM_VOCALS);
+#endif
+#ifdef __APPLE__
         // Keep the classify entry inside the same radio group so its
         // checkmark moves with `_type == CLASSIFIED` — otherwise the
         // radio defaults to showing "Raw" as selected while the
@@ -416,7 +429,7 @@ void Waveform::OnGridPopup(wxCommandEvent& event)
         ForceRedraw();
         Refresh();
         return;
-#ifdef __APPLE__
+#if defined(__APPLE__) || defined(HAVE_OPENVINO) || defined(HAVE_ORT) 
     } else if (id == ID_WAVE_MNU_STEM_DRUMS ||
                id == ID_WAVE_MNU_STEM_BASS ||
                id == ID_WAVE_MNU_STEM_OTHER ||
@@ -439,6 +452,8 @@ void Waveform::OnGridPopup(wxCommandEvent& event)
         views.clear();
         mCurrentWaveView = NO_WAVE_VIEW_SELECTED;
         // Fall through to the shared SwitchTo / rebuild path below.
+#endif // __APPLE__ || HAVE_OPENVINO || HAVE_ORT
+#ifdef __APPLE__
     } else if (id == ID_WAVE_MNU_CLASSIFY) {
         if (_media == nullptr) return;
         if (_soundClasses.empty()) {
@@ -635,6 +650,103 @@ void Waveform::mouseWheelMoved(wxMouseEvent& event)
         GetParent()->GetEventHandler()->SafelyProcessEvent(event);
     }
 }
+
+#if defined(HAVE_OPENVINO) || defined(HAVE_ORT)
+// Non-Apple PrepareStemData:
+//    ONNX Runtime or OpenVINO
+bool Waveform::PrepareStemData()
+{
+    if (_media == nullptr) return false;
+    auto* frame = xLightsApp::GetFrame();
+    if (frame == nullptr) return false;
+
+    std::vector<std::string> roots;
+    if (!xLightsFrame::CurrentDir.empty())
+        roots.push_back(xLightsFrame::CurrentDir.ToStdString());
+    for (const auto& m : frame->GetMediaFolders())
+        roots.push_back(m);
+    auto modelDirs = AIModelStore::CandidateModelDirs(roots);
+
+    // ONNX Runtime / OpenVINO path ─────────────────────────────────────────────────
+    std::string modelPath = AIModelStore::FindModel(AIModelStore::kDemucsOnnxModelName, modelDirs);
+
+    if (modelPath.empty()) {
+        // No cached model — confirm with user, let them pick install
+        // location, download.
+        if (roots.empty()) {
+            DisplayError("No show or media folders configured — cannot install the stem-separation model.");
+            return false;
+        }
+        wxArrayString choices;
+        for (const auto& r : roots) {
+            choices.Add(wxString::FromUTF8(r));
+        }
+        wxSingleChoiceDialog locDlg(this,
+                                    "The HTDemucs stem-separation model isn't installed yet.\n"
+                                    "Download (~300 MB) and install it to:",
+                                    "Install Stem Separation Model", choices);
+        if (locDlg.ShowModal() != wxID_OK)
+            return false;
+        const std::string chosenRoot = roots[locDlg.GetSelection()];
+        const std::string destDir = chosenRoot + "/" + AIModelStore::kModelsSubdir;
+        if (!AIModelStore::EnsureDirectory(destDir)) {
+            DisplayError("Couldn't create directory: " + destDir);
+            return false;
+        }
+
+        const std::string local_Path = destDir + "/" + AIModelStore::kDemucsOnnxModelName;        
+        wxProgressDialog prog("Downloading Model",
+                                "Fetching HTDemucs stem-separation model…",
+                                100, this,
+                                wxPD_APP_MODAL | wxPD_AUTO_HIDE | wxPD_CAN_ABORT);
+        if (!CurlManager::HTTPSGetFile(AIModelStore::kDemucsOnnxDownloadURL, local_Path)) {
+            DisplayError("Download failed. Check your internet connection and try again.");
+            return false;
+        }        
+        modelPath = local_Path;
+        if (modelPath.empty() || std::filesystem::exists(modelPath)) {
+            DisplayError("Model wasn't found anywhere under " + destDir);
+            return false;
+        }
+    }
+
+    StemOutput stems;
+    {
+        wxProgressDialog prog("Separating Stems",
+            "Running HTDemucs — drums, bass, vocals, other…",
+            100, this,
+            wxPD_APP_MODAL | wxPD_AUTO_HIDE | wxPD_ELAPSED_TIME | wxPD_ESTIMATED_TIME | wxPD_CAN_ABORT);
+        std::atomic<bool> done(false);
+        std::atomic<bool> ok(false);
+        std::atomic<int>  pct(0);
+        std::thread worker([&] {
+            ok = SeparateStems(_media, modelPath, stems,
+                               StemSeparatorOptions{},
+                               [&pct](int p) { pct.store(p); });
+            done.store(true);
+        });
+        wxSetCursor(wxCURSOR_WAIT);
+        while (!done.load()) {
+            prog.Update(pct.load());
+            wxMilliSleep(50);
+            wxTheApp->Yield(true);
+        }
+        worker.join();
+        wxSetCursor(wxCURSOR_ARROW);
+        if (!ok) {
+            DisplayError("Stem separation failed. Check the log for details.");
+            return false;
+        }
+    }
+
+    _media->SetStemData(
+        stems.drumsL, stems.drumsR,
+        stems.bassL,  stems.bassR,
+        stems.otherL, stems.otherR,
+        stems.vocalsL, stems.vocalsR);
+    return true;
+}
+#endif // HAVE_OPENVINO  || HAVE_ORT 
 
 #ifdef __APPLE__
 // A8 first-run helper: make sure the HTDemucs model is present

@@ -837,9 +837,6 @@
     <ClCompile Include="..\src-core\utils\ip_utils.cpp">
       <Filter>utils</Filter>
     </ClCompile>
-    <ClCompile Include="..\src-ui-wx\shared\utils\wxUtilities.cpp">
-      <Filter>shared\utils</Filter>
-    </ClCompile>
     <ClCompile Include="..\src-ui-wx\controllerproperties\ControllerEthernetPropertyAdapter.cpp">
       <Filter>controllerproperties</Filter>
     </ClCompile>
@@ -1331,6 +1328,8 @@
     <ClCompile Include="..\src-core\controllers\PowerDMX.cpp" />
     <ClCompile Include="..\src-core\settings\XLightsSettings.cpp" />
     <ClCompile Include="..\src-ui-wx\settings\XLightsConfigAdapter.cpp" />
+    <ClCompile Include="..\src-ui-wx\shared\utils\wxUtilities.cpp" />
+    <ClCompile Include="..\src-core\media\StemSeparator.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\src-ui-wx\sequencer\BatchRenderDialog.h" />
@@ -2195,9 +2194,6 @@
     <ClInclude Include="..\src-core\utils\CurlManager.h">
       <Filter>utils</Filter>
     </ClInclude>
-    <ClInclude Include="..\src-ui-wx\shared\utils\wxUtilities.h">
-      <Filter>shared\utils</Filter>
-    </ClInclude>
     <ClInclude Include="..\src-ui-wx\controllerproperties\ControllerEthernetPropertyAdapter.h">
       <Filter>controllerproperties</Filter>
     </ClInclude>
@@ -2770,6 +2766,7 @@
     <ClInclude Include="..\src-core\controllers\PowerDMX.h" />
     <ClInclude Include="..\src-core\settings\XLightsSettings.h" />
     <ClInclude Include="..\src-ui-wx\settings\XLightsConfigAdapter.h" />
+    <ClInclude Include="..\src-ui-wx\shared\utils\wxUtilities.h" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Models">
