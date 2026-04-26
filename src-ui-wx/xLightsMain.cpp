@@ -4095,7 +4095,7 @@ void xLightsFrame::MarkEffectsFileDirty()
 void xLightsFrame::MarkModelsAsNeedingRender()
 {
     auto logger_work = spdlog::get("work");
-    logger_work->debug("        MarkModelsAsNeedingRender %d.", modelsChangeCount);
+    logger_work->debug("        MarkModelsAsNeedingRender {}.", modelsChangeCount);
     modelsChangeCount++;
 }
 
