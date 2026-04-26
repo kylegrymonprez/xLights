@@ -1127,6 +1127,61 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate, UIPencilInteracti
         return true
     }
 
+    /// Long-press hit-test for the in/out transition diamonds drawn at
+    /// the corners of the currently-selected effect (see
+    /// `drawFadeDiamond` — diamonds only paint for the selection, so
+    /// hit-testing follows suit). Uses generous finger-friendly slop
+    /// around the diamond's actual drawn position rather than the
+    /// 7-pt top strip the drag-time hit test uses, because long-press
+    /// is an intentional gesture and the diamonds are only ~7 px tall.
+    func hitTestFadeDiamond(at p: CGPoint) -> (rowIndex: Int, effectIndex: Int, isIn: Bool)? {
+        guard let c = coordinator, c.pixelsPerMS > 0 else { return nil }
+        guard let sel = c.selection else { return nil }
+        // Locate the selected row's top y in viewport coords.
+        var rowTop: CGFloat = -c.scrollOffsetY
+        var found = false
+        for row in c.rows {
+            let h = (row.id == c.selection?.rowIndex)
+                ? c.metrics.selectedRowHeight : c.metrics.rowHeight
+            if row.id == sel.rowIndex {
+                found = true
+                break
+            }
+            rowTop += h
+        }
+        guard found else { return nil }
+        guard let row = c.rows.first(where: { $0.id == sel.rowIndex }) else { return nil }
+        guard sel.effectIndex >= 0, sel.effectIndex < row.effects.count else { return nil }
+        let effect = row.effects[sel.effectIndex]
+        let (fadeIn, fadeOut) = c.fadeProvider(sel.rowIndex, sel.effectIndex)
+        // Diamond x positions mirror the drawing math at line ~801.
+        let x1 = CGFloat(effect.startTimeMS) * c.pixelsPerMS - c.scrollOffsetX
+        let x2 = CGFloat(effect.endTimeMS)   * c.pixelsPerMS - c.scrollOffsetX
+        let width = x2 - x1
+        if width < 8 { return nil }
+        let fadeInPx = CGFloat(fadeIn) * 1000 * c.pixelsPerMS
+        let fadeOutPx = CGFloat(fadeOut) * 1000 * c.pixelsPerMS
+        let inX = x1 + min(fadeInPx, width)
+        let outX = max(x1, x2 - fadeOutPx)
+        // Vertical: top ~18 pt of the effect rect captures the diamond
+        // (centred ~2.5 pt below row top) plus finger slop. Reject
+        // anywhere below that so center-zone long-presses still reach
+        // the standard context menu.
+        let vSlop: CGFloat = 18
+        guard p.y >= rowTop - 4 && p.y <= rowTop + vSlop else { return nil }
+        // Horizontal: 18-pt half-width slop around each diamond centre.
+        // Only match a side that actually has a fade — empty corners
+        // of zero-fade effects fall through.
+        let hSlop: CGFloat = 18
+        if fadeIn > 0 && abs(p.x - inX) <= hSlop {
+            return (sel.rowIndex, sel.effectIndex, true)
+        }
+        if fadeOut > 0 && abs(p.x - outX) <= hSlop {
+            return (sel.rowIndex, sel.effectIndex, false)
+        }
+        return nil
+    }
+
     @objc func onTap(_ g: UITapGestureRecognizer) {
         guard let c = coordinator else { return }
         let p = g.location(in: self)
@@ -1203,6 +1258,16 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate, UIPencilInteracti
     @objc func onLongPress(_ g: UILongPressGestureRecognizer) {
         guard g.state == .began, let c = coordinator else { return }
         let p = g.location(in: self)
+        // Long-press on a visible transition diamond opens the
+        // transition-type picker for that side. Checked before the
+        // generic context-menu path so the gesture is always available
+        // regardless of selection state.
+        if let fade = hitTestFadeDiamond(at: p) {
+            c.actions.onTapEffect(fade.rowIndex, fade.effectIndex)
+            c.actions.onRequestTransitionMenu(fade.rowIndex, fade.effectIndex,
+                                               fade.isIn, p)
+            return
+        }
         guard let hit = hitTestEffect(at: p) else { return }
         // When the long-press lands on a member of the current
         // multi-select, preserve the set and request a bulk context

@@ -43,6 +43,12 @@ struct EffectCanvasActions {
     /// the touch location into view-space coordinates so the menu can
     /// anchor near the finger.
     var onRequestContextMenu: (_ row: Int, _ effect: Int, _ anchorInCanvas: CGPoint) -> Void = { _,_,_ in }
+    /// Fires when a long-press lands on a visible transition diamond
+    /// (the in/out fade bar at the top corners of an effect). `isIn`
+    /// distinguishes the in-side from the out-side so the picker writes
+    /// to the right `T_CHOICE_*_Transition_Type` key.
+    var onRequestTransitionMenu: (_ row: Int, _ effect: Int, _ isIn: Bool,
+                                   _ anchorInCanvas: CGPoint) -> Void = { _,_,_,_ in }
     /// B18: double-tap in empty space. The canvas passes the row id
     /// plus the `ms` it landed on; the outer view decides whether
     /// to create an effect (palette armed) filling the cell.

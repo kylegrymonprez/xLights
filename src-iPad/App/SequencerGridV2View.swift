@@ -66,6 +66,58 @@ private struct PasteReplaceAlert: ViewModifier {
     }
 }
 
+/// Long-press on a transition diamond opens a picker for the
+/// transition type. `isIn` selects which `T_CHOICE_*_Transition_Type`
+/// key the chosen value writes to.
+struct TransitionMenuTarget: Identifiable {
+    let rowIndex: Int
+    let effectIndex: Int
+    let isIn: Bool
+    var id: String { "\(rowIndex)-\(effectIndex)-\(isIn ? "in" : "out")" }
+}
+
+/// Transition-type picker confirmation dialog. Pulled out as its own
+/// `ViewModifier` (same reason as the other alert wrappers in this
+/// file) so the main body's modifier chain stays under SwiftUI's
+/// type-check budget.
+private struct TransitionPickerDialog: ViewModifier {
+    @Binding var target: TransitionMenuTarget?
+    let viewModel: SequencerViewModel
+    func body(content: Content) -> some View {
+        content.confirmationDialog(
+            "Transition",
+            isPresented: Binding(
+                get: { target != nil },
+                set: { if !$0 { target = nil } }
+            ),
+            presenting: target
+        ) { tgt in
+            let typeKey = tgt.isIn ? "T_CHOICE_In_Transition_Type"
+                                   : "T_CHOICE_Out_Transition_Type"
+            ForEach(kTransitionTypes, id: \.self) { (t: String) in
+                Button(t) {
+                    viewModel.selectEffect(rowIndex: tgt.rowIndex,
+                                            effectIndex: tgt.effectIndex)
+                    viewModel.setSettingValue(t, forKey: typeKey,
+                                               suppressIfDefault: "Fade")
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { tgt in
+            let typeKey = tgt.isIn ? "T_CHOICE_In_Transition_Type"
+                                   : "T_CHOICE_Out_Transition_Type"
+            let current = viewModel.document.effectSettingValue(
+                forKey: typeKey,
+                inRow: Int32(tgt.rowIndex),
+                at: Int32(tgt.effectIndex)) ?? ""
+            let display = current.isEmpty ? "Fade" : current
+            Text(tgt.isIn
+                 ? "In transition (current: \(display))"
+                 : "Out transition (current: \(display))")
+        }
+    }
+}
+
 /// B20 edit-description alert wrapper. Same extraction pattern
 /// as `InsertLayersAlert` — keeps the main body expression under
 /// SwiftUI's type-check budget. Target is encoded as a simple
@@ -201,6 +253,8 @@ struct SequencerGridV2View: View {
         let effectIndex: Int
         var id: String { "\(rowIndex)-\(effectIndex)" }
     }
+
+    @State private var transitionMenuTarget: TransitionMenuTarget?
 
     /// B67 / B69 timing-mark long-press target. `markIndex == nil`
     /// means "empty space at `ms`" (→ Add Mark Here menu); non-nil
@@ -1076,6 +1130,9 @@ struct SequencerGridV2View: View {
         .modifier(PasteReplaceAlert(
             target: $pasteReplaceTarget,
             viewModel: viewModel))
+        .modifier(TransitionPickerDialog(
+            target: $transitionMenuTarget,
+            viewModel: viewModel))
     }
 
     /// B21 time formatting / parsing helpers. `formatMS` emits
@@ -1719,6 +1776,10 @@ struct SequencerGridV2View: View {
         actions.onPinchZoom = pinchZoomAction
         actions.onRequestContextMenu = { rowIdx, effIdx, _ in
             contextMenuTarget = ContextMenuTarget(rowIndex: rowIdx, effectIndex: effIdx)
+        }
+        actions.onRequestTransitionMenu = { rowIdx, effIdx, isIn, _ in
+            transitionMenuTarget = TransitionMenuTarget(
+                rowIndex: rowIdx, effectIndex: effIdx, isIn: isIn)
         }
         actions.onDoubleTapEmpty = { rowIdx, ms in
             viewModel.doubleTapCreateInCell(rowIndex: rowIdx, atMS: ms)
