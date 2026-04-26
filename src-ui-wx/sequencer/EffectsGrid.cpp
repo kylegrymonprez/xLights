@@ -7082,6 +7082,7 @@ void EffectsGrid::Draw() {
         }
         ctx = PrepareContextForDrawing();
         if (ctx == nullptr) {
+            mIsInitialized = false;
             return;
         }
         CreateEffectIconTextures(ctx);
