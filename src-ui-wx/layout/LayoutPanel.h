@@ -114,11 +114,13 @@ class LayoutPanel: public wxPanel
 		//(*Declarations(LayoutPanel)
 		wxButton* ButtonSavePreview;
 		wxCheckBox* CheckBoxOverlap;
-		wxCheckBox* CheckBox_3D;
 		wxCheckBox* CheckBoxShowInfo;
 		wxCheckBox* CheckBoxShowNames;
+		wxCheckBox* CheckBox_3D;
 		wxChoice* ChoiceLayoutGroups;
+		wxFlexGridSizer* PreviewGLSizer;
 		wxFlexGridSizer* ToolSizer;
+		wxFlexGridSizer* TopBarSizer;
 		wxNotebook* Notebook_Objects;
 		wxPanel* FirstPanel;
 		wxPanel* LeftPanel;

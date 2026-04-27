@@ -520,13 +520,17 @@ public:
 #else
         const wxImageResizeQuality quality = wxIMAGE_QUALITY_HIGH;
 #endif
+        double sf = GetContentScaleFactor();
         wxImage imgScaled = originalImage.Scale(iconSize, iconSize, quality);
         wxImage disScaled = originalDisabled.Scale(iconSize, iconSize, quality);
         wxImage presScaled = originalPressed.Scale(iconSize, iconSize, quality);
+        wxImage imgScaledSF = originalImage.Scale(iconSize * sf, iconSize * sf, quality);
+        wxImage disScaledSF = originalDisabled.Scale(iconSize * sf, iconSize * sf, quality);
+        wxImage presScaledSF = originalPressed.Scale(iconSize * sf, iconSize * sf, quality);
 
-        bitmap = wxBitmapBundle::FromBitmaps(imgScaled, originalImage);
-        bitmapDisabled = wxBitmapBundle::FromBitmaps(disScaled, originalDisabled);
-        pressedBitmap = wxBitmapBundle::FromBitmaps(presScaled, originalPressed);
+        bitmap = wxBitmapBundle::FromBitmaps(imgScaled, wxBitmap(imgScaledSF, sf));
+        bitmapDisabled = wxBitmapBundle::FromBitmaps(disScaled, wxBitmap(disScaledSF, sf));
+        pressedBitmap = wxBitmapBundle::FromBitmaps(presScaled, wxBitmap(presScaledSF, sf));
 
         SetState(state);
         InvalidateBestSize();
@@ -570,13 +574,11 @@ LayoutPanel::LayoutPanel(wxWindow* parent, xLightsFrame *xl, wxPanel* sequencer)
     
 
 	//(*Initialize(LayoutPanel)
-	wxFlexGridSizer* FlexGridSizer1;
 	wxFlexGridSizer* FlexGridSizer3;
 	wxFlexGridSizer* FlexGridSizer4;
 	wxFlexGridSizer* FlexGridSizerPreview;
 	wxFlexGridSizer* LayoutGLSizer;
 	wxFlexGridSizer* LeftPanelSizer;
-	wxFlexGridSizer* PreviewGLSizer;
 
 	Create(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL, _T("wxID_ANY"));
 	FlexGridSizerPreview = new wxFlexGridSizer(1, 1, 0, 0);
@@ -628,19 +630,19 @@ LayoutPanel::LayoutPanel(wxWindow* parent, xLightsFrame *xl, wxPanel* sequencer)
 	PreviewGLSizer = new wxFlexGridSizer(3, 1, 0, 0);
 	PreviewGLSizer->AddGrowableCol(0);
 	PreviewGLSizer->AddGrowableRow(1);
-	FlexGridSizer1 = new wxFlexGridSizer(0, 6, 0, 0);
-	FlexGridSizer1->AddGrowableCol(0);
+	TopBarSizer = new wxFlexGridSizer(0, 6, 0, 0);
+	TopBarSizer->AddGrowableCol(0);
 	ToolSizer = new wxFlexGridSizer(0, 10, 0, 0);
-	FlexGridSizer1->Add(ToolSizer, 1, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 3);
+	TopBarSizer->Add(ToolSizer, 1, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 3);
 	StaticText1 = new wxStaticText(PreviewGLPanel, ID_STATICTEXT1, _("Preview:"), wxDefaultPosition, wxDefaultSize, 0, _T("ID_STATICTEXT1"));
 	wxFont StaticText1Font = wxSystemSettings::GetFont(wxSYS_DEFAULT_GUI_FONT);
 	if ( !StaticText1Font.Ok() ) StaticText1Font = wxSystemSettings::GetFont(wxSYS_DEFAULT_GUI_FONT);
 	StaticText1Font.SetWeight(wxFONTWEIGHT_BOLD);
 	StaticText1->SetFont(StaticText1Font);
-	FlexGridSizer1->Add(StaticText1, 1, wxLEFT|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 40);
+	TopBarSizer->Add(StaticText1, 1, wxLEFT|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 40);
 	ChoiceLayoutGroups = new wxChoice(PreviewGLPanel, ID_CHOICE_PREVIEWS, wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, _T("ID_CHOICE_PREVIEWS"));
-	FlexGridSizer1->Add(ChoiceLayoutGroups, 1, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
-	PreviewGLSizer->Add(FlexGridSizer1, 1, wxALL|wxALIGN_LEFT, 3);
+	TopBarSizer->Add(ChoiceLayoutGroups, 1, wxALL|wxALIGN_LEFT|wxALIGN_CENTER_VERTICAL, 5);
+	PreviewGLSizer->Add(TopBarSizer, 1, wxALL|wxALIGN_LEFT, 3);
 	LayoutGLSizer = new wxFlexGridSizer(0, 2, 0, 0);
 	LayoutGLSizer->AddGrowableCol(0);
 	LayoutGLSizer->AddGrowableRow(0);
@@ -1136,6 +1138,8 @@ void LayoutPanel::UpdateModelButtonSizes() {
         btn->UpdateIconSize(iconSize);
     }
     ToolSizer->Layout();
+    TopBarSizer->Layout();
+    PreviewGLSizer->Layout();
 }
 
 int LayoutPanel::GetColumnIndex(const std::string& name) const
