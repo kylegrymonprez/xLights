@@ -120,7 +120,7 @@ else()
         find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h)
     endif()
     set(_FF_HINTS ${XL_LIB}/windows64 /usr/lib /usr/local/lib)
-    foreach(_ff avcodec avformat avutil swscale swresample)
+    foreach(_ff avcodec avformat avutil avfilter swscale swresample)
         string(TOUPPER ${_ff} _FF_UPPER)
         find_library(${_FF_UPPER}_LIB NAMES ${_ff} HINTS ${_FF_HINTS})
         list(APPEND FFMPEG_LIBS ${${_FF_UPPER}_LIB})
@@ -191,7 +191,7 @@ else()
         PATHS /usr/include /usr/local/include)
     # On Windows the vendored file is a MinGW .dll.a — not usable by MSVC.
     # Look for a proper .lib; if absent, skip linking (project may use WinHTTP).
-    find_library(CURL_LIB NAMES curl libcurl curl_imp
+    find_library(CURL_LIB NAMES libcurl_msvc curl libcurl curl_imp libcurl_a
         HINTS ${XL_LIB}/windows64
         PATHS /usr/lib /usr/local/lib)
     if(CURL_LIB)
@@ -485,6 +485,20 @@ target_include_directories(xLights PRIVATE
     ${CURL_INC}
 )
 
+# ─── zlib ───────────────────────────────────────────────────────────────────
+if(NOT XLIGHTS_USE_VCPKG)
+    find_library(ZLIB_LIB NAMES zlibwapi zlib z
+        HINTS ${XL_LIB}/windows64 /usr/lib /usr/local/lib)
+    if(ZLIB_LIB)
+        set(ZLIB_LINK_TARGET ${ZLIB_LIB})
+    else()
+        set(ZLIB_LINK_TARGET "")
+    endif()
+else()
+    find_package(ZLIB REQUIRED)
+    set(ZLIB_LINK_TARGET ZLIB::ZLIB)
+endif()
+
 # ─── Link libraries ─────────────────────────────────────────────────────────
 if(FFMPEG_LIBRARY_DIRS)
     target_link_directories(xLights PRIVATE ${FFMPEG_LIBRARY_DIRS})
@@ -494,6 +508,7 @@ target_link_libraries(xLights PRIVATE
     ${FFMPEG_LIBS}
     ${SDL2_LINK_TARGET}
     ${ZSTD_LINK_TARGET}
+    ${ZLIB_LINK_TARGET}
 )
 # Lua is compiled from source (LUA_SRC) — no pre-built lib needed.
 # curl is optional: MSVC-compatible .lib may not be present in the vendored tree.
@@ -600,7 +615,8 @@ endif()
 # Platform link extras
 if(WIN32)
     target_link_libraries(xLights PRIVATE ws2_32 winmm comctl32 rpcrt4
-                                          mfuuid propsys wmcodecdspuuid)
+                                          mfuuid propsys wmcodecdspuuid
+                                          iphlpapi)
     if(NOT XLIGHTS_USE_VCPKG)
         # vendored pre-built libs (FFmpeg, SDL2, etc.) + lua pragma stubs
         target_link_directories(xLights PRIVATE ${XL_LIB}/windows64 ${XL_DEPS}/lua/src)
