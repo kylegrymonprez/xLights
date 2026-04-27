@@ -59,7 +59,7 @@
 #include <GL/glut.h>
 #endif
 
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(XLIGHTS_CMAKE_BUILD)
 #ifdef _DEBUG
     #pragma comment(lib, "wxbase" WXWIDGETS_VERSION "ud.lib")
     #pragma comment(lib, "wxbase" WXWIDGETS_VERSION "ud_net.lib")

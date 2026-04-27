@@ -28,6 +28,19 @@ endif()
 
 add_compile_definitions(NOMINMAX)
 
+# Always defined for any cmake build — suppresses VS-only #pragma comment(lib,…)
+# directives in source files so cmake's target_link_libraries is the sole link mechanism.
+add_compile_definitions(XLIGHTS_CMAKE_BUILD)
+
+# ─── vcpkg static-libs option ───────────────────────────────────────────────
+# Enable with:  cmake -DXLIGHTS_USE_VCPKG=ON -DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake
+# For a fully static build also pass:  -DVCPKG_TARGET_TRIPLET=x64-windows-static
+option(XLIGHTS_USE_VCPKG "Require all dependencies via vcpkg (no vendored fallback)" OFF)
+if(XLIGHTS_USE_VCPKG)
+    set(CMAKE_FIND_PACKAGE_PREFER_CONFIG ON)
+    message(STATUS "XLIGHTS_USE_VCPKG=ON — all deps resolved via cmake CONFIG packages")
+endif()
+
 # ─── Platform compile definitions ───────────────────────────────────────────
 if(WIN32)
     add_compile_definitions(_WINDOWS _CRT_SECURE_NO_WARNINGS IGNORE_VENDORS wxUSE_WEBP)
@@ -92,21 +105,27 @@ endif()
 # ─── OpenGL ─────────────────────────────────────────────────────────────────
 find_package(OpenGL REQUIRED)
 
-# ─── FFmpeg (vendored on Windows, system on Linux/macOS) ────────────────────
-find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h
-    HINTS ${XL_INC}/ffmpeg-6/include
-    PATHS /usr/include /usr/local/include
-    NO_DEFAULT_PATH)
-if(NOT FFMPEG_INCLUDE_DIR)
-    find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h)
+# ─── FFmpeg ─────────────────────────────────────────────────────────────────
+if(XLIGHTS_USE_VCPKG)
+    # vcpkg FFmpeg uses variables, not imported targets.
+    find_package(FFMPEG REQUIRED)
+    set(FFMPEG_INCLUDE_DIR "${FFMPEG_INCLUDE_DIRS}")
+    set(FFMPEG_LIBS ${FFMPEG_LIBRARIES})
+else()
+    find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h
+        HINTS ${XL_INC}/ffmpeg-6/include
+        PATHS /usr/include /usr/local/include
+        NO_DEFAULT_PATH)
+    if(NOT FFMPEG_INCLUDE_DIR)
+        find_path(FFMPEG_INCLUDE_DIR libavcodec/avcodec.h)
+    endif()
+    set(_FF_HINTS ${XL_LIB}/windows64 /usr/lib /usr/local/lib)
+    foreach(_ff avcodec avformat avutil swscale swresample)
+        string(TOUPPER ${_ff} _FF_UPPER)
+        find_library(${_FF_UPPER}_LIB NAMES ${_ff} HINTS ${_FF_HINTS})
+        list(APPEND FFMPEG_LIBS ${${_FF_UPPER}_LIB})
+    endforeach()
 endif()
-
-set(_FF_HINTS ${XL_LIB}/windows64 /usr/lib /usr/local/lib)
-foreach(_ff avcodec avformat avutil swscale swresample)
-    string(TOUPPER ${_ff} _FF_UPPER)
-    find_library(${_FF_UPPER}_LIB NAMES ${_ff} HINTS ${_FF_HINTS})
-    list(APPEND FFMPEG_LIBS ${${_FF_UPPER}_LIB})
-endforeach()
 
 # ─── SDL2 ───────────────────────────────────────────────────────────────────
 # Try cmake config first (works on all platforms when SDL2 is installed with cmake).
@@ -210,6 +229,7 @@ file(GLOB_RECURSE SRC_CORE
     src-core/graphics/xlMesh.cpp
     src-core/lyrics/*.cpp
     src-core/media/AudioLoader.cpp
+    src-core/media/AIModelStore.cpp
     src-core/media/AudioManager.cpp
     src-core/media/ChordDetector.cpp
     src-core/media/FFmpegAudioDecoder.cpp
@@ -219,6 +239,7 @@ file(GLOB_RECURSE SRC_CORE
     src-core/media/PitchDetector.cpp
     src-core/media/SDLAudioOutput.cpp
     src-core/media/Spectrogram.cpp
+    src-core/media/StemSeparator.cpp
     src-core/media/TempoDetector.cpp
     src-core/media/VideoReader.cpp
     src-core/media/VideoTranscoder.cpp
@@ -410,6 +431,7 @@ set(SRC_DEPS
     dependencies/libxlsxwriter/third_party/minizip/ioapi.c
     dependencies/libxlsxwriter/third_party/minizip/unzip.c
     dependencies/libxlsxwriter/third_party/minizip/zip.c
+    $<$<BOOL:${WIN32}>:${CMAKE_SOURCE_DIR}/dependencies/libxlsxwriter/third_party/minizip/iowin32.c>
 )
 
 # ─── Executable ─────────────────────────────────────────────────────────────
@@ -464,6 +486,9 @@ target_include_directories(xLights PRIVATE
 )
 
 # ─── Link libraries ─────────────────────────────────────────────────────────
+if(FFMPEG_LIBRARY_DIRS)
+    target_link_directories(xLights PRIVATE ${FFMPEG_LIBRARY_DIRS})
+endif()
 target_link_libraries(xLights PRIVATE
     ${wxWidgets_LIBRARIES}
     ${FFMPEG_LIBS}
@@ -484,14 +509,27 @@ elseif(UNIX AND NOT APPLE)
 	target_link_libraries(xLights PRIVATE GL GLU)
 endif()
 
-# libxlsxwriter
+# vcpkg FFmpeg ships avfilter with vsrc_gfxcapture_winrt compiled against the
+# static CRT (/MT) regardless of triplet, because it uses C++/WinRT.
+# Suppress the conflicting static-CRT default lib so unresolved symbols fall
+# through to the dynamic CRT (MSVCP140[D].dll) that xLights links against.
+if(MSVC AND XLIGHTS_USE_VCPKG)
+    target_link_options(xLights PRIVATE
+        $<$<CONFIG:Debug>:/NODEFAULTLIB:LIBCMTD>
+        $<$<NOT:$<CONFIG:Debug>>:/NODEFAULTLIB:LIBCMT>
+    )
+endif()
+
+# libxlsxwriter — no cmake config package; find_library works for both vcpkg and vendored.
 find_library(XLSXWRITER_LIB NAMES xlsxwriter xlsxwriterd
     HINTS ${XL_LIB}/windows64 ${XL_DEPS}/libxlsxwriter ${XL_DEPS}/libxlsxwriter/lib)
 if(XLSXWRITER_LIB)
     target_link_libraries(xLights PRIVATE ${XLSXWRITER_LIB})
+elseif(XLIGHTS_USE_VCPKG)
+    message(FATAL_ERROR "XLIGHTS_USE_VCPKG=ON but libxlsxwriter not found. Run: vcpkg install libxlsxwriter")
 endif()
 
-# LiquidFun
+# LiquidFun (not in vcpkg — always use vendored)
 if(WIN32)
     find_library(LIQUIDFUN_LIB_RELEASE NAMES liquidfun
         HINTS ${XL_LIB}/windows64 ${XL_DEPS}/liquidfun)
@@ -510,12 +548,20 @@ else()
     endif()
 endif()
 
+# hidapi
+if(XLIGHTS_USE_VCPKG)
+    find_package(hidapi CONFIG REQUIRED)
+    target_link_libraries(xLights PRIVATE hidapi::hidapi)
+endif()
+
 # Platform link extras
 if(WIN32)
-    target_link_libraries(xLights PRIVATE ws2_32 winmm comctl32 rpcrt4)
-    # windows64 — vendored pre-built libs (FFmpeg, SDL2, etc.)
-    # lua/src   — satisfies #pragma comment(lib,"lua5.3.5-static.lib") in xLightsApp.cpp
-    target_link_directories(xLights PRIVATE ${XL_LIB}/windows64 ${XL_DEPS}/lua/src)
+    target_link_libraries(xLights PRIVATE ws2_32 winmm comctl32 rpcrt4
+                                          mfuuid propsys wmcodecdspuuid)
+    if(NOT XLIGHTS_USE_VCPKG)
+        # vendored pre-built libs (FFmpeg, SDL2, etc.) + lua pragma stubs
+        target_link_directories(xLights PRIVATE ${XL_LIB}/windows64 ${XL_DEPS}/lua/src)
+    endif()
 elseif(UNIX AND NOT APPLE)
     target_link_libraries(xLights PRIVATE dl pthread)
     # ALSA — use pkg-config only on Linux where it is always available
@@ -535,42 +581,56 @@ elseif(UNIX AND NOT APPLE)
 endif()
 
 # ─── Stem separation backends ───────────────────────────────────────────────
-# onnx runtime options define XLIGHTS_CMAKE_BUILD so StemSeparator.cpp skips
-# the VS-only #pragma comment(lib,...) directives.
+# XLIGHTS_CMAKE_BUILD is defined globally above, so #pragma comment(lib,...)
+# in StemSeparator.cpp is already suppressed — no per-block define needed.
 #
+# Usage:
+#   cmake -DXLIGHTS_USE_ORT=ON      # ONNX Runtime (vcpkg: onnxruntime[directml])
+#   cmake -DXLIGHTS_USE_OPENVINO=ON # OpenVINO     (vcpkg: openvino)
 
-find_package(onnxruntime CONFIG
-    HINTS
-        "${CMAKE_SOURCE_DIR}/include/microsoft.ml.onnxruntime.directml.1.19.2"
-        "${CMAKE_SOURCE_DIR}/include/onnxruntime-win-x64-gpu-1.25.0"
-)
-if(onnxruntime_FOUND)
-    target_link_libraries(xLights PRIVATE onnxruntime::onnxruntime)
-    message(STATUS "Stem separation: ONNX Runtime (cmake package)")
-else()
-    # Fallback: probe the vendored directories directly.
-    find_path(ORT_INCLUDE_DIR onnxruntime_cxx_api.h
+option(XLIGHTS_USE_ORT      "Enable ONNX Runtime stem separation" ON)
+option(XLIGHTS_USE_OPENVINO "Enable OpenVINO stem separation"     OFF)
+
+if(XLIGHTS_USE_ORT)
+    find_package(onnxruntime CONFIG
         HINTS
-            "${CMAKE_SOURCE_DIR}/include/microsoft.ml.onnxruntime.directml.1.19.2/build/native/include"
-            "${CMAKE_SOURCE_DIR}/include/onnxruntime-win-x64-gpu-1.25.0/include"
+            "${CMAKE_SOURCE_DIR}/include/microsoft.ml.onnxruntime.directml.1.19.2"
+            "${CMAKE_SOURCE_DIR}/include/onnxruntime-win-x64-gpu-1.25.0"
     )
-    find_library(ORT_LIB onnxruntime
-        HINTS
-            "${CMAKE_SOURCE_DIR}/include/microsoft.ml.onnxruntime.directml.1.19.2/runtimes/win-x64/native"
-            "${CMAKE_SOURCE_DIR}/include/onnxruntime-win-x64-gpu-1.25.0/lib"
-    )
-    if(ORT_INCLUDE_DIR AND ORT_LIB)
-        target_include_directories(xLights PRIVATE ${ORT_INCLUDE_DIR})
-        target_link_libraries(xLights PRIVATE ${ORT_LIB})
-        message(STATUS "Stem separation: ONNX Runtime (vendored at ${ORT_LIB})")
+    if(onnxruntime_FOUND)
+        target_link_libraries(xLights PRIVATE onnxruntime::onnxruntime)
+        message(STATUS "Stem separation: ONNX Runtime (cmake package)")
     else()
-        message(FATAL_ERROR
-            "XLIGHTS_USE_ORT=ON but onnxruntime not found.\n"
-            "Install via vcpkg: vcpkg install onnxruntime[directml]\n"
-            "Or set ORT_INCLUDE_DIR and ORT_LIB manually.")
+        find_path(ORT_INCLUDE_DIR onnxruntime_cxx_api.h
+            HINTS
+                "${CMAKE_SOURCE_DIR}/include/microsoft.ml.onnxruntime.directml.1.19.2/build/native/include"
+                "${CMAKE_SOURCE_DIR}/include/onnxruntime-win-x64-gpu-1.25.0/include"
+        )
+        find_library(ORT_LIB onnxruntime
+            HINTS
+                "${CMAKE_SOURCE_DIR}/include/microsoft.ml.onnxruntime.directml.1.19.2/runtimes/win-x64/native"
+                "${CMAKE_SOURCE_DIR}/include/onnxruntime-win-x64-gpu-1.25.0/lib"
+        )
+        if(ORT_INCLUDE_DIR AND ORT_LIB)
+            target_include_directories(xLights PRIVATE ${ORT_INCLUDE_DIR})
+            target_link_libraries(xLights PRIVATE ${ORT_LIB})
+            message(STATUS "Stem separation: ONNX Runtime (vendored at ${ORT_LIB})")
+        else()
+            message(FATAL_ERROR
+                "XLIGHTS_USE_ORT=ON but onnxruntime not found.\n"
+                "Install via vcpkg: vcpkg install onnxruntime[directml]\n"
+                "Or set ORT_INCLUDE_DIR and ORT_LIB manually.")
+        endif()
     endif()
+    target_compile_definitions(xLights PRIVATE HAVE_ORT)
 endif()
-target_compile_definitions(xLights PRIVATE HAVE_ORT XLIGHTS_CMAKE_BUILD)
+
+if(XLIGHTS_USE_OPENVINO)
+    find_package(OpenVINO REQUIRED COMPONENTS Runtime)
+    target_link_libraries(xLights PRIVATE openvino::runtime)
+    target_compile_definitions(xLights PRIVATE HAVE_OPENVINO)
+    message(STATUS "Stem separation: OpenVINO enabled")
+endif()
 
 
 # ─── Windows post-build: copy DLLs and resources to output dir ──────────────

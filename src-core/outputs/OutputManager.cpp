@@ -37,7 +37,9 @@
 
 #ifdef _WIN32
 #include <winsock2.h>
+#if !defined(XLIGHTS_CMAKE_BUILD)
 #pragma comment(lib, "ws2_32.lib")
+#endif
 #else
 #include <unistd.h>
 #endif
