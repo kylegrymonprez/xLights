@@ -10,6 +10,8 @@ Issue Tracker is found here: www.github.com/xLightsSequencer/xLights/issues
 
 XLIGHTS/NUTCRACKER RELEASE NOTES
 ---------------------------------
+2026.08  May ??, 2026
+
 2026.07  April 28, 2026
     -enh (MrPierreB)            Add node animation playback to SubModels dialog.
     -enh (dkulp)                Media-compatibility "Convert Now" now special-cases animated GIFs that were used as
