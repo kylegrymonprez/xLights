@@ -12,8 +12,12 @@
 
 #include "render/Element.h"
 #include "render/EffectLayer.h"
+#include "render/Effect.h"
+#include "render/FSEQFile.h"
 #include "render/RenderProgressInfo.h"
 #include "render/SequenceMedia.h"
+#include "xLightsVersion.h"
+#include <map>
 #include "effects/ShaderEffect.h"
 #include "models/Model.h"
 #include "models/ModelGroup.h"
@@ -1193,4 +1197,304 @@ void iPadRenderContext::GenerateShaderPreview(ShaderMediaCacheEntry* entry) {
     if (!frames.empty()) {
         entry->SetPreviewFrames(std::move(frames), frameTimeMs);
     }
+}
+
+// ----------------------------------------------------------------------------
+// FSEQ write/read — mirrors the v2/zstd/sparse path of
+// `xLightsFrame::WriteFalconPiFile` (TabConvert.cpp:1565) +
+// `FileConverter::WriteFalconPiFile` (FileConverter.cpp:1488). The iPad
+// produces fseq files with the same shape so that FPP / Falcon controllers
+// playing back an iPad-saved show see no difference from a desktop save.
+// ----------------------------------------------------------------------------
+
+namespace {
+
+// Recursive port of `addRanges` in src-ui-wx/app-shell/TabConvert.cpp:1552.
+// ModelGroups expand to their member models so the per-model channel ranges
+// — not the group's amalgamated range — are what we record.
+void addModelRanges(Model* m, std::map<uint32_t, uint32_t>& ranges) {
+    if (!m) return;
+    if (auto* grp = dynamic_cast<ModelGroup*>(m)) {
+        for (auto* m2 : grp->Models()) {
+            addModelRanges(m2, ranges);
+        }
+    } else {
+        uint32_t cur = ranges[m->GetFirstChannel()];
+        ranges[m->GetFirstChannel()] = std::max(m->GetChanCount(), cur);
+    }
+}
+
+// Walk the master view (every ELEMENT_TYPE_MODEL element in `_sequenceElements`)
+// and produce a collapsed list of (startChannel, length) sparse ranges that
+// covers every model's channels. Mirrors the loop at TabConvert.cpp:1580–1622
+// with the same gapEliminate=0 behavior — adjacent/overlapping ranges merge
+// but otherwise gaps are preserved.
+std::vector<std::pair<uint32_t, uint32_t>>
+ComputeMasterViewSparseRanges(SequenceElements& seqElements,
+                              iPadRenderContext& ctx) {
+    std::map<uint32_t, uint32_t> ranges;
+    int n = seqElements.GetElementCount();
+    for (int i = 0; i < n; ++i) {
+        Element* element = seqElements.GetElement(i);
+        if (!element) continue;
+        if (element->GetType() != ElementType::ELEMENT_TYPE_MODEL) continue;
+        Model* m = ctx.GetModel(element->GetModelName());
+        addModelRanges(m, ranges);
+    }
+
+    std::vector<std::pair<uint32_t, uint32_t>> result;
+    constexpr uint32_t kSentinel = UINT32_MAX;
+    constexpr uint32_t gapEliminate = 0;
+    std::pair<uint32_t, uint32_t> cur(kSentinel, kSentinel);
+    for (auto& a : ranges) {
+        if (cur.first == kSentinel) {
+            cur.first = a.first;
+            cur.second = a.second;
+        } else if (a.first <= (cur.first + cur.second + gapEliminate)) {
+            uint32_t maxEnd = std::max(cur.first + cur.second - 1,
+                                       a.first + a.second - 1);
+            cur.second = maxEnd - cur.first + 1;
+        } else {
+            result.push_back(cur);
+            cur.first = a.first;
+            cur.second = a.second;
+        }
+    }
+    if (cur.first != kSentinel) {
+        result.push_back(cur);
+    }
+    return result;
+}
+
+// Build one FE / FC variable header for an FPP timing track. Matches the
+// layout in FileConverter.cpp:1576–1632: 1-byte version, 4-byte command count,
+// null-terminated host list (empty), then per-command name + count + (start,
+// end) frame pairs converted from MS via stepTime.
+FSEQFile::VariableHeader BuildFppCommandHeader(TimingElement* te, int stepTime) {
+    std::map<std::string, std::vector<std::pair<uint32_t, uint32_t>>> commands;
+    for (int l = 0; l < (int)te->GetEffectLayerCount(); ++l) {
+        EffectLayer* layer = te->GetEffectLayer(l);
+        if (!layer) continue;
+        for (auto& eff : layer->GetAllEffects()) {
+            if (!eff) continue;
+            commands[eff->GetEffectName()].push_back(
+                std::make_pair(eff->GetStartTimeMS(), eff->GetEndTimeMS()));
+        }
+    }
+
+    int totalLen = 3; // 1 byte ver, 2 byte count (legacy layout — see desktop)
+    const std::string fppInstances; // null-terminated host list, currently empty
+    totalLen += fppInstances.size() + 1;
+    for (auto& a : commands) {
+        totalLen += a.first.length() + 1 + 4;
+        totalLen += a.second.size() * 8;
+    }
+
+    FSEQFile::VariableHeader header;
+    header.extendedData = true;
+    header.code[0] = 'F';
+    header.code[1] = (te->GetSubType() == "FPP Effects") ? 'E' : 'C';
+    header.data.resize(totalLen);
+
+    uint8_t* data = &header.data[0];
+    data[0] = 1;
+    uint32_t* t2 = reinterpret_cast<uint32_t*>(&data[1]);
+    *t2 = static_cast<uint32_t>(commands.size());
+    std::memcpy(&data[5], fppInstances.c_str(), fppInstances.size() + 1);
+    data += 6 + fppInstances.size();
+    for (auto& a : commands) {
+        const std::string& c = a.first;
+        uint32_t count = static_cast<uint32_t>(a.second.size());
+        std::memcpy(data, c.c_str(), c.length() + 1);
+        data += c.length() + 1;
+        uint32_t* t = reinterpret_cast<uint32_t*>(data);
+        *t = count;
+        data += 4;
+        ++t;
+        for (size_t x = 0; x < count; ++x) {
+            uint32_t sframe = a.second[x].first / stepTime;
+            uint32_t eframe = a.second[x].second / stepTime;
+            *t = sframe; ++t;
+            *t = eframe; ++t;
+        }
+        data += count * 8;
+    }
+    return header;
+}
+
+inline uint32_t roundTo4(uint32_t n) { return (n + 3) & ~uint32_t(3); }
+
+} // namespace
+
+bool iPadRenderContext::WriteFseq(const std::string& path) {
+    if (!IsSequenceLoaded()) return false;
+    if (path.empty()) return false;
+
+    if (_sequenceData.NumChannels() == 0 || _sequenceData.NumFrames() == 0) {
+        spdlog::warn("WriteFseq: sequence data is empty (no render run yet?). Skipping.");
+        return false;
+    }
+
+    std::unique_ptr<FSEQFile> file(FSEQFile::createFSEQFile(
+        path, 2, FSEQFile::CompressionType::zstd, 2));
+    if (!file) {
+        spdlog::error("WriteFseq: failed to create FSEQ file at {}", path);
+        return false;
+    }
+
+    file->enableMinorVersionFeatures(2);
+    const uint32_t stepSize = roundTo4(static_cast<uint32_t>(_sequenceData.NumChannels()));
+    file->setChannelCount(stepSize);
+    file->setStepTime(_sequenceData.FrameTime());
+    file->setNumFrames(static_cast<uint32_t>(_sequenceData.NumFrames()));
+
+    if (_sequenceFile) {
+        const std::string& mediaFile = _sequenceFile->GetMediaFile();
+        if (!mediaFile.empty()) {
+            FSEQFile::VariableHeader mf;
+            mf.code[0] = 'm';
+            mf.code[1] = 'f';
+            mf.data.assign(mediaFile.begin(), mediaFile.end());
+            mf.data.push_back('\0');
+            file->addVariableHeader(mf);
+        }
+    }
+
+    {
+        FSEQFile::VariableHeader sp;
+        sp.code[0] = 's';
+        sp.code[1] = 'p';
+        const std::string ver = "xLights iPadOS " + xlights_version_string;
+        sp.data.assign(ver.begin(), ver.end());
+        sp.data.push_back('\0');
+        file->addVariableHeader(sp);
+    }
+
+    auto sparse = ComputeMasterViewSparseRanges(_sequenceElements, *this);
+    auto* v2 = dynamic_cast<V2FSEQFile*>(file.get());
+    if (v2 && !sparse.empty()) {
+        for (auto& r : sparse) {
+            v2->m_sparseRanges.push_back(r);
+            spdlog::info("WriteFseq sparse range start={} end={} size={}",
+                         r.first + 1, r.first + r.second, r.second);
+        }
+    }
+
+    for (int x = 0; x < _sequenceElements.GetNumberOfTimingElements(); ++x) {
+        TimingElement* te = _sequenceElements.GetTimingElement(x);
+        if (!te) continue;
+        const std::string& sub = te->GetSubType();
+        if (sub == "FPP Commands" || sub == "FPP Effects") {
+            file->addVariableHeader(BuildFppCommandHeader(te, _sequenceData.FrameTime()));
+        }
+    }
+
+    file->writeHeader();
+    const uint32_t numFrames = static_cast<uint32_t>(_sequenceData.NumFrames());
+    for (uint32_t fr = 0; fr < numFrames; ++fr) {
+        file->addFrame(fr, &_sequenceData[fr][0]);
+    }
+    file->finalize();
+    spdlog::info("WriteFseq: wrote {} frames × {} channels (stepSize={}) to {}",
+                 numFrames, _sequenceData.NumChannels(), stepSize, path);
+    return true;
+}
+
+bool iPadRenderContext::TryLoadFseq(const std::string& fseqPath,
+                                     const std::string& xsqPath) {
+    if (!IsSequenceLoaded()) return false;
+    if (fseqPath.empty()) return false;
+
+    std::error_code ec;
+    if (!std::filesystem::exists(fseqPath, ec) || ec) {
+        return false;
+    }
+
+    if (!xsqPath.empty()) {
+        auto fseqMtime = std::filesystem::last_write_time(fseqPath, ec);
+        if (ec) return false;
+        auto xsqMtime = std::filesystem::last_write_time(xsqPath, ec);
+        if (ec) return false;
+        if (fseqMtime < xsqMtime) {
+            spdlog::info("TryLoadFseq: fseq is older than xsq; will render.");
+            return false;
+        }
+    }
+
+    std::unique_ptr<FSEQFile> file(FSEQFile::openFSEQFile(fseqPath));
+    if (!file) {
+        spdlog::warn("TryLoadFseq: openFSEQFile failed for {}", fseqPath);
+        return false;
+    }
+
+    if (file->getVersionMajor() != 2) {
+        spdlog::info("TryLoadFseq: not a v2 fseq (got v{}); will render.",
+                     file->getVersionMajor());
+        return false;
+    }
+
+    const uint32_t fileFrames = static_cast<uint32_t>(file->getNumFrames());
+    const int fileStep = file->getStepTime();
+
+    const uint32_t expectedFrames = static_cast<uint32_t>(_sequenceData.NumFrames());
+    const int expectedStep = _sequenceData.FrameTime();
+
+    if (fileFrames != expectedFrames || fileStep != expectedStep) {
+        spdlog::info("TryLoadFseq: shape mismatch (frames {} vs {}, step {} vs {}); will render.",
+                     fileFrames, expectedFrames, fileStep, expectedStep);
+        return false;
+    }
+
+    // Sparse-range comparison is the real validity check. The on-disk channel
+    // count for a sparse fseq is the SUM of sparse-range lengths (see
+    // V2FSEQFile::writeHeader's recalculation), not the max channel address —
+    // so comparing it directly to _sequenceData.NumChannels() is meaningless.
+    // What we actually need is: do the file's sparse ranges match the ranges
+    // we'd compute from today's master view? If yes, the fseq covers exactly
+    // the channels we'd render and we can use it; if not (added/removed
+    // models, view change, channel reshuffling), we render.
+    auto* v2 = dynamic_cast<V2FSEQFile*>(file.get());
+    if (!v2) {
+        spdlog::warn("TryLoadFseq: failed to cast to V2FSEQFile; will render.");
+        return false;
+    }
+
+    auto expectedRanges = ComputeMasterViewSparseRanges(_sequenceElements, *this);
+    if (expectedRanges.size() != v2->m_sparseRanges.size()) {
+        spdlog::info("TryLoadFseq: sparse-range count mismatch ({} vs {}); will render.",
+                     v2->m_sparseRanges.size(), expectedRanges.size());
+        return false;
+    }
+    for (size_t i = 0; i < expectedRanges.size(); ++i) {
+        if (expectedRanges[i] != v2->m_sparseRanges[i]) {
+            spdlog::info("TryLoadFseq: sparse range #{} mismatch (file {}+{} vs expected {}+{}); will render.",
+                         i, v2->m_sparseRanges[i].first, v2->m_sparseRanges[i].second,
+                         expectedRanges[i].first, expectedRanges[i].second);
+            return false;
+        }
+    }
+
+    // Pass the actual sparse ranges to prepareRead so V2 doesn't trip its
+    // "requested range outside read ranges" warning and so we read only the
+    // bytes that are actually stored. `readFrame` then uses the same range
+    // list to scatter each compressed-frame chunk back to its absolute
+    // channel offset in `_sequenceData`.
+    file->prepareRead(expectedRanges, 0);
+
+    const uint32_t maxChan = static_cast<uint32_t>(_sequenceData.NumChannels());
+    for (uint32_t fr = 0; fr < fileFrames; ++fr) {
+        std::unique_ptr<FSEQFile::FrameData> fd(file->getFrame(fr));
+        if (!fd) {
+            spdlog::warn("TryLoadFseq: getFrame({}) returned null; falling back to render.", fr);
+            return false;
+        }
+        if (!fd->readFrame(&_sequenceData[fr][0], maxChan)) {
+            spdlog::warn("TryLoadFseq: readFrame({}) failed; falling back to render.", fr);
+            return false;
+        }
+    }
+
+    spdlog::info("TryLoadFseq: loaded {} frames over {} sparse range(s) from {}",
+                 fileFrames, expectedRanges.size(), fseqPath);
+    return true;
 }

@@ -369,6 +369,20 @@
                        startMS:(int)startMS endMS:(int)endMS
     NS_SWIFT_NAME(exportModelAsFSEQ(atRow:toPath:startMS:endMS:));
 
+// Write the rendered sequence to `path` as a v2/zstd/sparse FSEQ matching
+// the format produced by desktop's xLightsFrame::WriteFalconPiFile. Returns
+// NO if no sequence is loaded, the path is empty, or the underlying write
+// fails. Caller must call `ObtainAccessToURL` on `path` beforehand.
+- (BOOL)writeFseqToPath:(NSString*)path NS_SWIFT_NAME(writeFseq(toPath:));
+
+// Try to populate sequence frame data from a previously-saved FSEQ file at
+// `fseqPath`, allowing the caller to skip an immediate render. Returns NO if
+// the file is missing, older than `xsqPath`, or its shape (frame count, step
+// time, channel count) doesn't match the loaded sequence. `xsqPath` may be
+// empty to skip the staleness check (not recommended in normal flows).
+- (BOOL)tryLoadFseqFromPath:(NSString*)fseqPath xsqPath:(NSString*)xsqPath
+    NS_SWIFT_NAME(tryLoadFseq(fseqPath:xsqPath:));
+
 // Timing track rename / delete. `renameTiming…` wires through
 // `SequenceElements::RenameTimingTrack` so effect references to
 // the old name update in-place. `deleteTiming…` goes through

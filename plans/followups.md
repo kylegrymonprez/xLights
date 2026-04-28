@@ -18,12 +18,18 @@ phase home; catalogued here so they don't fall off.
 
 Phase E closed 2026-04-21. Deferred items:
 
-- **`.fseq` emission alongside save.** Desktop writes a
-  compiled `.fseq` to the FSEQ directory so Falcon Player /
-  downstream playback can consume it. iPad has no consumer
-  today (controller output is out of MVP). Revisit when a
-  real need surfaces — the `FSEQFile::createFSEQFile` path is
-  straightforward to plumb. P2.
+- **`.fseq` emission alongside save.** ✓ landed 2026-04-27.
+  `FolderConfig` got a "Save FSEQ on save" toggle + optional
+  fseq-folder picker; `iPadRenderContext::WriteFseq` produces a
+  v2/zstd/sparse fseq matching desktop's
+  `xLightsFrame::WriteFalconPiFile` (master-view sparse ranges,
+  `mf` / `sp` / FE / FC variable headers). On open,
+  `iPadRenderContext::TryLoadFseq` short-circuits the render
+  when a non-stale fseq exists with matching shape. Path rule
+  mirrors desktop: blank fseq folder → next to the .xsq;
+  configured fseq folder → flatten into that folder. Opens the
+  door to FPP Connect / Batch Render integrations once those
+  land on iPad.
 
 - **Sequence Settings → Timings import/export tab.** E-3
   shipped without Timings. Row-header long-press already

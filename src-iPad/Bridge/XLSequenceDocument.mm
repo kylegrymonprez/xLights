@@ -1062,6 +1062,22 @@ static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
     return YES;
 }
 
+- (BOOL)writeFseqToPath:(NSString*)path {
+    if (!_context || !path || path.length == 0) return NO;
+    if (!_context->IsSequenceLoaded()) return NO;
+    return _context->WriteFseq(std::string([path UTF8String])) ? YES : NO;
+}
+
+- (BOOL)tryLoadFseqFromPath:(NSString*)fseqPath xsqPath:(NSString*)xsqPath {
+    if (!_context || !fseqPath || fseqPath.length == 0) return NO;
+    if (!_context->IsSequenceLoaded()) return NO;
+    const std::string fseq([fseqPath UTF8String]);
+    const std::string xsq = (xsqPath && xsqPath.length > 0)
+        ? std::string([xsqPath UTF8String])
+        : std::string();
+    return _context->TryLoadFseq(fseq, xsq) ? YES : NO;
+}
+
 - (BOOL)removeWordsAndPhonemesAtRow:(int)rowIndex {
     auto& se = _context->GetSequenceElements();
     auto* row = se.GetRowInformation(rowIndex);

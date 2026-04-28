@@ -52,6 +52,24 @@ public:
     bool OpenSequence(const std::string& path);
     void CloseSequence();
 
+    // Write the rendered sequence to a v2/zstd/sparse .fseq file matching
+    // desktop's `xLightsFrame::WriteFalconPiFile` format. Sparse ranges come
+    // from the master view (each ELEMENT_TYPE_MODEL row contributes its
+    // channel range, ModelGroups expand to their children). Embeds 'mf' (media
+    // filename), 'sp' (source), and FE/FC (FPP Effects/Commands) variable
+    // headers when applicable. Returns false on I/O failure or if no sequence
+    // is loaded; returns true even if `_sequenceData` is empty (writes a
+    // header-only file) — callers should ensure a render has completed first.
+    bool WriteFseq(const std::string& path);
+
+    // Try to short-circuit a render by loading frame data from `path`. Returns
+    // true only if the file opens, the fseq's mtime is >= the xsq's mtime, and
+    // the channel/frame/step shape matches the currently-loaded sequence.
+    // On success `_sequenceData` is populated and the caller can skip
+    // `RenderAll`. On any mismatch returns false and leaves `_sequenceData`
+    // untouched so a normal render can proceed.
+    bool TryLoadFseq(const std::string& fseqPath, const std::string& xsqPath);
+
     // RenderContext implementation
     const std::string& GetFseqDirectory() const override { return _showDir; }
     const std::list<std::string>& GetMediaFolders() const override { return _mediaFolders; }

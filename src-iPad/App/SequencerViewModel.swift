@@ -510,8 +510,17 @@ class SequencerViewModel {
             // a higher-resolution waveform once it knows the zoom level
             // via `refreshWaveformForZoom`.
             loadWaveform(startMS: 0, endMS: sequenceDurationMS)
-            // Kick off background render so SequenceData is populated
-            startBackgroundRender()
+            // FSEQ short-circuit: if the user has the feature on and a
+            // matching .fseq exists, skip the render and load frame data
+            // straight from disk. On any mismatch (stale, wrong shape,
+            // missing) we fall through to the normal background render.
+            if let fseqPath = FolderConfig.fseqPath(forXsq: path),
+               document.tryLoadFseq(fseqPath: fseqPath, xsqPath: path) {
+                isRendering = false
+                isRenderDone = true
+            } else {
+                startBackgroundRender()
+            }
             startDirtyPolling()
             // Scan for missing media on open — the full render pass
             // populates the media cache which the scan walks. We run
@@ -684,6 +693,19 @@ class SequencerViewModel {
                 }
             }
             isDirty = false
+            // FSEQ companion write: when the user has the feature enabled,
+            // emit a v2/zstd/sparse fseq next to (or in the configured fseq
+            // folder for) the sequence so FPP / Falcon Connect / Batch
+            // Render can pick it up without re-rendering. We only do this
+            // on user-initiated saves — autosave goes through
+            // writeAutosaveBackup which doesn't touch the fseq.
+            if let fseqPath = FolderConfig.fseqPath(forXsq: path) {
+                _ = XLSequenceDocument.obtainAccess(toPath: fseqPath,
+                                                    enforceWritable: true)
+                if !document.writeFseq(toPath: fseqPath) {
+                    print("saveSequence: fseq write to \(fseqPath) failed; .xsq save still succeeded.")
+                }
+            }
             // Tier 1 memory mitigation — post-save is a safe
             // checkpoint to drop the undo / redo history.
             // Per-step snapshots (settings + palette strings for
