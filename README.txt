@@ -11,6 +11,11 @@ Issue Tracker is found here: www.github.com/xLightsSequencer/xLights/issues
 XLIGHTS/NUTCRACKER RELEASE NOTES
 ---------------------------------
 2026.08  May ??, 2026
+    -enh (dkulp)                Linux: text rendering switched from wxGraphicsContext (Cairo+Pango) to a portable
+                                FreeType+HarfBuzz+Fontconfig backend in src-core/. Text and Shape effects can now
+                                render on background threads on Linux (previously forced to the main thread because
+                                the wx/Pango stack isn't off-thread safe), parallelizing rendering of sequences
+                                with heavy text/emoji content.
 
 2026.07  April 28, 2026
     -enh (MrPierreB)            Add node animation playback to SubModels dialog.

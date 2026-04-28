@@ -22,6 +22,7 @@
 					<Add option="`pkg-config --cflags libavformat libavcodec libavutil libswresample libswscale libavfilter`" />
 					<Add option="`pkg-config --cflags gstreamer-1.0 gstreamer-video-1.0`" />
 					<Add option="`pkg-config --cflags lua53`" />
+					<Add option="`pkg-config --cflags freetype2 harfbuzz fontconfig`" />
 					<Add option="-Winvalid-pch" />
 					<Add option="-DWX_PRECOMP" />
 					<Add option="-DLINUX" />
@@ -58,6 +59,7 @@
 					<Add option="`wx-config --version=3.3 --libs std,media,gl,aui,propgrid`" />
 					<Add option="`pkg-config --libs gstreamer-1.0 gstreamer-video-1.0`" />
 					<Add option="`pkg-config --libs lua53`" />
+					<Add option="`pkg-config --libs freetype2 harfbuzz fontconfig`" />
 					<Add option="-lexpat" />
 					<Add option="-rdynamic" />
 					<Add option="-lz" />
@@ -84,6 +86,7 @@
 					<Add option="`pkg-config --cflags gstreamer-1.0 gstreamer-video-1.0`" />
 					<Add option="`pkg-config --cflags libavformat libavcodec libavutil libswresample libswscale libavfilter`" />
 					<Add option="`pkg-config --cflags lua53`" />
+					<Add option="`pkg-config --cflags freetype2 harfbuzz fontconfig`" />
 					<Add option="-Winvalid-pch" />
 					<Add option="-DWX_PRECOMP" />
 					<Add option="-DLINUX" />
@@ -120,6 +123,7 @@
 					<Add option="`wx-config --version=3.3 --libs std,media,gl,aui,propgrid`" />
 					<Add option="`pkg-config --libs gstreamer-1.0 gstreamer-video-1.0`" />
 					<Add option="`pkg-config --libs lua53`" />
+					<Add option="`pkg-config --libs freetype2 harfbuzz fontconfig`" />
 					<Add option="-lexpat" />
 					<Add option="-rdynamic" />
 					<Add option="-lz" />
@@ -1212,6 +1216,8 @@
 		<Unit filename="../src-core/render/SequenceMedia.h" />
 		<Unit filename="../src-core/render/TextDrawingContext.cpp" />
 		<Unit filename="../src-core/render/TextDrawingContext.h" />
+		<Unit filename="../src-core/render/FreeTypeTextDrawingContext.cpp" />
+		<Unit filename="../src-core/render/FreeTypeTextDrawingContext.h" />
 		<Unit filename="../src-ui-wx/sequencer/TimeLine.cpp" />
 		<Unit filename="../src-ui-wx/sequencer/TimeLine.h" />
 		<Unit filename="../src-core/render/UICallbacks.h" />

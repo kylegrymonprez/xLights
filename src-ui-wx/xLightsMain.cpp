@@ -71,6 +71,9 @@
 #include "render/SequencePackage.h"
 #include "shared/utils/wxUtilities.h"
 #include "graphics/wxTextDrawingContext.h"
+#ifdef LINUX
+#include "render/FreeTypeTextDrawingContext.h"
+#endif
 #include "utils/AppCallbacks.h"
 #include "utils/xlImage.h"
 #include <wx/mstream.h>
@@ -2231,10 +2234,17 @@ xLightsFrame::xLightsFrame(wxWindow* parent, int ab, wxWindowID id, bool renderO
     ShaderEffect::SetBackgroundRender(bgShaders);
 #endif
 
+#ifdef LINUX
+    // FreeType + HarfBuzz + Fontconfig path. Thread-safe per-instance, which
+    // lets TextEffect/ShapeEffect render on background threads (the wx/Pango
+    // path requires the main thread).
+    FreeTypeTextDrawingContext::Register();
+#else
     TextDrawingContext::RegisterFactory(wxTextDrawingContext::Create,
                                         wxTextDrawingContext::ParseTextFont,
                                         wxTextDrawingContext::ParseShapeFont);
     TextDrawingContext::Initialize();
+#endif
 
     MenuItem_File_Save->Enable(true);
     MenuItem_File_Save->SetItemLabel("Save Setup\tCTRL-s");
