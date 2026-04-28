@@ -27,6 +27,9 @@ jobs:
       # ACTIONS_CACHE_URL and ACTIONS_RUNTIME_TOKEN are exported below.
       VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
       VCPKG_DEFAULT_TRIPLET: x64-windows
+      # Disable manifest mode globally so cmake's vcpkg toolchain integration
+      # uses the already-installed packages rather than re-running the manifest.
+      VCPKG_FEATURE_FLAGS: "-manifests"
       BUILD_DIR: cmake_vs_vcpkg
 
     steps:
@@ -88,9 +91,12 @@ jobs:
             "libxlsxwriter:x64-windows",
             "libwebp:x64-windows"
           )
+          # --feature-flags=-manifests forces classic mode so individual
+          # package arguments are accepted even though vcpkg.json exists.
           & "$env:VCPKG_ROOT\vcpkg.exe" install @packages `
             --no-print-usage `
-            --triplet x64-windows
+            --triplet x64-windows `
+            --feature-flags=-manifests
 
       # ── wxWidgets ──────────────────────────────────────────────────────────
       - name: Get wxWidgets HEAD SHA
