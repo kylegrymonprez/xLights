@@ -10,35 +10,10 @@ Issue Tracker is found here: www.github.com/xLightsSequencer/xLights/issues
 
 XLIGHTS/NUTCRACKER RELEASE NOTES
 ---------------------------------
-2026.07  April ??, 2026
+2026.07  April 28, 2026
     -enh (MrPierreB)            Add node animation playback to SubModels dialog.
     -enh (dkulp)                Media-compatibility "Convert Now" now special-cases animated GIFs that were used as
                                 Video effects and turns them into normal Pictures effects that properly handle animated GIFs
-    -bug (dkulp)                Replaced throwing std::stoi calls in OutputManager / xxxSerialOutput / HinksPix with
-                                non-throwing std::strtol so corrupt config or controller responses no longer crash.
-    -bug (dkulp)                State / Faces / Shockwave / VUMeter / Lyric / MatrixModel: added div-by-zero and
-                                map.at() guards on render-thread paths that could crash on edge-case inputs.
-    -bug (dkulp)                Faces / xlFontInfo / SpecialOptions / FileUtils / ip_utils / AudioManager: added
-                                missing locks around static / shared caches that were mutated concurrently from
-                                render workers and could corrupt or crash under heavy parallel rendering.
-    -bug (dkulp)                E1.31 / ArtNet / DDP SetManyChannels: bounds-check the starting channel before
-                                memcpy so an out-of-range channel can't overflow the packet buffer.
-    -bug (dkulp)                AlphaPix / WLED / HinksPix: free curl_slist headers (and the WLED CURL handle) on
-                                every exit path; firmware-upload filename copy now uses bounded strncpy.
-    -bug (dkulp)                AudioManager: widened sample-loop counters to long so pcm conversion no longer
-                                overflows on multi-hour audio; added missing int16 clamp on the NONVOCALS / VOCALS
-                                mono fallback.
-    -bug (dkulp)                Render engine: AggregatorRenderer::setPreviousFrameDone bounds-checks the frame
-                                index before indexing the per-frame counter array.
-    -change (dkulp)             Package Sequence: rewritten to walk SequenceMedia + every model/view-object's file
-                                references + Matrix face images so shaders, custom images, videos, meshes, and
-                                face/state assets are actually included. Show-relative paths preserved where possible;
-                                external files relocated under typed subdirs (Images/ Videos/ Shaders/ Glediators/
-                                Meshes/ Faces/) with folder-based disambiguation on basename collisions so packaged
-                                filenames can't mimic PicturesEffect's animation-sequence detection. No more _lost/
-                                dumping;
-    -change (dkulp)             Packaging preferences: "Exclude Presets" renamed to "Exclude Videos" — the old option
-                                stripped a rgbeffects element that no longer carries presets, so it was a no-op; 
     -enh (dkulp)                Waveform (macOS 12+): four new "Stem — Drums / Bass / Other / Vocals (ML)" right-click
                                 filters run Apple CoreML inference against HTDemucs to split the audio into its constituent
                                 parts. Both the waveform and the playback signal follow the picked stem — so "Stem — Drums"
@@ -99,6 +74,22 @@ XLIGHTS/NUTCRACKER RELEASE NOTES
     -enh (dkulp)                Shader effect: dynamic uniforms emit JSON matching the effect-panel schema; JsonEffectPanel
                                 gains a reusable point2d control type, so iPad and desktop build the dynamic rows from the
                                 same description.
+    -bug (dkulp)                Replaced throwing std::stoi calls in OutputManager / xxxSerialOutput / HinksPix with
+                                non-throwing std::strtol so corrupt config or controller responses no longer crash.
+    -bug (dkulp)                State / Faces / Shockwave / VUMeter / Lyric / MatrixModel: added div-by-zero and
+                                map.at() guards on render-thread paths that could crash on edge-case inputs.
+    -bug (dkulp)                Faces / xlFontInfo / SpecialOptions / FileUtils / ip_utils / AudioManager: added
+                                missing locks around static / shared caches that were mutated concurrently from
+                                render workers and could corrupt or crash under heavy parallel rendering.
+    -bug (dkulp)                E1.31 / ArtNet / DDP SetManyChannels: bounds-check the starting channel before
+                                memcpy so an out-of-range channel can't overflow the packet buffer.
+    -bug (dkulp)                AlphaPix / WLED / HinksPix: free curl_slist headers (and the WLED CURL handle) on
+                                every exit path; firmware-upload filename copy now uses bounded strncpy.
+    -bug (dkulp)                AudioManager: widened sample-loop counters to long so pcm conversion no longer
+                                overflows on multi-hour audio; added missing int16 clamp on the NONVOCALS / VOCALS
+                                mono fallback.
+    -bug (dkulp)                Render engine: AggregatorRenderer::setPreviousFrameDone bounds-checks the frame
+                                index before indexing the per-frame counter array.
     -bug (derwin12)             Fix state/face definitions copied in layout not rendering in sequence until restart (#6239)
     -bug (derwin12)             Layout was sizing groups and model names too quickly (#6236)
     -bug (derwin12)             Fix ON effect was resetting the intensity values (#6233)
@@ -120,7 +111,16 @@ XLIGHTS/NUTCRACKER RELEASE NOTES
     -bug (derwin12)             Random Value Curve now holds the value properly (#4803)
     -bug (scott)                Fix some values not being stored in (new) settings file (#6134)
     -bug (dkulp)                Fix layout render glitches by sorting pixels back-to-front by camera-space Z (#6126)
-    -enh (charlie)              Restore performance of House Preview Export to Video
+    -bug (charlie)              Restore performance of House Preview Export to Video
+    -change (dkulp)             Package Sequence: rewritten to walk SequenceMedia + every model/view-object's file
+                                references + Matrix face images so shaders, custom images, videos, meshes, and
+                                face/state assets are actually included. Show-relative paths preserved where possible;
+                                external files relocated under typed subdirs (Images/ Videos/ Shaders/ Glediators/
+                                Meshes/ Faces/) with folder-based disambiguation on basename collisions so packaged
+                                filenames can't mimic PicturesEffect's animation-sequence detection. No more _lost/
+                                dumping;
+    -change (dkulp)             Packaging preferences: "Exclude Presets" renamed to "Exclude Videos" — the old option
+                                stripped a rgbeffects element that no longer carries presets, so it was a no-op;
 
 2026.06  April 16, 2026
     -enh (dkulp)                Media-compatibility warning on sequence load now offers "Convert Videos Now" —
