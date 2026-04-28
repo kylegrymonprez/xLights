@@ -14,6 +14,7 @@
 #include "render/EffectLayer.h"
 #include "render/Effect.h"
 #include "render/FSEQFile.h"
+#include "render/IRenderJobStatus.h"
 #include "render/RenderProgressInfo.h"
 #include "render/SequenceMedia.h"
 #include "xLightsVersion.h"
@@ -832,6 +833,37 @@ bool iPadRenderContext::IsRenderDone() {
         }
     }
     return allDone;
+}
+
+float iPadRenderContext::GetRenderProgressFraction() const {
+    if (!_renderEngine) return 1.0f;
+    auto& list = const_cast<RenderEngine*>(_renderEngine.get())->GetRenderProgressInfo();
+    if (list.empty()) return 1.0f;
+
+    uint64_t totalDone = 0;
+    uint64_t totalWork = 0;
+    for (auto* rpi : list) {
+        const int totalFrames = rpi->endFrame - rpi->startFrame + 1;
+        if (totalFrames <= 0 || !rpi->jobs) continue;
+        for (int i = 0; i < rpi->numRows; ++i) {
+            IRenderJobStatus* job = rpi->jobs[i];
+            if (!job) continue;
+            const int cur = job->GetCurrentFrame();
+            int done;
+            if (cur == END_OF_RENDER_FRAME) {
+                done = totalFrames;
+            } else {
+                int rel = cur - rpi->startFrame;
+                if (rel < 0) rel = 0;
+                if (rel > totalFrames) rel = totalFrames;
+                done = rel;
+            }
+            totalDone += static_cast<uint64_t>(done);
+            totalWork += static_cast<uint64_t>(totalFrames);
+        }
+    }
+    if (totalWork == 0) return 1.0f;
+    return static_cast<float>(totalDone) / static_cast<float>(totalWork);
 }
 
 void iPadRenderContext::SetModelColors(int frameMS) {

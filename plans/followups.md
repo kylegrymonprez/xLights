@@ -18,6 +18,21 @@ phase home; catalogued here so they don't fall off.
 
 Phase E closed 2026-04-21. Deferred items:
 
+- **Batch Render tool.** ✓ landed 2026-04-28. Toolbar entry on
+  `SequencePickerView` opens a sheet that walks the show folder
+  recursively (skipping `Backup/` and dot-folders) and lets the
+  user check sequences to re-render. Selections persist per show
+  folder in the `xLights-BatchRender` UserDefaults suite.
+  `BatchRenderRunner` drives a serial open → render →
+  `writeFseq` → close loop directly against the bridge so the
+  picker stays on screen between iterations. Cancel + progress
+  ("Rendering N of M") supported. Bypasses the FSEQ load
+  short-circuit via a new `forceRender` flag on
+  `SequencerViewModel.openSequence`. Picker UI now also surfaces
+  sequences in subfolders with the parent path shown as a caption,
+  so users with one-folder-per-sequence layouts can open from the
+  list directly.
+
 - **`.fseq` emission alongside save.** ✓ landed 2026-04-27.
   `FolderConfig` got a "Save FSEQ on save" toggle + optional
   fseq-folder picker; `iPadRenderContext::WriteFseq` produces a

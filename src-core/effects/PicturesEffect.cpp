@@ -196,7 +196,10 @@ void PicturesEffect::adjustSettings(const std::string &version, Effect *effect, 
                 media.AddAnimatedImage(NewPictureName, effect->GetParentEffectLayer()->GetParentElement()->GetSequenceElements()->GetFrameMS());
             }
         }
-        effect->GetParentEffectLayer()->GetParentElement()->GetSequenceElements()->GetSequenceMedia().GetImage(settings["E_TEXTCTRL_Pictures_Filename"]);
+        auto a = effect->GetParentEffectLayer()->GetParentElement()->GetSequenceElements()->GetSequenceMedia().GetImage(settings["E_TEXTCTRL_Pictures_Filename"]);
+        if (!a->IsOk()) {
+            spdlog::warn("Could not load image file: {}", settings["E_TEXTCTRL_Pictures_Filename"]);
+        }
     }
 }
 
@@ -452,8 +455,9 @@ void PicturesEffect::Render(RenderBuffer& buffer,
             // `GetImage` never gets a chance to run its own FixFile.
             std::string resolvedName = FileUtils::FixFile("", NewPictureName);
             if (!buffer.GetSequenceMedia()->HasImage(NewPictureName) &&
-                !FileExists(resolvedName)) {
+                !FileExists(resolvedName, false)) {
                 noImageFile = true;
+                spdlog::warn("No image for: {}", resolvedName);
             } else {
                 cache->PictureName = NewPictureName;
                 cache->imageCache = buffer.GetSequenceMedia()->GetImage(NewPictureName);

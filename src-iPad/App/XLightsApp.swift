@@ -733,6 +733,7 @@ struct SequencePickerView: View {
 
     @State private var recent: [RecentSequences.Entry] = RecentSequences.load()
     @State private var showingNewWizard: Bool = false
+    @State private var showingBatchRender: Bool = false
     @State private var openErrorMessage: String? = nil
 
     var body: some View {
@@ -772,14 +773,24 @@ struct SequencePickerView: View {
                     }
                 }
                 Section(recent.isEmpty ? "Sequences" : "In This Show Folder") {
-                    ForEach(viewModel.sequenceFiles, id: \.self) { file in
-                        let path = (viewModel.showFolderPath ?? "") + "/" + file
-                        let status = ubiquityStatus(for: URL(fileURLWithPath: path))
+                    ForEach(viewModel.sequenceFiles) { entry in
+                        let status = ubiquityStatus(for: URL(fileURLWithPath: entry.fullPath))
                         Button {
-                            openWithDownloadIfNeeded(path: path, status: status)
+                            openWithDownloadIfNeeded(path: entry.fullPath, status: status)
                         } label: {
-                            HStack {
-                                Text(file)
+                            HStack(spacing: 8) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(entry.displayName)
+                                        .font(.body)
+                                        .foregroundStyle(.primary)
+                                    if !entry.parentRelativePath.isEmpty {
+                                        Text(entry.parentRelativePath)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                    }
+                                }
                                 Spacer()
                                 UbiquityBadge(status: status)
                             }
@@ -796,6 +807,12 @@ struct SequencePickerView: View {
                         } label: {
                             Image(systemName: "plus")
                         }
+                        Button {
+                            showingBatchRender = true
+                        } label: {
+                            Image(systemName: "square.stack.3d.up")
+                        }
+                        .disabled(viewModel.sequenceFiles.isEmpty)
                         Button {
                             showFolderConfig = true
                         } label: {
@@ -827,6 +844,10 @@ struct SequencePickerView: View {
                     .onDisappear {
                         recent = RecentSequences.load()
                     }
+            }
+            .sheet(isPresented: $showingBatchRender) {
+                BatchRenderSheet()
+                    .environment(viewModel)
             }
             .alert("Cannot Open Sequence",
                    isPresented: Binding(

@@ -1480,7 +1480,9 @@ std::string SequenceMedia::ResolvePath(const std::string& filepath) {
     // FixFile's fast path is FileExists(file, false) → early return, so
     // untouched paths stay cheap on desktop.
     std::string resolved = FileUtils::FixFile("", filepath);
-    if (!resolved.empty()) return resolved;
+    if (!resolved.empty()) {
+        return resolved;
+    }
     return filepath;
 }
 

@@ -41,7 +41,7 @@ class SequencerViewModel {
     var sequenceDurationMS: Int = 0
     var frameIntervalMS: Int = 50
     var rows: [RowInfo] = []
-    var sequenceFiles: [String] = []
+    var sequenceFiles: [SequenceEntry] = []
 
     // Audio state
     var hasAudio = false
@@ -494,7 +494,7 @@ class SequencerViewModel {
         return ok
     }
 
-    func openSequence(path: String) {
+    func openSequence(path: String, forceRender: Bool = false) {
         if document.openSequence(path) {
             isSequenceLoaded = true
             isDirty = false
@@ -514,7 +514,11 @@ class SequencerViewModel {
             // matching .fseq exists, skip the render and load frame data
             // straight from disk. On any mismatch (stale, wrong shape,
             // missing) we fall through to the normal background render.
-            if let fseqPath = FolderConfig.fseqPath(forXsq: path),
+            // `forceRender` (used by Batch Render) bypasses the
+            // short-circuit so we always re-render against the current
+            // layout regardless of any cached fseq.
+            if !forceRender,
+               let fseqPath = FolderConfig.fseqPath(forXsq: path),
                document.tryLoadFseq(fseqPath: fseqPath, xsqPath: path) {
                 isRendering = false
                 isRenderDone = true
@@ -5038,11 +5042,68 @@ class SequencerViewModel {
     }
 
     private func scanForSequenceFiles(at path: String) {
-        sequenceFiles = []
+        sequenceFiles = SequenceScanner.scan(showFolder: path)
+    }
+}
+
+/// A single .xsq surfaced by the picker / batch render scanners.
+/// `relativePath` is the path under the show folder, with forward slashes
+/// (e.g. "Halloween 2026/skeleton.xsq"); `parentRelativePath` is just the
+/// directory portion ("Halloween 2026", or "" for sequences at the root).
+struct SequenceEntry: Hashable, Identifiable {
+    let fullPath: String
+    let relativePath: String
+    var id: String { fullPath }
+    var displayName: String {
+        (relativePath as NSString).lastPathComponent
+    }
+    var parentRelativePath: String {
+        let parent = (relativePath as NSString).deletingLastPathComponent
+        return parent
+    }
+}
+
+/// Recursive show-folder walker shared by the picker and the batch render
+/// sheet. Skips directories named "Backup" (case-insensitive) and any
+/// dot-folder so iOS / iCloud / xLights metadata doesn't clutter the list.
+/// Returns entries sorted by relative path so subfolder mates cluster.
+enum SequenceScanner {
+    static func scan(showFolder: String) -> [SequenceEntry] {
+        guard !showFolder.isEmpty else { return [] }
+        let root = URL(fileURLWithPath: showFolder)
         let fm = FileManager.default
-        guard let items = try? fm.contentsOfDirectory(atPath: path) else { return }
-        sequenceFiles = items
-            .filter { $0.hasSuffix(".xsq") }
-            .sorted()
+        var results: [SequenceEntry] = []
+        var stack: [URL] = [root]
+        while let dir = stack.popLast() {
+            guard let children = try? fm.contentsOfDirectory(
+                at: dir,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ) else { continue }
+            for child in children {
+                let name = child.lastPathComponent
+                if name.hasPrefix(".") { continue }
+                let isDir = (try? child.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                if isDir {
+                    if name.caseInsensitiveCompare("Backup") == .orderedSame { continue }
+                    stack.append(child)
+                } else if name.lowercased().hasSuffix(".xsq") {
+                    let rel = relativePath(of: child, under: root)
+                    results.append(SequenceEntry(fullPath: child.path, relativePath: rel))
+                }
+            }
+        }
+        results.sort { $0.relativePath.localizedStandardCompare($1.relativePath) == .orderedAscending }
+        return results
+    }
+
+    private static func relativePath(of file: URL, under root: URL) -> String {
+        let rootComps = root.standardizedFileURL.pathComponents
+        let fileComps = file.standardizedFileURL.pathComponents
+        guard fileComps.count > rootComps.count,
+              Array(fileComps.prefix(rootComps.count)) == rootComps else {
+            return file.lastPathComponent
+        }
+        return fileComps.dropFirst(rootComps.count).joined(separator: "/")
     }
 }

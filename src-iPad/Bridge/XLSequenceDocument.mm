@@ -3090,6 +3090,11 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
     return _context->IsRenderDone() ? YES : NO;
 }
 
+- (float)renderProgressFraction {
+    if (!_context) return 1.0f;
+    return _context->GetRenderProgressFraction();
+}
+
 - (BOOL)abortRenderAndWait:(NSTimeInterval)timeoutSeconds {
     if (!_context) return YES;
     // Signal every in-flight render job to bail. Workers test the

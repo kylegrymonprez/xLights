@@ -115,6 +115,13 @@ public:
     SequenceData& GetSequenceData() { return _sequenceData; }
     bool IsRenderDone();
 
+    // Coarse fraction (0..1) of the in-flight Render() call's frame work
+    // that has completed. Walks every active RenderProgressInfo's per-row
+    // job and sums each `IRenderJobStatus::GetCurrentFrame()` against the
+    // total frame range. Returns 1.0 when no render is active so a UI
+    // can use this directly without racing IsRenderDone().
+    float GetRenderProgressFraction() const;
+
     // === Preset model / preview rendering =================================
     // Mirrors xLightsFrame's standalone preset-render scaffolding: a 64×64
     // RGB `MatrixModel` owned by its own `ModelManager`, plus a dedicated

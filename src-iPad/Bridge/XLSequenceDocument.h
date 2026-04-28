@@ -836,6 +836,11 @@
 // Rendering
 - (void)renderAll;
 - (BOOL)isRenderDone;
+
+// Coarse render-progress fraction (0..1) for the in-flight render of the
+// currently-loaded sequence. Aggregates per-row job frame counters against
+// the sequence's frame range. Returns 1.0 when no render is active.
+- (float)renderProgressFraction;
 // Signal all in-flight render jobs to abort and block until they've
 // completed (or `timeoutSeconds` elapses). Returns YES if the render
 // is fully quiesced by the time the call returns. Call on shutdown /
