@@ -620,7 +620,7 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate, UIPencilInteracti
         bridge.flushLineBatch()
 
         // Icons + name labels.
-        let screenScale = UIScreen.main.scale
+        let screenScale = UITraitCollection.current.displayScale
         for e in vis {
             let width = e.x2 - e.x1
             guard width > minIconWidth else { continue }

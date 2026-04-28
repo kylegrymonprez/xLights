@@ -3473,14 +3473,10 @@ static std::string iPadLiftNestedStemModel(const std::string& rootDir) {
     NSURLSessionConfiguration* cfg = [NSURLSessionConfiguration defaultSessionConfiguration];
     cfg.allowsCellularAccess = NO; // 65 MB download — stay on Wi-Fi by default.
     cfg.waitsForConnectivity = YES;
-    __block id progressObserver = nil;
     NSURLSession* session = [NSURLSession sessionWithConfiguration:cfg];
     NSURLSessionDownloadTask* task =
         [session downloadTaskWithURL:url
                     completionHandler:^(NSURL* tmpLoc, NSURLResponse* resp, NSError* err) {
-        if (progressObserver) {
-            [progressObserver invalidate];
-        }
         if (err || !tmpLoc) {
             NSLog(@"Stem model download failed: %@", err);
             if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(nil); });
@@ -3561,13 +3557,10 @@ static std::string iPadLiftNestedStemModel(const std::string& rootDir) {
         NSString* out = [NSString stringWithUTF8String:modelPath.c_str()];
         if (completion) dispatch_async(dispatch_get_main_queue(), ^{ completion(out); });
     }];
-    // Hook up periodic download progress (0..50).
-    progressObserver = [task.progress addObserverForKeyPath:@"fractionCompleted"
-                                                    options:NSKeyValueObservingOptionNew
-                                                    context:nullptr];
-    // NSKVO-based progress observation is clumsy from ObjC without
-    // a subclass; use a timer-driven poll instead. Keep it simple.
-    (void)progressObserver;
+    // Periodic download progress (0..50). Done via a timer-driven
+    // poll rather than KVO — NSProgress KVO from ObjC++ would need a
+    // subclass for the callback, and a 250 ms tick is plenty for a
+    // ~65 MB download.
     if (progress) {
         dispatch_async(dispatch_get_main_queue(), ^{
             // Immediately report 0 so the UI shows the progress bar.
@@ -3891,6 +3884,7 @@ NSString* mediaTypeToString(MediaType t) {
         case MediaType::TextFile:   return @"text";
         case MediaType::BinaryFile: return @"binary";
         case MediaType::Video:      return @"video";
+        case MediaType::Audio:      return @"audio";
     }
     return @"";
 }
@@ -3946,6 +3940,11 @@ std::shared_ptr<MediaCacheEntry> lookupMediaEntry(SequenceMedia& media,
         case MediaType::Video:
             if (!media.HasMedia(path)) return nullptr;
             if (auto e = media.GetVideo(path))
+                return std::static_pointer_cast<MediaCacheEntry>(e);
+            return nullptr;
+        case MediaType::Audio:
+            if (!media.HasMedia(path)) return nullptr;
+            if (auto e = media.GetAudio(path))
                 return std::static_pointer_cast<MediaCacheEntry>(e);
             return nullptr;
     }
@@ -4295,6 +4294,7 @@ const char* canonicalSubdirForType(MediaType t) {
         case MediaType::Video:      return "Videos";
         case MediaType::TextFile:   return "Text";
         case MediaType::BinaryFile: return "Other";
+        case MediaType::Audio:      return "Audio";
     }
     return "";
 }
@@ -4657,14 +4657,14 @@ const char* canonicalSubdirForType(MediaType t) {
         (__bridge CFDataRef)srcData);
     CGImageRef srcImage = CGImageCreate(
         srcW, srcH, 8, 32, srcW * 4, cs,
-        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little,
+        (uint32_t)kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little,
         provider, nullptr, true, kCGRenderingIntentDefault);
     CGDataProviderRelease(provider);
 
     NSMutableData* outData = [NSMutableData dataWithLength:(NSUInteger)dstW * dstH * 4];
     CGContextRef ctx = CGBitmapContextCreate(
         outData.mutableBytes, dstW, dstH, 8, dstW * 4, cs,
-        kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
+        (uint32_t)kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Little);
     CGColorSpaceRelease(cs);
     if (!ctx || !srcImage) {
         if (ctx) CGContextRelease(ctx);
@@ -4696,14 +4696,6 @@ static constexpr const char* kMovingHeadEffectName = "Moving Head";
 static constexpr std::array<const char*, 6> kMovingHeadPositionCmds = {
     "Pan", "Tilt", "PanOffset", "TiltOffset", "Groupings", "Cycles"
 };
-
-/// Slider key per position command. The renderer reads either the
-/// raw scalar or a `<cmd> VC: <curve>` trailing entry; we mirror
-/// both when an active value curve is present.
-static NSString* mhSettingsKeyForFixture(int fixture) {
-    return [NSString stringWithFormat:@"E_TEXTCTRL_MH%d_Settings",
-            fixture];
-}
 
 /// Parse a packed MH command string into an ordered list of
 /// (cmd, value) pairs. Preserves the desktop grammar: commands

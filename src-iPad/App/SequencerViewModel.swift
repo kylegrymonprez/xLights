@@ -1,6 +1,16 @@
 import SwiftUI
 import UIKit
 
+// XLSequenceDocument is the Objective-C bridge over the C++ render
+// context. It's main-actor-owned for normal mutation but several
+// flows deliberately hand it to background work (`renderAll` runs
+// on a Thread{}, `openPackagedSequence` and `abortRenderAndWait`
+// dispatch off main, the stem-separation pipeline does CoreML on a
+// utility queue). The bridge serialises that access internally —
+// this conformance is the type-system promise that mirrors the
+// runtime contract so Swift 6 stops flagging the captures.
+extension XLSequenceDocument: @retroactive @unchecked Sendable {}
+
 @Observable @MainActor
 class SequencerViewModel {
     var document = XLSequenceDocument()
@@ -647,7 +657,7 @@ class SequencerViewModel {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.75) { [weak self] in
             guard let self, self.isSequenceLoaded else { return }
             DispatchQueue.global(qos: .utility).async {
-                let inv = (doc.mediaInventoryInSequence() as? [[String: Any]]) ?? []
+                let inv = doc.mediaInventoryInSequence() ?? []
                 let broken = inv.reduce(0) { acc, dict -> Int in
                     let b = (dict["isBroken"] as? NSNumber)?.boolValue ?? false
                     return acc + (b ? 1 : 0)
@@ -836,10 +846,15 @@ class SequencerViewModel {
         stopDirtyPolling()
         dirtyPollTimer = Timer.scheduledTimer(withTimeInterval: 0.5,
                                                repeats: true) { [weak self] _ in
-            guard let self else { return }
-            let dirty = self.document.isSequenceDirty()
-            if dirty != self.isDirty {
-                self.isDirty = dirty
+            // Timer was scheduled on the main runloop from a @MainActor
+            // method, so it always fires here on main; assumeIsolated
+            // is the type-system bridge to that runtime contract.
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let dirty = self.document.isSequenceDirty()
+                if dirty != self.isDirty {
+                    self.isDirty = dirty
+                }
             }
         }
     }
@@ -865,7 +880,9 @@ class SequencerViewModel {
         let interval = TimeInterval(autosaveIntervalMinutes * 60)
         autosaveTimer = Timer.scheduledTimer(withTimeInterval: interval,
                                               repeats: true) { [weak self] _ in
-            self?.tickAutosave()
+            MainActor.assumeIsolated {
+                self?.tickAutosave()
+            }
         }
     }
 
@@ -1101,22 +1118,27 @@ class SequencerViewModel {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.document.handleMemoryWarning()
-            NotificationCenter.default.post(
-                name: NSNotification.Name("XLMemoryWarning"), object: nil)
-            self?.memoryWarning = true
+            // queue: .main pins the observer block to the main thread.
+            MainActor.assumeIsolated {
+                self?.document.handleMemoryWarning()
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("XLMemoryWarning"), object: nil)
+                self?.memoryWarning = true
+            }
         }
 
         memoryPollTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            let mb = XLSequenceDocument.availableMemoryMB()
-            if self.memoryWarning {
-                // Clear once we're comfortably above the threshold (hysteresis).
-                if mb >= Self.memoryRecoveredThresholdMB {
-                    self.memoryWarning = false
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let mb = XLSequenceDocument.availableMemoryMB()
+                if self.memoryWarning {
+                    // Clear once we're comfortably above the threshold (hysteresis).
+                    if mb >= Self.memoryRecoveredThresholdMB {
+                        self.memoryWarning = false
+                    }
+                } else if mb < Self.memoryWarningThresholdMB {
+                    self.memoryWarning = true
                 }
-            } else if mb < Self.memoryWarningThresholdMB {
-                self.memoryWarning = true
             }
         }
     }
@@ -1331,62 +1353,64 @@ class SequencerViewModel {
         stopPlaybackTimer()
         let interval = Double(frameIntervalMS) / 1000.0
         playbackTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            guard let self else { return }
+            MainActor.assumeIsolated {
+                guard let self else { return }
 
-            if self.hasAudio {
-                // Audio-driven: poll audio position
-                let pos = self.document.audioTellMS()
-                self.playPositionMS = Int(pos)
+                if self.hasAudio {
+                    // Audio-driven: poll audio position
+                    let pos = self.document.audioTellMS()
+                    self.playPositionMS = Int(pos)
 
-                let state = self.document.audioPlayingState()
-                // Audio naturally ending past the sequence length doesn't
-                // always flip _media_state to STOPPED — the backend only does
-                // that on explicit Stop(). Treat "past end" as end-of-playback.
-                if state == 2 || self.playPositionMS >= self.sequenceDurationMS {
-                    self.playPositionMS = self.sequenceDurationMS
-                    self.document.audioStop()
-                    self.isPlaying = false
-                    self.isPaused = false
-                    self.stopPlaybackTimer()
-                    return
+                    let state = self.document.audioPlayingState()
+                    // Audio naturally ending past the sequence length doesn't
+                    // always flip _media_state to STOPPED — the backend only does
+                    // that on explicit Stop(). Treat "past end" as end-of-playback.
+                    if state == 2 || self.playPositionMS >= self.sequenceDurationMS {
+                        self.playPositionMS = self.sequenceDurationMS
+                        self.document.audioStop()
+                        self.isPlaying = false
+                        self.isPaused = false
+                        self.stopPlaybackTimer()
+                        return
+                    }
+                    // B33 play-loop: wrap back to loopStart when the
+                    // head crosses loopEnd. Audio seek is used to keep
+                    // the audio stream in sync; playback continues
+                    // without re-issuing `audioPlay`.
+                    if self.loopPlayEnabled, self.hasLoopRegion,
+                       self.playPositionMS >= self.loopEndMS {
+                        self.playPositionMS = self.loopStartMS
+                        self.document.audioSeek(toMS: self.loopStartMS)
+                    }
+                } else {
+                    // Timer-driven: use wall clock elapsed since play
+                    // started, scaled by the current playback speed
+                    // (animation sequences without audio can't ride the
+                    // audio engine's time-pitch unit).
+                    let wallElapsed = CFAbsoluteTimeGetCurrent() - self.playbackStartTime
+                    let elapsedMS = Int(wallElapsed * 1000.0 * Double(self.playSpeed))
+                    let pos = self.playbackStartMS + elapsedMS
+                    if pos >= self.sequenceDurationMS {
+                        self.playPositionMS = self.sequenceDurationMS
+                        self.isPlaying = false
+                        self.isPaused = false
+                        self.stopPlaybackTimer()
+                        return
+                    }
+                    self.playPositionMS = pos
+                    // B33 play-loop (no-audio path): reset the wall-clock
+                    // anchor so the next tick starts measuring from the
+                    // loop's start.
+                    if self.loopPlayEnabled, self.hasLoopRegion,
+                       self.playPositionMS >= self.loopEndMS {
+                        self.playPositionMS = self.loopStartMS
+                        self.playbackStartMS = self.loopStartMS
+                        self.playbackStartTime = CFAbsoluteTimeGetCurrent()
+                    }
                 }
-                // B33 play-loop: wrap back to loopStart when the
-                // head crosses loopEnd. Audio seek is used to keep
-                // the audio stream in sync; playback continues
-                // without re-issuing `audioPlay`.
-                if self.loopPlayEnabled, self.hasLoopRegion,
-                   self.playPositionMS >= self.loopEndMS {
-                    self.playPositionMS = self.loopStartMS
-                    self.document.audioSeek(toMS: self.loopStartMS)
-                }
-            } else {
-                // Timer-driven: use wall clock elapsed since play
-                // started, scaled by the current playback speed
-                // (animation sequences without audio can't ride the
-                // audio engine's time-pitch unit).
-                let wallElapsed = CFAbsoluteTimeGetCurrent() - self.playbackStartTime
-                let elapsedMS = Int(wallElapsed * 1000.0 * Double(self.playSpeed))
-                let pos = self.playbackStartMS + elapsedMS
-                if pos >= self.sequenceDurationMS {
-                    self.playPositionMS = self.sequenceDurationMS
-                    self.isPlaying = false
-                    self.isPaused = false
-                    self.stopPlaybackTimer()
-                    return
-                }
-                self.playPositionMS = pos
-                // B33 play-loop (no-audio path): reset the wall-clock
-                // anchor so the next tick starts measuring from the
-                // loop's start.
-                if self.loopPlayEnabled, self.hasLoopRegion,
-                   self.playPositionMS >= self.loopEndMS {
-                    self.playPositionMS = self.loopStartMS
-                    self.playbackStartMS = self.loopStartMS
-                    self.playbackStartTime = CFAbsoluteTimeGetCurrent()
-                }
+
+                self.sendOutputFrame()
             }
-
-            self.sendOutputFrame()
         }
     }
 
@@ -1411,9 +1435,11 @@ class SequencerViewModel {
         isScrubbing = true
         let interval = Double(frameIntervalMS) / 1000.0
         scrubTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            guard let self else { return }
-            let next = self.playPositionMS + self.frameIntervalMS
-            self.playPositionMS = (next >= self.scrubEndMS) ? self.scrubStartMS : next
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let next = self.playPositionMS + self.frameIntervalMS
+                self.playPositionMS = (next >= self.scrubEndMS) ? self.scrubStartMS : next
+            }
         }
     }
 
@@ -1466,11 +1492,17 @@ class SequencerViewModel {
         // Poll for completion
         renderPollTimer?.invalidate()
         renderPollTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] timer in
-            if doc.isRenderDone() {
-                timer.invalidate()
-                self?.renderPollTimer = nil
-                self?.isRendering = false
-                self?.isRenderDone = true
+            // Timer isn't Sendable, so we can't reference `timer` from
+            // inside the assumeIsolated body — invalidate it out here
+            // before crossing into main-actor land.
+            let done = doc.isRenderDone()
+            if done { timer.invalidate() }
+            MainActor.assumeIsolated {
+                if done {
+                    self?.renderPollTimer = nil
+                    self?.isRendering = false
+                    self?.isRenderDone = true
+                }
             }
         }
     }
@@ -1616,10 +1648,10 @@ class SequencerViewModel {
         // Merge settings map (E_/B_/T_) and palette map (C_) into a single
         // observed dictionary so the SwiftUI controls re-render on change.
         var merged: [String: String] = [:]
-        if let settings = document.effectSettings(forRow: Int32(rowIndex), at: Int32(effectIndex)) as? [String: String] {
+        if let settings = document.effectSettings(forRow: Int32(rowIndex), at: Int32(effectIndex)) {
             for (k, v) in settings { merged[k] = v }
         }
-        if let palette = document.effectPalette(forRow: Int32(rowIndex), at: Int32(effectIndex)) as? [String: String] {
+        if let palette = document.effectPalette(forRow: Int32(rowIndex), at: Int32(effectIndex)) {
             for (k, v) in palette { merged[k] = v }
         }
         selectedEffectSettings = merged
@@ -1651,11 +1683,11 @@ class SequencerViewModel {
         guard let sel = selectedEffect else { return }
         var merged: [String: String] = [:]
         if let settings = document.effectSettings(forRow: Int32(sel.rowIndex),
-                                                  at: Int32(sel.effectIndex)) as? [String: String] {
+                                                  at: Int32(sel.effectIndex)) {
             for (k, v) in settings { merged[k] = v }
         }
         if let palette = document.effectPalette(forRow: Int32(sel.rowIndex),
-                                                at: Int32(sel.effectIndex)) as? [String: String] {
+                                                at: Int32(sel.effectIndex)) {
             for (k, v) in palette { merged[k] = v }
         }
         selectedEffectSettings = merged
@@ -1701,11 +1733,11 @@ class SequencerViewModel {
         // path except scrub is skipped.
         var merged: [String: String] = [:]
         if let settings = document.effectSettings(forRow: Int32(anchor.rowIndex),
-                                                   at: Int32(anchor.effectIndex)) as? [String: String] {
+                                                   at: Int32(anchor.effectIndex)) {
             for (k, v) in settings { merged[k] = v }
         }
         if let palette = document.effectPalette(forRow: Int32(anchor.rowIndex),
-                                                 at: Int32(anchor.effectIndex)) as? [String: String] {
+                                                 at: Int32(anchor.effectIndex)) {
             for (k, v) in palette { merged[k] = v }
         }
         selectedEffectSettings = merged
@@ -1760,14 +1792,14 @@ class SequencerViewModel {
     func dynamicOptions(source: String, propertyId: String) -> [String] {
         switch source {
         case "timingTracks":
-            return (document.timingTrackNames() as? [String]) ?? []
+            return document.timingTrackNames() ?? []
         case "lyricTimingTracks":
-            return (document.lyricTimingTrackNames() as? [String]) ?? []
+            return document.lyricTimingTrackNames() ?? []
         case "cameras":
             // PerPreviewCamera: "2D" plus every 3D camera defined in
             // the show's ViewpointMgr. Populated by Phase D-3's
             // ViewpointMgr bridging at show-load time.
-            return (document.perPreviewCameraNames() as? [String]) ?? []
+            return document.perPreviewCameraNames() ?? []
         default:
             break
         }
@@ -1777,16 +1809,15 @@ class SequencerViewModel {
         let idx = Int32(sel.effectIndex)
         switch source {
         case "states":
-            return (document.states(forRow: row, at: idx) as? [String]) ?? []
+            return document.states(forRow: row, at: idx) ?? []
         case "faces":
-            return (document.faces(forRow: row, at: idx) as? [String]) ?? []
+            return document.faces(forRow: row, at: idx) ?? []
         case "modelNodeNames":
-            return (document.modelNodeNames(forRow: row, at: idx) as? [String]) ?? []
+            return document.modelNodeNames(forRow: row, at: idx) ?? []
         case "effect":
-            return (document.effectSettingOptions(forRow: row,
-                                                   at: idx,
-                                                   settingId: propertyId)
-                    as? [String]) ?? []
+            return document.effectSettingOptions(forRow: row,
+                                                  at: idx,
+                                                  settingId: propertyId) ?? []
         default:
             return []
         }
@@ -1973,12 +2004,12 @@ class SequencerViewModel {
         var anchorValues: [(String, String)] = []
         if let settings = document.effectSettings(
             forRow: Int32(anchor.rowIndex),
-            at: Int32(anchor.effectIndex)) as? [String: String] {
+            at: Int32(anchor.effectIndex)) {
             for (k, v) in settings { anchorValues.append((k, v)) }
         }
         if let palette = document.effectPalette(
             forRow: Int32(anchor.rowIndex),
-            at: Int32(anchor.effectIndex)) as? [String: String] {
+            at: Int32(anchor.effectIndex)) {
             for (k, v) in palette { anchorValues.append((k, v)) }
         }
 
@@ -4524,7 +4555,7 @@ class SequencerViewModel {
     }
 
     func loadAvailableEffects() {
-        if let names = document.availableEffectNames() as? [String] {
+        if let names = document.availableEffectNames() {
             availableEffects = names.filter { !$0.isEmpty }
         }
     }
@@ -4692,16 +4723,21 @@ class SequencerViewModel {
         let doc = document
         doc.installStemModel(toRoot: root,
                               progress: { [weak self] pct in
-            self?.stemsProgressPct = Int(pct)
+            // Bridge documents these callbacks fire on the main queue.
+            MainActor.assumeIsolated {
+                self?.stemsProgressPct = Int(pct)
+            }
         },
                               completion: { [weak self] installedPath in
-            guard let self = self else { return }
-            if let path = installedPath, !path.isEmpty {
-                self.runStemSeparation(with: path)
-            } else {
-                self.stemsPhase = .idle
-                self.stemsPendingFilter = nil
-                self.stemsInstallRoot = nil
+            MainActor.assumeIsolated {
+                guard let self = self else { return }
+                if let path = installedPath, !path.isEmpty {
+                    self.runStemSeparation(with: path)
+                } else {
+                    self.stemsPhase = .idle
+                    self.stemsPendingFilter = nil
+                    self.stemsInstallRoot = nil
+                }
             }
         })
     }
@@ -4722,17 +4758,21 @@ class SequencerViewModel {
         stemsProgressPct = 0
         document.runStemSeparation(atPath: modelPath,
                                     progress: { [weak self] pct in
-            self?.stemsProgressPct = Int(pct)
+            MainActor.assumeIsolated {
+                self?.stemsProgressPct = Int(pct)
+            }
         },
                                     completion: { [weak self] ok in
-            guard let self = self else { return }
-            if ok {
-                self.stemsAvailable = true
-                self.stemsPhase = .ready
-                self.applyPendingStemFilter()
-            } else {
-                self.stemsPhase = .idle
-                self.stemsPendingFilter = nil
+            MainActor.assumeIsolated {
+                guard let self = self else { return }
+                if ok {
+                    self.stemsAvailable = true
+                    self.stemsPhase = .ready
+                    self.applyPendingStemFilter()
+                } else {
+                    self.stemsPhase = .idle
+                    self.stemsPendingFilter = nil
+                }
             }
         })
     }
@@ -4995,9 +5035,9 @@ class SequencerViewModel {
 
             var effects: [EffectInfo] = []
             for j in 0..<effectNames.count {
-                let name = effectNames[j] as? String ?? ""
-                let start = (effectStarts[j] as? NSNumber)?.intValue ?? 0
-                let end = (effectEnds[j] as? NSNumber)?.intValue ?? 0
+                let name = effectNames[j]
+                let start = effectStarts[j].intValue
+                let end = effectEnds[j].intValue
                 effects.append(EffectInfo(id: j, name: name, startTimeMS: start, endTimeMS: end))
             }
 
