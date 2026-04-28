@@ -74,7 +74,7 @@ struct HinksPixSerial {
     void Dump() const;
     void SetConfig(nlohmann::json const& data);
 
-    [[nodiscard]] nlohmann::ordered_json BuildCommand() const;
+    [[nodiscard]] std::string BuildCommand() const;
     [[nodiscard]] std::string BuildCommandEasyLights(int mode) const;
 };
 

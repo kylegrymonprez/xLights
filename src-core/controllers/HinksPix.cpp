@@ -197,7 +197,7 @@ void HinksPixSerial::SetConfig(nlohmann::json const& data) {
     ddpDMXNumOfChan = data.at("DDP_DMX_CHAN_CNT").get<int>();
 }
 
-nlohmann::ordered_json HinksPixSerial::BuildCommand() const {
+std::string HinksPixSerial::BuildCommand() const {
     nlohmann::ordered_json cmd;
     cmd= {
          { "CMD", "DATA_MODE" },
@@ -209,7 +209,7 @@ nlohmann::ordered_json HinksPixSerial::BuildCommand() const {
          {"DDP_DMX_START", ddpDMXStartChannel},
          {"DDP_DMX_CHAN_CNT", ddpDMXNumOfChan}
      };
-    return "DATA: " +cmd;
+    return "DATA: " + cmd.dump();
 }
 
 std::string HinksPixSerial::BuildCommandEasyLights(int mode) const
