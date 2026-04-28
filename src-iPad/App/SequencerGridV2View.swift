@@ -1412,7 +1412,7 @@ struct SequencerGridV2View: View {
                     HStack(spacing: 2) {
                         Text(currentName)
                             .font(.caption).fontWeight(.medium)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(.primary)
                             .lineLimit(1)
                         Image(systemName: "chevron.down")
                             .font(.caption2)
@@ -1431,7 +1431,7 @@ struct SequencerGridV2View: View {
         }
         .padding(6)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color(white: 0.12))
+        .background(Color(.secondarySystemBackground))
     }
 
     /// Row-1 ruler + waveform strip. Extracted from `body` so the
