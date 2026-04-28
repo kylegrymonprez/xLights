@@ -487,7 +487,10 @@ target_include_directories(xLights PRIVATE
 
 # ─── zlib ───────────────────────────────────────────────────────────────────
 if(NOT XLIGHTS_USE_VCPKG)
-    find_library(ZLIB_LIB NAMES zlibwapi zlib z
+    # Prefer z.lib (plain static MSVC build, no ASM deps).
+    # zlibwapi.lib ships without its companion gvmat64.obj / inffas8664.obj
+    # ASM objects and causes LNK2001 on x64 MSVC — keep it as last resort.
+    find_library(ZLIB_LIB NAMES z zlib zlibstatic zlibwapi
         HINTS ${XL_LIB}/windows64 /usr/lib /usr/local/lib)
     if(ZLIB_LIB)
         set(ZLIB_LINK_TARGET ${ZLIB_LIB})
@@ -497,6 +500,13 @@ if(NOT XLIGHTS_USE_VCPKG)
 else()
     find_package(ZLIB REQUIRED)
     set(ZLIB_LINK_TARGET ZLIB::ZLIB)
+endif()
+
+# Suppress static-CRT conflict that a /GL-compiled zlibwapi.lib can trigger.
+if(MSVC AND NOT XLIGHTS_USE_VCPKG)
+    target_link_options(xLights PRIVATE
+        $<$<CONFIG:Release>:/NODEFAULTLIB:LIBCMT>
+        $<$<CONFIG:Debug>:/NODEFAULTLIB:LIBCMTD>)
 endif()
 
 # ─── Link libraries ─────────────────────────────────────────────────────────
