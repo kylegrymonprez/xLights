@@ -473,11 +473,13 @@ public:
 
         if (contextHandle) {
             auto& mgr = GLContextManager::Instance();
-            mgr.MakeCurrent(contextHandle);
-            DestroyResources();
-            mgr.DoneCurrent(contextHandle);
-            mgr.ReleaseContext(contextHandle);
-            contextHandle = nullptr;
+            mgr.ExecuteOnGLThread([&]() {
+                mgr.MakeCurrent(contextHandle);
+                DestroyResources();
+                mgr.DoneCurrent(contextHandle);
+                mgr.ReleaseContext(contextHandle);
+                contextHandle = nullptr;
+            });
         }
     }
 
@@ -560,11 +562,6 @@ ShaderEffect::~ShaderEffect()
 {
 }
 
-bool ShaderEffect::CanRenderOnBackgroundThread(Effect* effect, const SettingsMap& settings, RenderBuffer& buffer)
-{
-    return GLContextManager::Instance().CanRenderOnBackgroundThread();
-}
-
 bool ShaderEffect::SetGLContext(ShaderRenderCache *cache) {
     auto& mgr = GLContextManager::Instance();
     if (!cache->contextHandle) {
@@ -591,6 +588,12 @@ void ShaderEffect::UnsetGLContext(ShaderRenderCache* cache) {
 
 void ShaderEffect::Render(Effect* eff, const SettingsMap& SettingsMap, RenderBuffer& buffer)
 {
+    // All GL work runs through the GL thread.  On Windows that's a
+    // dedicated worker thread internal to GLContextManager (so flaky
+    // drivers see a stable single-thread caller); on other platforms
+    // the lambda runs directly on this thread.  ExecuteOnGLThread
+    // blocks until the lambda returns, so captures by reference are safe.
+    GLContextManager::Instance().ExecuteOnGLThread([&]() {
     // Bail out right away if we don't have the necessary OpenGL support
     if (!OpenGLShaders::HasFramebufferObjects() || !OpenGLShaders::HasShaderSupport()) {
         setRenderBufferAll(buffer, xlCYAN);
@@ -862,10 +865,11 @@ void ShaderEffect::Render(Effect* eff, const SettingsMap& SettingsMap, RenderBuf
     LOG_GL_ERRORV(glBindBuffer(GL_ARRAY_BUFFER, 0));
 
     copyPixelDataFromTexture(buffer);
-    
+
     LOG_GL_ERRORV(glUseProgram(0));
     cache->StoreProgramId();
     UnsetGLContext(cache);
+    });
 }
 
 void ShaderEffect::preparePixelTextures(RenderBuffer& buffer, bool shadersInit, unsigned fbId) {

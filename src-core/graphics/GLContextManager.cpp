@@ -230,8 +230,8 @@ void GLContextManager::ReleaseContext(ContextHandle ctx) {
     _platform->poolNotifier.notify_all();
 }
 
-bool GLContextManager::CanRenderOnBackgroundThread() const {
-    return true; // EGL contexts are thread-safe with separate contexts
+void GLContextManager::ExecuteOnGLThread(std::function<void()> fn) {
+    if (fn) fn();
 }
 
 void GLContextManager::Shutdown() {
@@ -461,8 +461,8 @@ void GLContextManager::ReleaseContext(ContextHandle ctx) {
     _platform->poolNotifier.notify_all();
 }
 
-bool GLContextManager::CanRenderOnBackgroundThread() const {
-    return true; // macOS CGL is thread-safe with separate contexts
+void GLContextManager::ExecuteOnGLThread(std::function<void()> fn) {
+    if (fn) fn();
 }
 
 void GLContextManager::Shutdown() {
@@ -503,6 +503,8 @@ void* GLContextManager::GetNativeDisplay() const {
 #endif
 #include <windows.h>
 
+#include <future>
+
 #include <GL/gl.h>
 #include <GL/glext.h>
 //#include <GL/wglext.h>
@@ -523,6 +525,19 @@ struct GLContextManager::PlatformState {
     std::mutex poolMutex;
     PFNWGLCREATECONTEXTATTRIBSARBPROC wglCreateContextAttribsARB = nullptr;
     std::once_flag bootstrapFlag;
+
+    // Internal GL worker thread.  All GL operations on Windows run here
+    // (HWND/HDC creation, wgl*, glGen*, glDelete*, draw, glReadPixels, etc.)
+    // so that drivers which misbehave when GL is touched from arbitrary
+    // render-pool threads see a stable single-thread caller.  The worker
+    // is also the thread that owns the dummy HWNDs — Windows requires
+    // window destruction on the creating thread.
+    std::thread worker;
+    std::queue<std::function<void()>> taskQueue;
+    std::mutex taskMutex;
+    std::condition_variable taskCv;
+    std::once_flag workerStartFlag;
+    bool workerStop = false;
 
     struct WinGLContextInfo {
         HGLRC context;
@@ -565,7 +580,16 @@ void GLContextManager::Initialize(const InitParams& params) {
 }
 
 // Bootstrap WGL: create a temp legacy context to load wglCreateContextAttribsARB,
-// then obtain the shared HGLRC from the UI layer.  Must run on the main thread.
+// then obtain the shared HGLRC from the UI layer.
+//
+// Runs on the GL worker thread.  The dummy window + temp context are local
+// to this function so they do not need to outlive the worker, and the
+// destruction (DestroyWindow) happens on the same thread that called
+// CreateWindow as Windows requires.
+//
+// The single piece that still needs main-thread dispatch is the
+// getSharedGLContext callback — it queries the wx canvas's HGLRC, and wx
+// canvas access is main-thread-only.
 static void bootstrapWGL(PlatformState* ps,
                   const GLContextManager::InitParams& params) {
     HWND tmpHwnd = createDummyWindow();
@@ -591,24 +615,29 @@ static void bootstrapWGL(PlatformState* ps,
     ReleaseDC(tmpHwnd, tmpDC);
     DestroyWindow(tmpHwnd);
 
-    // Obtain the shared HGLRC from the UI layer
+    // Obtain the shared HGLRC from the UI layer.  This callback talks to wx
+    // and must run on the main thread.
     if (params.getSharedGLContext) {
-        ps->sharedContext = (HGLRC)params.getSharedGLContext();
+        if (params.mainThreadRunner) {
+            params.mainThreadRunner([&]() {
+                ps->sharedContext = (HGLRC)params.getSharedGLContext();
+            });
+        } else {
+            ps->sharedContext = (HGLRC)params.getSharedGLContext();
+        }
     }
 }
 
 GLContextManager::ContextHandle GLContextManager::AcquireContext() {
     if (!_platform) return nullptr;
 
-    // Lazy bootstrap: load WGL functions and shared context on first call (thread-safe)
+    // Callers reach AcquireContext from inside ExecuteOnGLThread, so we are
+    // already on the GL worker thread (or the calling render thread when
+    // background rendering is user-enabled).  Either way, no further
+    // dispatch is needed — bootstrap, dummy HWND creation and wglCreateContext
+    // all run on whichever thread we're on.
     std::call_once(_platform->bootstrapFlag, [this]() {
-        if (_params.mainThreadRunner) {
-            _params.mainThreadRunner([this]() {
-                bootstrapWGL(_platform, _params);
-            });
-        } else {
-            bootstrapWGL(_platform, _params);
-        }
+        bootstrapWGL(_platform, _params);
     });
     if (!_platform->wglCreateContextAttribsARB) return nullptr;
 
@@ -621,60 +650,52 @@ GLContextManager::ContextHandle GLContextManager::AcquireContext() {
         }
     }
 
-    // Create a new context — must happen on main thread
     PlatformState::WinGLContextInfo* info = nullptr;
-    auto createFn = [this, &info]() {
-        HWND hwnd = createDummyWindow();
-        HDC hdc = GetDC(hwnd);
 
-        PIXELFORMATDESCRIPTOR pfd = {};
-        pfd.nSize = sizeof(pfd);
-        pfd.nVersion = 1;
-        pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL;
-        pfd.iPixelType = PFD_TYPE_RGBA;
-        pfd.cColorBits = 32;
-        int pf = ChoosePixelFormat(hdc, &pfd);
-        SetPixelFormat(hdc, pf, &pfd);
+    HWND hwnd = createDummyWindow();
+    HDC hdc = GetDC(hwnd);
 
-        int attribs33[] = {
+    PIXELFORMATDESCRIPTOR pfd = {};
+    pfd.nSize = sizeof(pfd);
+    pfd.nVersion = 1;
+    pfd.dwFlags = PFD_DRAW_TO_WINDOW | PFD_SUPPORT_OPENGL;
+    pfd.iPixelType = PFD_TYPE_RGBA;
+    pfd.cColorBits = 32;
+    int pf = ChoosePixelFormat(hdc, &pfd);
+    SetPixelFormat(hdc, pf, &pfd);
+
+    int attribs33[] = {
+        WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
+        WGL_CONTEXT_MINOR_VERSION_ARB, 3,
+        WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
+        0
+    };
+    HGLRC ctx = _platform->wglCreateContextAttribsARB(hdc, _platform->sharedContext, attribs33);
+    if (!ctx) {
+        // Fallback to 3.1
+        int attribs31[] = {
             WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
-            WGL_CONTEXT_MINOR_VERSION_ARB, 3,
+            WGL_CONTEXT_MINOR_VERSION_ARB, 1,
             WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
             0
         };
-        HGLRC ctx = _platform->wglCreateContextAttribsARB(hdc, _platform->sharedContext, attribs33);
-        if (!ctx) {
-            // Fallback to 3.1
-            int attribs31[] = {
-                WGL_CONTEXT_MAJOR_VERSION_ARB, 3,
-                WGL_CONTEXT_MINOR_VERSION_ARB, 1,
-                WGL_CONTEXT_PROFILE_MASK_ARB, WGL_CONTEXT_CORE_PROFILE_BIT_ARB,
-                0
-            };
-            ctx = _platform->wglCreateContextAttribsARB(hdc, _platform->sharedContext, attribs31);
-        }
+        ctx = _platform->wglCreateContextAttribsARB(hdc, _platform->sharedContext, attribs31);
+    }
 
-        if (ctx) {
-            info = new PlatformState::WinGLContextInfo{ctx, hdc, hwnd};
-            // Log GL version info for diagnostics
-            wglMakeCurrent(hdc, ctx);
-            const char* ver = (const char*)glGetString(GL_VERSION);
-            const char* rend = (const char*)glGetString(GL_RENDERER);
-            const char* vend = (const char*)glGetString(GL_VENDOR);
-            spdlog::info("GLContextManager - glVer: {} ({}) ({})",
-                         ver ? ver : "?", rend ? rend : "?", vend ? vend : "?");
-            wglMakeCurrent(hdc, nullptr);
-        } else {
-            ReleaseDC(hwnd, hdc);
-            DestroyWindow(hwnd);
-            spdlog::error("GLContextManager: wglCreateContextAttribsARB failed");
-        }
-    };
-
-    if (_params.mainThreadRunner) {
-        _params.mainThreadRunner(createFn);
+    if (ctx) {
+        info = new PlatformState::WinGLContextInfo{ctx, hdc, hwnd};
+        // Log GL version info for diagnostics
+        wglMakeCurrent(hdc, ctx);
+        const char* ver = (const char*)glGetString(GL_VERSION);
+        const char* rend = (const char*)glGetString(GL_RENDERER);
+        const char* vend = (const char*)glGetString(GL_VENDOR);
+        spdlog::info("GLContextManager - glVer: {} ({}) ({})",
+                     ver ? ver : "?", rend ? rend : "?", vend ? vend : "?");
+        wglMakeCurrent(hdc, nullptr);
     } else {
-        createFn();
+        ReleaseDC(hwnd, hdc);
+        DestroyWindow(hwnd);
+        spdlog::error("GLContextManager: wglCreateContextAttribsARB failed");
     }
 
     return (ContextHandle)info;
@@ -705,20 +726,96 @@ void GLContextManager::ReleaseContext(ContextHandle ctx) {
     _platform->pool.push(ctx);
 }
 
-bool GLContextManager::CanRenderOnBackgroundThread() const {
-    return _backgroundRenderEnabled; // User-configurable; defaults to false due to driver crashes
+void GLContextManager::ExecuteOnGLThread(std::function<void()> fn) {
+    if (!fn || !_platform) return;
+
+    if (_backgroundRenderEnabled) {
+        // User opted in to direct rendering — driver expected to handle MT GL.
+        fn();
+        return;
+    }
+
+    // Lazy-start the GL worker thread on first dispatch.
+    std::call_once(_platform->workerStartFlag, [this]() {
+        _platform->worker = std::thread([this]() {
+            for (;;) {
+                std::function<void()> task;
+                {
+                    std::unique_lock<std::mutex> lock(_platform->taskMutex);
+                    _platform->taskCv.wait(lock, [this]() {
+                        return _platform->workerStop || !_platform->taskQueue.empty();
+                    });
+                    if (_platform->taskQueue.empty()) {
+                        // Stop signal with no remaining work.
+                        return;
+                    }
+                    task = std::move(_platform->taskQueue.front());
+                    _platform->taskQueue.pop();
+                }
+                task();
+            }
+        });
+    });
+
+    auto promise = std::make_shared<std::promise<void>>();
+    auto future = promise->get_future();
+
+    {
+        std::unique_lock<std::mutex> lock(_platform->taskMutex);
+        _platform->taskQueue.push([fn = std::move(fn), promise]() {
+            try {
+                fn();
+                promise->set_value();
+            } catch (...) {
+                promise->set_exception(std::current_exception());
+            }
+        });
+    }
+    _platform->taskCv.notify_one();
+    future.get();  // re-throws any exception from fn
 }
 
 void GLContextManager::Shutdown() {
     if (!_platform) return;
 
-    while (!_platform->pool.empty()) {
-        auto* info = (PlatformState::WinGLContextInfo*)_platform->pool.front();
-        _platform->pool.pop();
-        wglDeleteContext(info->context);
-        ReleaseDC(info->hwnd, info->hdc);
-        DestroyWindow(info->hwnd);
-        delete info;
+    auto destroyPool = [this]() {
+        while (!_platform->pool.empty()) {
+            auto* info = (PlatformState::WinGLContextInfo*)_platform->pool.front();
+            _platform->pool.pop();
+            wglDeleteContext(info->context);
+            ReleaseDC(info->hwnd, info->hdc);
+            DestroyWindow(info->hwnd);
+            delete info;
+        }
+    };
+
+    // If the worker thread is running, post pool teardown to it (so
+    // wglDeleteContext + DestroyWindow run on the thread that created the
+    // contexts and windows — Windows requires window destruction on the
+    // creating thread), then signal stop and join.
+    if (_platform->worker.joinable()) {
+        std::promise<void> drained;
+        auto drainedFuture = drained.get_future();
+        {
+            std::unique_lock<std::mutex> lock(_platform->taskMutex);
+            _platform->taskQueue.push([&]() {
+                destroyPool();
+                drained.set_value();
+            });
+        }
+        _platform->taskCv.notify_one();
+        drainedFuture.get();
+
+        {
+            std::unique_lock<std::mutex> lock(_platform->taskMutex);
+            _platform->workerStop = true;
+        }
+        _platform->taskCv.notify_one();
+        _platform->worker.join();
+    } else {
+        // Worker never started; tear down inline.  Safe because no contexts
+        // can have been created without going through the worker.
+        destroyPool();
     }
 
     delete _platform;
@@ -1044,11 +1141,8 @@ void GLContextManager::ReleaseContext(ContextHandle ctx) {
     _platform->poolNotifier.notify_all();
 }
 
-bool GLContextManager::CanRenderOnBackgroundThread() const {
-    // GLX pbuffer contexts are thread-safe (XInitThreads() is called at startup).
-    // EGL contexts are inherently thread-safe.  Both paths use an independent
-    // Display*/EGLDisplay with no ties to the wx UI thread.
-    return true;
+void GLContextManager::ExecuteOnGLThread(std::function<void()> fn) {
+    if (fn) fn();
 }
 
 void GLContextManager::Shutdown() {

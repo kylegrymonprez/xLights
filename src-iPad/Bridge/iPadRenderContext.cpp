@@ -1085,18 +1085,7 @@ std::vector<std::shared_ptr<xlImage>> iPadRenderContext::RenderEffectToFrames(
                            nullptr, true,
                            [&renderComplete](bool) { renderComplete = true; });
 
-    // Unlike desktop, iPad has no main-thread-effects drain tied to the
-    // UI event loop; this method is expected to be called from a
-    // utility-priority thread (the media-picker path does so), so we
-    // just poll. Text effects (the sole main-thread-effects user today)
-    // still need draining — hop to main via GCD to keep correctness.
     while (!renderComplete) {
-        if (_renderEngine) {
-            // Synchronous hop only if the main queue is idle; otherwise
-            // skip this tick. Keeps us from deadlocking if the caller
-            // is somehow on the main queue already.
-            _renderEngine->RenderMainThreadEffects();
-        }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
 

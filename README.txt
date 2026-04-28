@@ -16,6 +16,11 @@ XLIGHTS/NUTCRACKER RELEASE NOTES
                                 render on background threads on Linux (previously forced to the main thread because
                                 the wx/Pango stack isn't off-thread safe), parallelizing rendering of sequences
                                 with heavy text/emoji content.
+    -change (dkulp)             Windows shader effect: GL work now runs on a dedicated worker thread inside
+                                GLContextManager instead of being dispatched to the wx UI thread.
+    -change (dkulp)             Render engine cleanup: removed the main-thread effect render queue and all the
+                                wx CallAfter / drain plumbing that supported it. No effect now needs main-thread
+                                dispatch.
 
 2026.07  April 28, 2026
     -enh (MrPierreB)            Add node animation playback to SubModels dialog.

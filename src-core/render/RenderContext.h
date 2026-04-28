@@ -67,7 +67,6 @@ public:
 
     // ---- rendering control ----
     virtual bool AbortRender(int maxTimeMs = 60000) = 0;
-    virtual void RenderMainThreadEffects() {}
     virtual void RenderEffectForModel(const std::string& model,
                                       int startms,
                                       int endms,

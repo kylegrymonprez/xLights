@@ -676,8 +676,7 @@ xLightsFrame::xLightsFrame(wxWindow* parent, int ab, wxWindowID id, bool renderO
         // Windows: provide main-thread runner and lazy shared-context accessor
         glParams.mainThreadRunner = [this](std::function<void()> fn) {
             if (wxThread::IsMain()) {
-                // Already on the main thread (e.g., called from RenderEffectOnMainThread);
-                // calling CallAfter + wait here would deadlock.
+                // Already on the main thread; CallAfter + wait would deadlock.
                 fn();
                 return;
             }
@@ -714,7 +713,6 @@ xLightsFrame::xLightsFrame(wxWindow* parent, int ab, wxWindowID id, bool renderO
 
     _renderEngine = std::make_unique<RenderEngine>(*this, jobPool, _renderCache);
     _renderEngine->SetOnRenderStatusTimerStart([this]() { RenderStatusTimer.Start(100, false); });
-    _renderEngine->SetOnCallAfterRenderMainThread([this]() { CallAfter(&xLightsFrame::RenderMainThreadEffects); });
     _renderEngine->SetOnRenderJobComplete([this](const std::string& modelName) {
         CallAfter(&xLightsFrame::SetStatusText, wxString("Done Rendering \"" + modelName + "\""), 0);
     });

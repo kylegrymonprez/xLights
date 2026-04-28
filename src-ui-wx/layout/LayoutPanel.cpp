@@ -972,7 +972,6 @@ LayoutPanel::LayoutPanel(wxWindow* parent, xLightsFrame *xl, wxPanel* sequencer)
     CheckBoxShowNames->Reparent(layoutControlsBar);
     CheckBoxShowInfo->Reparent(layoutControlsBar);
     ButtonSavePreview->Reparent(layoutControlsBar);
-    ButtonSavePreview->SetMinSize(wxSize(120, 48));
     {
         wxBoxSizer* lcbSizer = new wxBoxSizer(wxHORIZONTAL);
         lcbSizer->AddStretchSpacer(1);

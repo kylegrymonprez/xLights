@@ -84,23 +84,6 @@ public:
     std::vector<bool> validLayers;
 };
 
-class RenderEvent {
-public:
-    RenderEvent() : mutex(), signal() {}
-    std::mutex mutex;
-    std::condition_variable signal;
-
-    int layer;
-    int period;
-    Effect *effect;
-    SequenceElements *seqElements{ nullptr }; // non-owning; must outlive the RenderEvent (guaranteed by RenderEngine::Render() caller)
-    SettingsMap *settingsMap;
-    PixelBufferClass *buffer;
-    bool *ResetEffectState;
-    int returnVal{ -1 };
-    bool suppress{ false };
-};
-
 class NextRenderer {
 public:
 
@@ -339,8 +322,6 @@ public:
             mainBuffer = nullptr;
         }
         startFrame = 0;
-        renderEvent.buffer = mainBuffer;
-        renderEvent.seqElements = _seqElements;
     }
 
     virtual ~RenderJob() {
@@ -738,7 +719,7 @@ public:
                     buffer->UnMergeBuffersForLayer(layer);
                 }
 
-                info.validLayers[layer] = _engine->RenderEffectFromMap(suppress, ef, layer, frame, info.settingsMaps[layer], *buffer, b, true, &renderEvent);
+                info.validLayers[layer] = _engine->RenderEffectFromMap(suppress, ef, layer, frame, info.settingsMaps[layer], *buffer, b);
                 effectsToUpdate |= info.validLayers[layer];
                 info.effectStates[layer] = b;
 
@@ -940,7 +921,7 @@ public:
                         }
 
                         SetRenderingStatus(frame, &nodeSettingsMaps[node], -1, -1, strand, inode, cleared);
-                        if (_engine->RenderEffectFromMap(false, el, 0, frame, nodeSettingsMaps[node], *buffer, nodeEffectStates[node], true, &renderEvent)) {
+                        if (_engine->RenderEffectFromMap(false, el, 0, frame, nodeSettingsMaps[node], *buffer, nodeEffectStates[node])) {
                             SetCalOutputStatus(frame, -1, strand, inode);
                             buffer->HandleLayerBlurZoom(frame, 0);
                             buffer->HandleLayerTransitions(frame, 0);
@@ -1087,7 +1068,6 @@ private:
     SequenceElements *_seqElements;
     std::vector<bool> rangeRestriction;
     bool supportsModelBlending;
-    RenderEvent renderEvent;
 
     //stuff for handling the status;
     std::string statusMsg;
@@ -1122,35 +1102,6 @@ RenderEngine::~RenderEngine() {
         delete rpi;
     }
     _renderProgressInfo.clear();
-}
-
-void RenderEngine::RenderMainThreadEffects() {
-    std::unique_lock<std::mutex> lock(_renderEventLock);
-    while (!_mainThreadRenderEvents.empty()) {
-        RenderEvent *evt = _mainThreadRenderEvents.front();
-        _mainThreadRenderEvents.pop();
-        lock.unlock();
-        RenderEffectOnMainThread(evt);
-        lock.lock();
-    }
-}
-
-void RenderEngine::RenderEffectOnMainThread(RenderEvent *ev) {
-    std::unique_lock<std::mutex> lock(ev->mutex);
-
-    // validate that the effect still exists as this could be being processed after the effect was deleted
-    SequenceElements& seqElements = ev->seqElements ? *ev->seqElements : _ctx.GetSequenceElements();
-    if (seqElements.IsValidEffect(ev->effect)) {
-        ev->returnVal = RenderEffectFromMap(ev->suppress, ev->effect,
-            ev->layer,
-            ev->period,
-            *ev->settingsMap,
-            *ev->buffer, *ev->ResetEffectState, false, ev) ? 1 : 0;
-    } else {
-        // Effect was deleted before the main-thread render event was processed — skip it.
-        ev->returnVal = 0;
-    }
-    ev->signal.notify_all();
 }
 
 // RenderProgressInfo is defined in RenderProgressInfo.h (included above).
@@ -1726,8 +1677,7 @@ RenderEngine::ExportedModelData RenderEngine::ExportModelData(const std::string&
 }
 
 bool RenderEngine::RenderEffectFromMap(bool suppress, Effect* effectObj, int layer, int period, SettingsMap& SettingsMap,
-    PixelBufferClass& buffer, bool& resetEffectState,
-    bool bgThread, RenderEvent* event)
+    PixelBufferClass& buffer, bool& resetEffectState)
 {
     auto logger_render = spdlog::get("render");
 
@@ -1790,45 +1740,7 @@ bool RenderEngine::RenderEffectFromMap(bool suppress, Effect* effectObj, int lay
                 logger_render->warn("render on model {} layer {} effect {} from {}ms returned no buffer ... skipping rendering.", (const char*)buffer.GetModelName().c_str(), layer, (const char*)reff->Name().c_str(), effectObj->GetStartTimeMS());
             }
             else {
-                if (bgThread && !reff->CanRenderOnBackgroundThread(effectObj, SettingsMap, *b)) {
-                    event->effect = effectObj;
-                    event->layer = layer;
-                    event->period = period;
-                    event->settingsMap = &SettingsMap;
-                    event->ResetEffectState = &resetEffectState;
-                    event->buffer = &buffer;
-                    event->suppress = suppress;
-
-                    std::unique_lock<std::mutex> lock(event->mutex);
-
-                    std::unique_lock<std::mutex> qlock(_renderEventLock);
-                    _mainThreadRenderEvents.push(event);
-                    qlock.unlock();
-
-                    if (_onCallAfterRenderMainThread) _onCallAfterRenderMainThread();
-                    if (event->signal.wait_for(lock, std::chrono::seconds(10)) == std::cv_status::no_timeout) {
-                        retval = event->returnVal == 1;
-                    }
-                    else {
-                        logger_render->warn("HELP!!!!   Frame #{} render on model {} ({}x{}) layer {} effect {} from {}ms (#{}) to {}ms (#{}) timed out 10 secs.", b->curPeriod, (const char*)buffer.GetModelName().c_str(), b->BufferWi, b->BufferHt, layer, (const char*)reff->Name().c_str(), effectObj->GetStartTimeMS(), b->curEffStartPer, effectObj->GetEndTimeMS(), b->curEffEndPer);
-
-                        if (event->signal.wait_for(lock, std::chrono::seconds(60)) == std::cv_status::no_timeout) {
-                            retval = event->returnVal == 1;
-                        }
-                        else {
-                            logger_render->warn("DOUBLE HELP!!!!   Frame #{} render on model {} ({}x{}) layer {} effect {} from {}ms (#{}) to {}ms (#{}) timed out 70 secs.", b->curPeriod, (const char*)buffer.GetModelName().c_str(), b->BufferWi, b->BufferHt, layer, (const char*)reff->Name().c_str(), effectObj->GetStartTimeMS(), b->curEffStartPer, effectObj->GetEndTimeMS(), b->curEffEndPer);
-                        }
-                    }
-                    if (period % 10 == 0) {
-                        std::this_thread::yield();
-
-                        SequenceElements& seqElements = event->seqElements ? *event->seqElements : _ctx.GetSequenceElements();
-                        if (!seqElements.IsValidEffect(event->effect)) {
-                            logger_render->error("In RenderEffectFromMap after Yield() call: effect is no longer valid (expected during abort/delete).");
-                        }
-                    }
-                }
-                else {
+                {
                     int bufCnt = buffer.BufferCountForLayer(layer);
                     std::function<void(int)> f([this, &buffer, layer, suppress, effectObj, reff, &SettingsMap, logger_render](int bufn) {
                         RenderBuffer* rb = &buffer.BufferForLayer(layer, bufn);
@@ -1874,15 +1786,8 @@ bool RenderEngine::RenderEffectFromMap(bool suppress, Effect* effectObj, int lay
                         }
                         });
                     if (bufCnt > 1) {
-                        if (bgThread) {
-                            static ParallelJobPool PER_MODEL_POOL("per_model_pool");
-                            parallel_for(0, bufCnt, [&f](int x) {f(x); }, 1, &PER_MODEL_POOL);
-                        }
-                        else {
-                            for (int x = 0; x < bufCnt; x++) {
-                                f(x);
-                            }
-                        }
+                        static ParallelJobPool PER_MODEL_POOL("per_model_pool");
+                        parallel_for(0, bufCnt, [&f](int x) {f(x); }, 1, &PER_MODEL_POOL);
                     }
                     else {
                         f(0);

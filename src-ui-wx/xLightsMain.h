@@ -249,7 +249,6 @@ enum SeqPlayerStates
     PLAYING_EFFECT
 };
 
-class RenderEvent;
 class wxDebugReportCompress;
 class BufferPanel;
 class LayoutPanel;
@@ -1638,7 +1637,6 @@ public:
     std::string GetSelectedLayoutPanelPreview() const;
     void UpdateRenderStatus();
     void LogRenderStatus();
-    void RenderMainThreadEffects() override;
     void RenderEffectForModel(const std::string &model, int startms, int endms, bool clear = false) override;
     void RenderTimeSlice(int startms, int endms, bool clear);
 
