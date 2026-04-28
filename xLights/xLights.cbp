@@ -36,6 +36,7 @@
 					<Add directory="../src-ui-wx" />
 					<Add directory="../src-core/effects" />
 					<Add directory="../src-core/effects/" />
+					<Add directory="../src-core/import_export" />
 					<Add directory="../src-core/models" />
 					<Add directory="../src-core/effects/assist" />
 					<Add directory="../include" />
@@ -100,6 +101,7 @@
 					<Add directory="../src-ui-wx" />
 					<Add directory="../src-core/effects" />
 					<Add directory="../src-core/effects/" />
+					<Add directory="../src-core/import_export" />
 					<Add directory="../src-core/models" />
 					<Add directory="../src-core/effects/assist" />
 					<Add directory="../include" />
@@ -206,6 +208,14 @@
 		<Unit filename="../src-core/media/SDLAudioOutput.cpp" />
 		<Unit filename="../src-core/media/SDLAudioOutput.h" />
 		<Unit filename="../src-core/media/xLightsVamp.h" />
+		<Unit filename="../src-core/effects/BufferStyles.h" />
+		<Unit filename="../src-core/import_export/AutoMapper.cpp" />
+		<Unit filename="../src-core/import_export/AutoMapper.h" />
+		<Unit filename="../src-core/import_export/EffectMapper.cpp" />
+		<Unit filename="../src-core/import_export/EffectMapper.h" />
+		<Unit filename="../src-core/import_export/ImportMappingNode.h" />
+		<Unit filename="../src-core/import_export/MapHintsIO.cpp" />
+		<Unit filename="../src-core/import_export/MapHintsIO.h" />
 		<Unit filename="../src-ui-wx/sequencer/AutoLabelDialog.cpp" />
 		<Unit filename="../src-ui-wx/sequencer/AutoLabelDialog.h" />
 		<Unit filename="../src-ui-wx/sequencer/BatchRenderDialog.cpp" />

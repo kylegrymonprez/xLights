@@ -37,6 +37,7 @@ CORE_DIRS=(
     "src-core/common"
     "src-core/discovery"
     "src-core/graphics"
+    "src-core/import_export"
     "src-core/lyrics"
     "src-core/render"
     "src-core/effects"

@@ -263,6 +263,9 @@ public:
     // showing them.
     ViewpointMgr& GetViewpointMgr() { return _viewpointMgr; }
     const ViewpointMgr& GetViewpointMgr() const { return _viewpointMgr; }
+    PreviewCamera* GetNamedCamera3D(const std::string& name) override {
+        return _viewpointMgr.GetNamedCamera3D(name);
+    }
 
     // Rewrite just the `<Viewpoints>` subtree of the on-disk
     // xlights_rgbeffects.xml so saved-as / delete survive app restart.

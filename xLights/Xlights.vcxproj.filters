@@ -29,6 +29,9 @@
     <ClCompile Include="..\src-core\media\AudioLoader.cpp" />
     <ClCompile Include="..\src-core\media\FFmpegAudioDecoder.cpp" />
     <ClCompile Include="..\src-core\media\SDLAudioOutput.cpp" />
+    <ClCompile Include="..\src-core\import_export\AutoMapper.cpp" />
+    <ClCompile Include="..\src-core\import_export\EffectMapper.cpp" />
+    <ClCompile Include="..\src-core\import_export\MapHintsIO.cpp" />
     <ClCompile Include="..\src-ui-wx\shared\utils\BitmapCache.cpp" />
     <ClCompile Include="..\src-ui-wx\sequencer\BufferPanel.cpp" />
     <ClCompile Include="..\src-ui-wx\sequencer\BufferSizeDialog.cpp" />
@@ -1360,6 +1363,11 @@
     <ClInclude Include="..\src-core\media\IAudioOutput.h" />
     <ClInclude Include="..\src-core\media\SDLAudioOutput.h" />
     <ClInclude Include="..\src-core\media\xLightsVamp.h" />
+    <ClInclude Include="..\src-core\effects\BufferStyles.h" />
+    <ClInclude Include="..\src-core\import_export\AutoMapper.h" />
+    <ClInclude Include="..\src-core\import_export\EffectMapper.h" />
+    <ClInclude Include="..\src-core\import_export\ImportMappingNode.h" />
+    <ClInclude Include="..\src-core\import_export\MapHintsIO.h" />
     <ClInclude Include="..\src-ui-wx\shared\utils\BitmapCache.h" />
     <ClInclude Include="..\src-ui-wx\sequencer\BufferPanel.h" />
     <ClInclude Include="..\src-ui-wx\sequencer\BufferSizeDialog.h" />

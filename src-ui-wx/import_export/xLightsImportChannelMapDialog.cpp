@@ -23,6 +23,8 @@
 #include <wx/stdpaths.h>
 
 #include "xLightsImportChannelMapDialog.h"
+#include "import_export/AutoMapper.h"
+#include "import_export/MapHintsIO.h"
 #include "render/SequenceElements.h"
 #include "xLightsMain.h"
 #include "settings/XLightsConfigAdapter.h"
@@ -3243,148 +3245,47 @@ void xLightsImportChannelMapDialog::DoAutoMap(
     std::function<bool(const std::string&, const std::string&, const std::string&, const std::string&, const std::list<std::string>&)> lambda_node,
     const std::string& extra1, const std::string& extra2, const std::string& mg, const bool& select)
 {
-    bool selectMapAvail = (ListCtrl_Available->GetSelectedItemCount() != 0) && select;
-    bool selectMapTarget = (TreeListCtrl_Mapping->GetSelectedItemsCount() != 0) && select;
-    wxDataViewItemArray targetSelectedItems;
-    TreeListCtrl_Mapping->GetSelections(targetSelectedItems);
+    // Build the source-candidate list once: canonical (lowered/trimmed) name
+    // for matching, original casing for the eventual Map() call, and the
+    // model-type tag resolved up-front (AutoMapper is wx-free and can't call
+    // findModelType).
+    std::vector<AvailableSource> available;
+    available.reserve(ListCtrl_Available->GetItemCount());
+    for (int j = 0; j < ListCtrl_Available->GetItemCount(); ++j) {
+        AvailableSource src;
+        src.displayName = ListCtrl_Available->GetItemText(j).ToStdString();
+        src.canonicalName = ListCtrl_Available->GetItemText(j).Trim(true).Trim(false).Lower().ToStdString();
+        // findModelType only meaningful for bare-model entries (no slash); for
+        // strand/node entries the type is always overridden by AutoMapper to
+        // "Strand" / "Node" / "SubModel" / "Unknown".
+        if (src.canonicalName.find('/') == std::string::npos) {
+            src.modelType = findModelType(ListCtrl_Available->GetItemText(j));
+        }
+        src.selected = ListCtrl_Available->GetItemState(j, wxLIST_STATE_SELECTED) == wxLIST_STATE_SELECTED;
+        available.push_back(std::move(src));
+    }
+
+    // Roots (top-level destination models) and selection set — the wx
+    // selection is lifted into a pointer set so AutoMapper doesn't have to
+    // know about wxDataView at all.
+    std::vector<ImportMappingNode*> roots;
+    roots.reserve(_dataModel->GetChildCount());
     for (unsigned int i = 0; i < _dataModel->GetChildCount(); ++i) {
-        auto model = _dataModel->GetNthChild(i);
-        if (model != nullptr) {
-            bool isTargetSelected = false;
-            auto index = (wxDataViewItem)model;
-            for (const wxDataViewItem& selectedItem : targetSelectedItems) {
-                isTargetSelected = (index.GetID() == selectedItem.GetID() ? true : false);
-                if (isTargetSelected) break;
-            }
+        roots.push_back(_dataModel->GetNthChild(i));
+    }
 
-            if ((selectMapTarget && isTargetSelected) || !selectMapTarget) { // If LS has selection or no selections required
-                auto aliases = model->GetAliases();
-                if ((model->IsGroup() && (mg == "B" || mg == "G")) || (!model->IsGroup() && (mg == "B" || mg == "M"))) {
-                    for (int j = 0; j < ListCtrl_Available->GetItemCount(); ++j) {
-                        bool isSourceSelected = ListCtrl_Available->GetItemState(j, wxLIST_STATE_SELECTED) == wxLIST_STATE_SELECTED;
-                        if ((selectMapAvail && isSourceSelected) || !selectMapAvail) {
-                            wxString const availName = ListCtrl_Available->GetItemText(j).Trim(true).Trim(false).Lower();
-                            if (availName.Contains("/")) {
-                                wxArrayString const parts = wxSplit(availName, '/');
-                                if (lambda_model(model->_model, parts[0], extra1, extra2, aliases)) {
-                                    // matched the model name ... need to look at strands and submodels
-                                    for (unsigned int k = 0; k < model->GetChildCount(); ++k) {
-                                        auto strand = model->GetNthChild(k);
-                                        if (strand != nullptr) {
-                                            if (lambda_strand(strand->_strand, parts[1], extra1, extra2, aliases)) {
-                                                // matched to the strand level
-                                                if (parts.size() == 2) {
-                                                    if (strand->_mapping.empty()) {
-                                                        strand->Map(ListCtrl_Available->GetItemText(j), "Strand");
-                                                    }
-                                                } else {
-                                                    // need to map the node level
-                                                    for (unsigned int m = 0; m < strand->GetChildCount(); ++m) {
-                                                        auto node = strand->GetNthChild(m);
-                                                        if (node != nullptr) {
-                                                            if (node->_mapping.empty()) {
-                                                                if (lambda_node(node->_node, parts[2], extra1, extra2, aliases)) {
-                                                                    // matched to the node level
-                                                                    if (parts.size() == 3) {
-                                                                        node->Map(ListCtrl_Available->GetItemText(j), "Node");
-                                                                    } else {
-                                                                        wxASSERT(false);
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            } else { // match model to model
-                                if (model->_mapping.empty() && lambda_model(model->_model, availName, extra1, extra2, aliases)) {
-                                    model->Map(ListCtrl_Available->GetItemText(j), findModelType(availName));
-                                }
-                            }
-                        }
-                    }
-                    if (model->_mapping.empty()) {
-                        for (int j = 0; j < ListCtrl_Available->GetItemCount(); ++j) {
-                            bool isSourceSelected = ListCtrl_Available->GetItemState(j, wxLIST_STATE_SELECTED) == wxLIST_STATE_SELECTED;
-                            if ((selectMapAvail && isSourceSelected) || !selectMapAvail) {
-                                std::string const availName = ListCtrl_Available->GetItemText(j).Trim(true).Trim(false).Lower().ToStdString();
-                                auto m = xlights->GetModel(model->_model);
-                                for (unsigned int k = 0; k < model->GetChildCount(); ++k) {
-                                    auto sm = model->GetNthChild(k);
-                                    if (sm != nullptr) {
-                                        auto sm2 = m->GetSubModel(sm->_strand);
-                                        if (sm2 != nullptr) {
-                                            auto& smAliases = sm2->GetAliases();
-                                            if (!smAliases.empty()) {
-                                                if (lambda_model(sm->_strand, availName, extra1, extra2, smAliases)) {
-                                                    sm->Map(ListCtrl_Available->GetItemText(j), "Unknown");
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        } else {
-            
-            spdlog::warn("xLightsImportTreeModel::OnButton_AutoMapClick: Weird ... model {} was nullptr", i);
+    std::unordered_set<const ImportMappingNode*> selectedTargets;
+    if (select && TreeListCtrl_Mapping->GetSelectedItemsCount() != 0) {
+        wxDataViewItemArray targetSelectedItems;
+        TreeListCtrl_Mapping->GetSelections(targetSelectedItems);
+        for (const wxDataViewItem& it : targetSelectedItems) {
+            selectedTargets.insert(static_cast<xLightsImportModelNode*>(it.GetID()));
         }
     }
-    // Process selected submodels independently
-    if (selectMapTarget) {
-        for (unsigned int i = 0; i < _dataModel->GetChildCount(); ++i) {
-            auto model = _dataModel->GetNthChild(i);
-            if (model != nullptr) {
-                for (unsigned int k = 0; k < model->GetChildCount(); ++k) {
-                    auto submodel = model->GetNthChild(k);
-                    if (submodel != nullptr) {
-                        bool isSubmodelSelected = false;
-                        auto index = (wxDataViewItem)submodel;
-                        for (const wxDataViewItem& selectedItem : targetSelectedItems) {
-                            isSubmodelSelected = (index.GetID() == selectedItem.GetID() ? true : false);
-                            if (isSubmodelSelected)
-                                break;
-                        }
 
-                        if ((selectMapTarget && isSubmodelSelected) || !selectMapTarget) {
-                            for (int j = 0; j < ListCtrl_Available->GetItemCount(); ++j) {
-                                bool isSourceSelected = ListCtrl_Available->GetItemState(j, wxLIST_STATE_SELECTED) == wxLIST_STATE_SELECTED;
-                                if ((selectMapAvail && isSourceSelected) || !selectMapAvail) {
-                                    std::string const availName = ListCtrl_Available->GetItemText(j).Trim(true).Trim(false).Lower().ToStdString();
-                                    auto m = xlights->GetModel(model->_model);
-                                    auto& mAliases = m->GetAliases();
-                                    if (m != nullptr) {
-                                        auto sm = m->GetSubModel(submodel->_strand);
-                                        if (sm != nullptr) {
-                                            auto& smAliases = sm->GetAliases();
-                                            if (submodel->_mapping.empty()) {
-                                                if (lambda_strand(submodel->GetModelName(), availName, extra1, extra2, smAliases)) {
-                                                    submodel->Map(ListCtrl_Available->GetItemText(j), "SubModel");
-                                                } else {
-                                                    for (const auto& modelAlias : mAliases) { // check for any aliases on model itself
-                                                        if (lambda_strand(modelAlias + "/" + submodel->_strand, availName, extra1, extra2, smAliases)) {
-                                                            submodel->Map(ListCtrl_Available->GetItemText(j), "SubModel");
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
+    AutoMapper::Run(roots, available, *xlights,
+                    lambda_model, lambda_strand, lambda_node,
+                    extra1, extra2, mg, select, selectedTargets);
 }
 
 void xLightsImportChannelMapDialog::OnButton_AutoMapClick(wxCommandEvent& event)
@@ -3396,15 +3297,8 @@ void xLightsImportChannelMapDialog::OnButton_AutoMapClick(wxCommandEvent& event)
     DoAutoMap(norm, norm, norm, "", "", "B", false);
     DoAutoMap(aggressive, aggressive, aggressive, "", "", "B", false);
 
-    auto maphints = xlights->CurrentDir + wxFileName::GetPathSeparator() + "maphints";
-    if (wxDir::Exists(maphints)) {
-        wxArrayString files;
-        GetAllFilesInDir(maphints, files, "*.xmaphint");
-        for (auto &filename : files) {
-            if (FileExists(filename)) {
-                loadMapHintsFile(filename);
-            }
-        }
+    for (auto const& e : LoadMapHintsFromShowDir(xlights->CurrentDir.ToStdString())) {
+        DoAutoMap(regex, regex, norm, e.toRegex, e.fromModel, e.applyTo, false);
     }
     TreeListCtrl_Mapping->Thaw();
     MarkUsed();
@@ -3418,15 +3312,8 @@ void xLightsImportChannelMapDialog::OnButton_AutoMapSelClick(wxCommandEvent& eve
     DoAutoMap(norm, norm, norm, "", "", "B", true);
     DoAutoMap(aggressive, aggressive, aggressive, "", "", "B", true);
 
-    auto maphints = xlights->CurrentDir + wxFileName::GetPathSeparator() + "maphints";
-    if (wxDir::Exists(maphints)) {
-        wxArrayString files;
-        GetAllFilesInDir(maphints, files, "*.xmaphint");
-        for (auto& filename : files) {
-            if (FileExists(filename)) {
-                loadMapHintsFile(filename);
-            }
-        }
+    for (auto const& e : LoadMapHintsFromShowDir(xlights->CurrentDir.ToStdString())) {
+        DoAutoMap(regex, regex, norm, e.toRegex, e.fromModel, e.applyTo, false);
     }
 
     TreeListCtrl_Mapping->Refresh();
@@ -3679,66 +3566,37 @@ void xLightsImportChannelMapDialog::AddChannel(std::string const& name, int effe
 }
 
 void xLightsImportChannelMapDialog::loadMapHintsFile(wxString const& filename) {
-    // <MapHints>
-    //  <Map ToRegex"" FromModel="" />
-    // </MapHints>
-
-    pugi::xml_document doc;
-    if (doc.load_file(filename.mb_str())) {
-        for (pugi::xml_node n = doc.document_element().first_child(); n; n = n.next_sibling()) {
-            if (wxString(n.name()).Lower() == "map") {
-                wxString toRegex = n.attribute("ToRegex").as_string();
-                wxString fromModel = n.attribute("FromModel").as_string();
-                wxString applyTo = n.attribute("ApplyTo").as_string("B");
-                if (toRegex != "" && fromModel != "") {
-                    DoAutoMap(regex, regex, norm, toRegex, fromModel, applyTo, false);
-                }
-            }
-        }
+    auto entries = LoadMapHintsFile(filename.ToStdString());
+    for (auto const& e : entries) {
+        DoAutoMap(regex, regex, norm, e.toRegex, e.fromModel, e.applyTo, false);
     }
 }
 
 void xLightsImportChannelMapDialog::generateMapHintsFile(wxString const& filename) {
-    //create basic xmaphints file
-    wxFile f(filename);
-    //    bool isnew = !wxFile::Exists(filename);
-    if (!f.Create(filename, true) || !f.IsOpened()) {
-        DisplayError(wxString::Format("Unable to create file %s. Error %d\n", filename, f.GetLastError()).ToStdString());
-    }
-
-    f.Write("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<MapHints>\n");
-
+    std::vector<MapHintEntry> entries;
     for (size_t i = 0; i < _dataModel->GetChildCount(); ++i) {
         xLightsImportModelNode* m = _dataModel->GetNthChild(i);
-        if (m->HasMapping()) {
-            if (!m->_mapping.empty()) {
-                f.Write(wxString::Format("    <Map ToRegex=\"^%s$\" FromModel=\"%s\" ApplyTo=\"B\" />\n", EscapeRegex(m->_model), m->_mapping));
+        if (!m->HasMapping()) continue;
+        if (!m->_mapping.empty()) {
+            entries.push_back({ "^" + EscapeRegex(m->_model) + "$", m->_mapping, "B" });
+        }
+        for (size_t j = 0; j < m->GetChildCount(); ++j) {
+            xLightsImportModelNode* s = m->GetNthChild(j);
+            if (!s->HasMapping()) continue;
+            if (!s->_mapping.empty()) {
+                entries.push_back({ "^" + EscapeRegex(m->_model) + "\\/" + EscapeRegex(s->_strand) + "$", s->_mapping, "B" });
             }
-            for (size_t j = 0; j < m->GetChildCount(); ++j) {
-                xLightsImportModelNode* s = m->GetNthChild(j);
-                if (s->HasMapping()) {
-                    if (!s->_mapping.empty()) {
-                        f.Write(wxString::Format("    <Map ToRegex=\"^%s\\/%s$\" FromModel=\"%s\" ApplyTo=\"B\" />\n",  EscapeRegex(m->_model), EscapeRegex(s->_strand), s->_mapping));
-                    }
-                    for (size_t k = 0; k < s->GetChildCount(); ++k) {
-                        xLightsImportModelNode* n = s->GetNthChild(k);
-                        if (n->HasMapping()) {
-                            f.Write(wxString::Format("    <Map ToRegex=\"^%s\\/%s\\/%s$\" FromModel=\"%s\" ApplyTo=\"B\" />\n",  EscapeRegex(m->_model), EscapeRegex(s->_strand), EscapeRegex(n->_node), n->_mapping));
-                        }
-                    }
-                }
+            for (size_t k = 0; k < s->GetChildCount(); ++k) {
+                xLightsImportModelNode* n = s->GetNthChild(k);
+                if (!n->HasMapping()) continue;
+                entries.push_back({ "^" + EscapeRegex(m->_model) + "\\/" + EscapeRegex(s->_strand) + "\\/" + EscapeRegex(n->_node) + "$", n->_mapping, "B" });
             }
-
         }
     }
-    f.Write("<!-- Samples\n");
-    f.Write("    <Map ToRegex=\"^Star(s?)(\\sGroup)?$\" FromModel=\"Star\" ApplyTo=\"B\" />\n");
-    f.Write("    <Map ToRegex=\"(.*Mega|^Pixel)\\sTree$\" FromModel=\"Mega Tree\" ApplyTo=\"M\" />\n");
-    f.Write("    <Map ToRegex=\"(^ALL|^Whole)\\sHouse$\" FromModel=\"ALL House\" ApplyTo=\"G\" />\n");
-    f.Write("-->\n");
 
-    f.Write("</MapHints>");
-    f.Close();
+    if (!WriteMapHintsFile(filename.ToStdString(), entries)) {
+        DisplayError(wxString::Format("Unable to create file %s.\n", filename).ToStdString());
+    }
 }
 
 void xLightsImportChannelMapDialog::OnTextCtrl_FindFromText(wxCommandEvent& event)

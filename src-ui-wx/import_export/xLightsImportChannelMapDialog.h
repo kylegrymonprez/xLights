@@ -37,6 +37,7 @@
 #include <list>
 #include <memory>
 #include <optional>
+#include "import_export/ImportMappingNode.h"
 #include "render/SequencePackage.h"
 
 class SequenceElements;
@@ -64,7 +65,7 @@ public:
     wxString _type;
 };
 
-class xLightsImportModelNode : wxDataViewTreeStoreNode
+class xLightsImportModelNode : public wxDataViewTreeStoreNode, public ImportMappingNode
 {
 public:
     xLightsImportModelNode(xLightsImportModelNode* parent,
@@ -171,9 +172,9 @@ public:
         }
     }
 
-    bool IsGroup() const { return _group; }
+    bool IsGroup() const override { return _group; }
 
-    std::list<std::string> GetAliases() const {
+    std::list<std::string> GetAliases() const override {
         return _aliases;
     }
 
@@ -181,12 +182,18 @@ public:
         return _modelType;
     }
 
-    void Map(const std::string& mapTo, const std::string& mappingModelType)
+    void Map(const std::string& mapTo, const std::string& mappingModelType) override
     {
         _mapping = mapTo;
         _mappingExists = true;
         _mappingModelType = mappingModelType;
     }
+
+    // ImportMappingNode interface — string-field accessors used by AutoMapper.
+    const std::string& GetCoreModel() const override { return _model; }
+    const std::string& GetCoreStrand() const override { return _strand; }
+    const std::string& GetCoreNode() const override { return _node; }
+    const std::string& GetMapping() const override { return _mapping; }
 
     // This also considers children
     bool HasMapping() {
@@ -221,7 +228,7 @@ public:
     {
         return m_children;
     }
-    xLightsImportModelNode* GetNthChild(unsigned int n)
+    xLightsImportModelNode* GetNthChild(unsigned int n) override
     {
         return m_children.Item(n);
     }
@@ -233,12 +240,12 @@ public:
     {
         m_children.Add(child);
     }
-    unsigned int GetChildCount() const
+    unsigned int GetChildCount() const override
     {
         return m_children.GetCount();
     }
 
-    std::string GetModelName() const {
+    std::string GetModelName() const override {
         std::string name = _model;
         if (!_strand.empty()) {
             name += "/" + _strand;
