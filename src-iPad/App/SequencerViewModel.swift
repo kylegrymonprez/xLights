@@ -1557,13 +1557,28 @@ class SequencerViewModel {
 
     // MARK: - Controller Output
 
-    func toggleOutput() {
+    /// Toggle controller output. Returns nil on success (either
+    /// successfully started, or successfully stopped); returns a
+    /// user-facing error message when a start attempt fails so the
+    /// caller can surface it. The two failure modes — no controllers
+    /// configured vs. controllers configured but none reachable — get
+    /// distinct messages because the remediation differs (set up
+    /// controllers vs. check the network).
+    @discardableResult
+    func toggleOutput() -> String? {
         if isOutputting {
             document.stopOutput()
             isOutputting = false
-        } else {
-            isOutputting = document.startOutput()
+            return nil
         }
+        if document.outputCount() == 0 {
+            return "No controllers are configured for this show. Set up controllers in desktop xLights and copy the show folder to the iPad."
+        }
+        isOutputting = document.startOutput()
+        if !isOutputting {
+            return "Couldn't reach any of the configured controllers. Check that the iPad is on the same network as the controllers. sACN multicast isn't supported on iPad yet — try ArtNet, DDP, or sACN unicast."
+        }
+        return nil
     }
 
     private func sendOutputFrame() {

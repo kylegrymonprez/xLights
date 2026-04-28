@@ -832,6 +832,7 @@
 - (void)stopOutput;
 - (BOOL)isOutputting;
 - (void)outputFrame:(int)frameMS;
+- (NSInteger)outputCount;
 
 // Rendering
 - (void)renderAll;

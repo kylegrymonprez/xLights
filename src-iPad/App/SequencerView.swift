@@ -223,6 +223,15 @@ struct SequencerView: View {
         } message: {
             Text(saveAsError ?? "")
         }
+        .alert("Output to Lights",
+               isPresented: Binding(
+                get: { outputAlertMessage != nil },
+                set: { if !$0 { outputAlertMessage = nil } }
+               )) {
+            Button("OK", role: .cancel) { outputAlertMessage = nil }
+        } message: {
+            Text(outputAlertMessage ?? "")
+        }
         .sheet(isPresented: Bindable(viewModel).showingSequenceSettings) {
             SequenceSettingsSheet()
                 .environment(viewModel)
@@ -253,6 +262,7 @@ struct SequencerView: View {
     @State private var saveAsDoc: XLSequenceExportDoc? = nil
     @State private var saveAsDefaultName: String = "Sequence.xsq"
     @State private var saveAsError: String? = nil
+    @State private var outputAlertMessage: String? = nil
 
     // MARK: - Sequence Settings (E-3)
     //
@@ -396,6 +406,29 @@ struct SequencerView: View {
             }) {
                 Image(systemName: "goforward.10")
             }
+
+            Divider().frame(height: 24)
+
+            // Output to lights toggle — desktop's lightbulb. Yellow tint
+            // when on so the active output state is hard to miss; a tap
+            // while off that returns an error (no controllers, network
+            // unreachable) routes through `outputAlertMessage` because
+            // a silently-failing icon would just confuse testers.
+            Button(action: {
+                if let err = viewModel.toggleOutput() {
+                    outputAlertMessage = err
+                }
+            }) {
+                if viewModel.isOutputting {
+                    Image(systemName: "lightbulb.fill")
+                        .foregroundStyle(Color.yellow)
+                } else {
+                    Image(systemName: "lightbulb")
+                }
+            }
+            .help(viewModel.isOutputting
+                  ? "Stop output to lights"
+                  : "Output to lights")
 
             // Play position + duration already appear under the
             // view picker (SequencerGridV2View.topLeftCorner). The

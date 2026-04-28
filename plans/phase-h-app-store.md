@@ -1,6 +1,6 @@
 # Phase H — App Store readiness
 
-**Status: H-0/H-1/H-2/H-3 ✓ complete; H-4/H-5 remaining
+**Status: H-0/H-1/H-2/H-3/H-4 ✓ complete; H-5 remaining
 (organizational).**
 
 Apple Developer team: Kulp Lights LLC (existing). iPad app
@@ -94,24 +94,19 @@ Not numbered but necessary for H-4:
   `xLights-macOS-dependencies/submodules/build_angle.sh` so
   future tarballs ship correct plists.
 
-## H-4 — TestFlight + beta group
+## H-4 — TestFlight + beta group ✓
 
-Workflow builds to App Store Connect successfully; Universal
-Purchase record accepts iOS builds. Remaining:
+Internal group running on every Xcode Cloud archive via
+Automatic Distribution. External group cleared Beta App
+Review and went live to external testers 2026-04-28.
 
-- **Internal group** — invite primary reviewers, enable
-  "Automatic Distribution" so every Xcode Cloud archive lands
-  in the test queue without manual promotion.
-- **External group** — up to 10,000 email addresses. First
-  external build requires Beta App Review (~24–48 hour
-  turnaround). Fill in:
-  - Test information (feedback email, optional marketing URL)
-  - Description of what to test
-  - Beta App Review Information (contact info, notes,
-    demo-account-not-required flag)
-
-Both are App Store Connect UI work — nothing further on the
-code side.
+First wave of external feedback already surfaced one gap the
+plan had marked deferred: a visible "Output To Lights" toggle.
+Pulled forward as a follow-up — see the "Controller output"
+section in `iPad-xLights-Plan.md`. The plumbing was already in
+the tree (output manager owned by iPadRenderContext, per-frame
+send wired into the playback timer); only the user-visible
+button was missing.
 
 ## H-5 — Submission
 

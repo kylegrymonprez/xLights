@@ -3080,6 +3080,10 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
     om.EndFrame();
 }
 
+- (NSInteger)outputCount {
+    return _context->GetOutputManager().GetOutputCount();
+}
+
 // MARK: - Rendering
 
 - (void)renderAll {

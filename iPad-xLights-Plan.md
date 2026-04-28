@@ -90,11 +90,11 @@ variants in `libdbg-ios/`.
 | E | Sequence management (open / save / new / settings) | ✓ complete — E-1 through E-6 shipped 2026-04-21; `.fseq` save+load short-circuit landed 2026-04-27 (toggle + folder picker in FolderConfig, v2/zstd/sparse write matching desktop, on-open render skip when a fresh fseq exists); Batch Render tool + recursive picker landed 2026-04-28 (sheet on the picker re-renders selected sequences serially, persists per-show selections, picker now surfaces subfolders). Deferred tabs (Timings import/export, Audio Tracks, Data Layers) tracked in [`plans/followups.md`](plans/followups.md) | — |
 | F | Window system + Display Elements | ✓ complete 2026-04-21 — F-1 scene-level split, F-2/F-3 responsive+docked layout, F-4 menu bar / `.commands`, F-5 persistence (session destruction + main-window minimum-size floor + detach-state AppStorage), and F-6 Display Elements editor all landed. Known iPadOS limitation: Stage Manager caches window position outside SwiftUI's reach, so main can relaunch in the last-active scene's corner — self-corrects after one drag-reposition. Detached scene-owned preview state (is3D, camera, layoutGroup) deferred — not worth the refactor given session-destruction policy. | [`plans/phase-f-window-system.md`](plans/phase-f-window-system.md) |
 | G | Document / iCloud polish | ✓ complete — G-1 file coordination, G-2 iCloud ubiquity badges, G-3 `.xsq` + `.xsqz` document registration with Files/AirDrop `.onOpenURL` handling, G-4 clean background shutdown. `.xsqz` round-trip: tap in Files → copy into app sandbox via `NSFileCoordinator` (iOS path-based POSIX can't read `~/Library/Mobile Documents` without iCloud entitlements) → extract with `SequencePackage::Extract` → edit → Save repacks via `SequencePackage::Pack` and copies back to the original URL with write-coordination. Fresh-install tap opens straight to the sequencer with no show-folder configuration. Shared desktop+iPad `SequencePackage::Pack()` replaces the legacy wxZipOutputStream packager: walks SequenceMedia + models + view objects, preserves show-relative paths, relocates externals under typed subdirs (Images/Videos/Shaders/Glediators/Objects/Faces), per-object group colocation for mesh + `.mtl` + textures, folder-based collision disambiguation (won't trip PicturesEffect's animation-sequence detection), pre-flight readability check (no orphan stub zip entries), and per-file warnings surfaced to the desktop packaging dialog. | [`plans/phase-g-document.md`](plans/phase-g-document.md) |
-| H | App Store readiness | H-0/H-1/H-2/H-3 ✓ complete — Universal Purchase unified bundle ID (`org.xlights` shared with Mac, iOS platform added to the existing App Store Connect record); Icon Composer `.icon` bundle with Liquid Glass appearance variants on iOS 26 and raster fallbacks for older; launch screen with centered xLights logo + light/dark background; `PrivacyInfo.xcprivacy` declaring only FileTimestamp / UserDefaults / SystemBootTime required-reason APIs; `ITSAppUsesNonExemptEncryption=false`; `NSLocalNetworkUsageDescription` + Bonjour services. Xcode Cloud workflow building and archiving cleanly; `SequencePackage::Pack` landed the comprehensive wx-free packager. **H-4 TestFlight external group + H-5 submission metadata / screenshots remaining** (organizational). | [`plans/phase-h-app-store.md`](plans/phase-h-app-store.md) |
+| H | App Store readiness | H-0/H-1/H-2/H-3/H-4 ✓ complete — Universal Purchase unified bundle ID (`org.xlights` shared with Mac, iOS platform added to the existing App Store Connect record); Icon Composer `.icon` bundle with Liquid Glass appearance variants on iOS 26 and raster fallbacks for older; launch screen with centered xLights logo + light/dark background; `PrivacyInfo.xcprivacy` declaring only FileTimestamp / UserDefaults / SystemBootTime required-reason APIs; `ITSAppUsesNonExemptEncryption=false`; `NSLocalNetworkUsageDescription` + Bonjour services. Xcode Cloud workflow building and archiving cleanly; `SequencePackage::Pack` landed the comprehensive wx-free packager. H-4 TestFlight external group cleared Beta App Review and went live to external testers 2026-04-28. **H-5 submission metadata / screenshots remaining** (organizational). | [`plans/phase-h-app-store.md`](plans/phase-h-app-store.md) |
 | I | Import Effects (iPad) | I-1 (core extraction + desktop refactor) landed 2026-04-27 — `EffectMapper`, `AutoMapper` (with `ImportMappingNode` interface + matchers), `MapHintsIO`, `BufferStyles` all in `src-core/import_export/` (or `src-core/effects/`), desktop `xLightsImportChannelMapDialog::DoAutoMap` is now a 30-line adapter, both desktop + iPad-lib debug builds green. Manual import regression on a vendor sequence outstanding before merge. I-2 iPad UI (`.xsq`/`.xsqz` picker → mapping view → import) is the next big push. | [`plans/phase-i-import-effects.md`](plans/phase-i-import-effects.md) |
 
-**Remaining work.** Phase B P2 polish items (~40), Phase H's
-TestFlight external beta + App Store submission, and Phase I
+**Remaining work.** Phase B P2 polish items (~40), Phase H-5
+App Store submission metadata / screenshots, and Phase I
 (Import Effects) — the next major feature gap after H.
 
 **Preview scope.** Phase D is preview *viewing and appearance*: camera,
@@ -104,11 +104,37 @@ editing, align/distribute, property grid) — that behaviour stays
 desktop-only and is not in Phase D or anywhere else in the iPad plan.
 Per-view model visibility / layout-group management is Phase F.
 
+### Controller output
+
+Pulled forward from "Deferred" 2026-04-28 after external testers
+flagged the missing toggle. The plumbing was already in place
+(`OutputManager` owned by `iPadRenderContext`, `XLSequenceDocument`
+exposes `startOutput` / `stopOutput` / `outputFrame:` / `outputCount`,
+`SequencerViewModel.sendOutputFrame()` runs every playback tick,
+`shutdownForBackground` / `closeSequence` both halt output cleanly);
+the gap was just the user-visible toggle.
+
+Lightbulb button now lives in the `SequencerView` toolbar between
+the play controls and render-all (`lightbulb` / `lightbulb.fill`,
+yellow tint when on). Tap-while-off routes through
+`SequencerViewModel.toggleOutput()`; on failure it returns a
+user-facing string that the view promotes to an alert. Two
+distinct messages: "no controllers configured" (the common
+external-tester case — there's no iPad controller-setup UI, so
+they need to set controllers up in desktop xLights and copy the
+show folder over) vs. "couldn't reach configured controllers"
+(network / multicast issue).
+
+**Caveat — sACN multicast.** iOS gates `239.255.x.x` joins
+behind `com.apple.developer.networking.multicast`, which Apple
+approves manually. Entitlement request submitted 2026-04-28; the
+"couldn't reach" alert text mentions the limitation so testers
+know to use ArtNet, DDP, or sACN unicast in the meantime. Add
+the entitlement key to `macOS/Assets/xLights-iPad/xLights-iPad.entitlements`
+once approval lands.
+
 ### Deferred / explicitly out of MVP
 
-- **Controller output** — infrastructure is in the tree (output
-  manager, per-frame send, sACN / ArtNet / DDP / OPC) but not on the
-  MVP critical path. Revisit after App Store submission.
 - **JobPool requeue redesign** — desktop-scope refactor to replace
   block-on-other-model-frame with re-enqueue. Tracked separately; the
   iPad workaround is "more threads."
