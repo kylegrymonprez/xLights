@@ -1035,7 +1035,7 @@ MetalComputeUtilities::MetalComputeUtilities() {
 
     if ([device supportsFamily:MTLGPUFamilyApple10]) {
         maxTextureSize = 32768; // A19/M5 and later (per Metal Feature Set Tables, Feb 2026)
-    } else if ([device supportsFamily:MTLGPUFamilyApple3] || [device supportsFamily:MTLGPUFamilyMac1]) {
+    } else if ([device supportsFamily:MTLGPUFamilyApple3] || [device supportsFamily:MTLGPUFamilyMac2]) {
         maxTextureSize = 16384; // A9/M1 through A18/M4
     } else if ([device supportsFamily:MTLGPUFamilyApple2]) {
         maxTextureSize = 8192;  // A8

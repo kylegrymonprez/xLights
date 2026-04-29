@@ -238,6 +238,19 @@ struct XLSequencerCommands: Commands {
             .disabled(!viewModel.isSequenceLoaded)
         }
 
+        // Tools menu — placeholder for the long list of desktop Tools
+        // entries that will land on iPad over time. v1 has just Import
+        // Effects, but the menu is here so future items (Test Lights,
+        // Convert, Package Sequence, Color Manager, Effects Settings
+        // Search, Generate Custom Model, …) can drop in without menu
+        // reshuffling.
+        CommandMenu("Tools") {
+            Button("Import Effects…") {
+                viewModel.showingImportEffects = true
+            }
+            .disabled(!viewModel.isSequenceLoaded)
+        }
+
         // Playback menu.
         CommandMenu("Playback") {
             Button(viewModel.isPlaying ? "Pause" : "Play") {

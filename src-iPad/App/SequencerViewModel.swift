@@ -318,6 +318,9 @@ class SequencerViewModel {
     // hard-coupling the command handler to view internals.
     var showingSequenceSettings = false
     var showingDisplayElements = false
+    // Phase I-2 — Tools → Import Effects sheet. Reset to false after
+    // the user dismisses the sheet (Apply or Cancel).
+    var showingImportEffects = false
     // Save As is a multi-step flow (persist, open exporter, handle
     // errors). The menu command bumps this counter; the SequencerView
     // `.onChange` reacts exactly once per command invocation even if
