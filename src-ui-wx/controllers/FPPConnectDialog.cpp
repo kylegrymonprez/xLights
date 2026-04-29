@@ -839,9 +839,13 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString const& dir) const
     spdlog::info("Scanning folder for sequences for FPP upload: {}", ToUTF8(dir));
 
     wxDir directory;
-    directory.Open(dir);
+    if (!directory.Open(dir)) {
+        spdlog::warn("LoadSequencesFromFolder: could not open directory: {}", ToUTF8(dir));
+        return;
+    }
 
     wxArrayString files;
+    try {
     GetAllFilesInDir(dir, files, "*.x*");
 
     for (auto &filename : files) {
@@ -956,6 +960,9 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString const& dir) const
             fcont = directory.GetNext(&file);
         }
     }
+    } catch (...) {
+        spdlog::warn("LoadSequencesFromFolder: exception scanning folder: {}", ToUTF8(dir));
+    }
 }
 
 void FPPConnectDialog::LoadSequences()
@@ -991,17 +998,22 @@ void FPPConnectDialog::LoadSequences()
             wxTreeListItem item = CheckListBox_Sequences->AppendItem(CheckListBox_Sequences->GetRootItem(), v);
             DisplayDateModified(v, item);
             DisplayPixelCount(v, item);
-            FSEQFile *file = FSEQFile::openFSEQFile(ToUTF8(v));
-            if (file != nullptr) {
-                for (auto& header : file->getVariableHeaders()) {
-                    if (header.code[0] == 'm' && header.code[1] == 'f') {
-                        std::string mediaName = (const char*)(&header.data[0]);
-                        mediaName = FileUtils::FixFile(std::string(""), mediaName);
-                        if (FileExists(mediaName)) {
-                            CheckListBox_Sequences->SetItemText(item, 2, mediaName);
+            try {
+                FSEQFile *file = FSEQFile::openFSEQFile(ToUTF8(v));
+                if (file != nullptr) {
+                    for (auto& header : file->getVariableHeaders()) {
+                        if (header.code[0] == 'm' && header.code[1] == 'f' && !header.data.empty()) {
+                            std::string mediaName = (const char*)(&header.data[0]);
+                            mediaName = FileUtils::FixFile(std::string(""), mediaName);
+                            if (FileExists(mediaName)) {
+                                CheckListBox_Sequences->SetItemText(item, 2, mediaName);
+                            }
                         }
                     }
+                    delete file;
                 }
+            } catch (...) {
+                spdlog::warn("LoadSequences: exception reading FSEQ file: {}", ToUTF8(v));
             }
         }
     }
