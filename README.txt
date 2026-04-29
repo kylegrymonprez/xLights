@@ -16,6 +16,9 @@ XLIGHTS/NUTCRACKER RELEASE NOTES
                                 render on background threads on Linux (previously forced to the main thread because
                                 the wx/Pango stack isn't off-thread safe), parallelizing rendering of sequences
                                 with heavy text/emoji content.
+    -bug (dkulp)                Circles effect: GPU (Metal) path was clearing non-circle pixels to (0,0,0,0), wiping
+                                the buffer's pre-existing contents. Now leaves background pixels untouched, matching
+                                the CPU and ISPC paths.
     -change (dkulp)             Windows shader effect: GL work now runs on a dedicated worker thread inside
                                 GLContextManager instead of being dispatched to the wx UI thread.
     -change (dkulp)             Render engine cleanup: removed the main-thread effect render queue and all the
