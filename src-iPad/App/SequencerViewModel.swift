@@ -59,6 +59,33 @@ class SequencerViewModel {
     var isPaused = false
     var playPositionMS: Int = 0
     var volume: Int = 100
+    /// B43: -1 = main sequence audio, 0..N-1 = alt track index. Only
+    /// affects the waveform display — playback always uses the main
+    /// track. Mirrored from the bridge so SwiftUI can refresh on
+    /// sequence load. `altAudioTrackNames` is sized to the alt-track
+    /// count and surfaces in the waveform long-press menu.
+    var activeWaveformTrack: Int = -1
+    var altAudioTrackNames: [String] = []
+
+    /// B40: timestamp (CFAbsoluteTime) of the last audio scrub burst
+    /// fired from `scrubSeekTo`. Used to throttle bursts to ~50ms.
+    @ObservationIgnored var lastScrubAudioBurstAt: TimeInterval = 0
+
+    /// B97: Find / Replace state. Search is over timing-mark labels
+    /// only (matches desktop's intentional restriction in
+    /// `EffectsGrid::Find`). `findResults` caches `(rowIndex,
+    /// markIndex)` for every visible timing-row mark whose name
+    /// contains `findText`; navigation cycles through these.
+    var findText: String = ""
+    var findCaseSensitive: Bool = false
+    struct FindMatch: Equatable, Hashable {
+        let rowIndex: Int
+        let markIndex: Int
+    }
+    var findResults: [FindMatch] = []
+    var currentFindIndex: Int = -1
+    /// Toggled by ⌘F (XLightsCommands) and by `Done` in the sheet.
+    var findReplacePresented: Bool = false
     // F-4 playback speed. Desktop exposes 0.25/0.5/0.75/1.0/1.5/2/3/4x
     // — we match that set in the Playback menu. Applied to the
     // AVAudioEngine time-pitch unit via the bridge on `play()`, and
@@ -491,6 +518,7 @@ class SequencerViewModel {
             sequenceDurationMS = Int(document.sequenceDurationMS())
             frameIntervalMS = Int(document.frameIntervalMS())
             hasAudio = document.hasAudio()
+            reloadAltTracks()
             reloadRows()
             reloadTagPositions()
             syncClipboardFromPasteboard()   // B99
@@ -512,6 +540,7 @@ class SequencerViewModel {
             sequenceDurationMS = Int(document.sequenceDurationMS())
             frameIntervalMS = Int(document.frameIntervalMS())
             hasAudio = document.hasAudio()
+            reloadAltTracks()
             reloadRows()
             reloadTagPositions()
             syncClipboardFromPasteboard()   // B99
@@ -626,6 +655,7 @@ class SequencerViewModel {
                 self.sequenceDurationMS = Int(self.document.sequenceDurationMS())
                 self.frameIntervalMS = Int(self.document.frameIntervalMS())
                 self.hasAudio = self.document.hasAudio()
+                self.reloadAltTracks()
                 self.reloadRows()
                 self.reloadTagPositions()
                 self.syncClipboardFromPasteboard()
@@ -1213,6 +1243,27 @@ class SequencerViewModel {
         if hasAudio {
             document.audioSeek(toMS: Int(clamped))
         }
+    }
+
+    /// B40: variant of `seekTo` for ruler drag-to-scrub. Plays a tiny
+    /// audio window (~50 ms) at the new position so the user can hear
+    /// where they are. Throttled to 50 ms between bursts so a fast
+    /// drag doesn't fire dozens of overlapping plays — the burst length
+    /// matches the throttle so back-to-back calls cover the swept range
+    /// continuously without piling up.
+    func scrubSeekTo(ms: Int) {
+        let clamped = max(0, min(ms, sequenceDurationMS))
+        playPositionMS = clamped
+        guard hasAudio, !isPlaying else { return }
+        let now = Date().timeIntervalSinceReferenceDate
+        if now - lastScrubAudioBurstAt >= 0.050 {
+            document.audioPlaySegment(fromMS: Int(clamped), lengthMS: 50)
+            lastScrubAudioBurstAt = now
+        }
+        // Even when we throttle the audible burst, keep the seek
+        // honest so the next bullet (or the final commit on drag-end)
+        // resumes from the right spot.
+        document.audioSeek(toMS: Int(clamped))
     }
 
     func stopPlayback() {
@@ -2196,6 +2247,35 @@ class SequencerViewModel {
         return n
     }
 
+    /// B55: convert effects on the row's element from "Per Preview" /
+    /// "Default" / "Single Line" buffer styles to their "Per Model …"
+    /// counterparts. `allLayers == true` walks every layer of the
+    /// element (model-scope menu); false touches only the row's layer.
+    /// Returns the number of effects whose style was rewritten so the
+    /// caller can show a result toast / no-op feedback.
+    @discardableResult
+    func convertEffectsToPerModel(rowIndex: Int, allLayers: Bool) -> Int {
+        let n = Int(document.convertEffectsToPerModel(onRow: Int32(rowIndex),
+                                                        acrossAllLayers: allLayers))
+        if n > 0 {
+            // Re-render is kicked off by the bridge; refresh rows
+            // so the effect bars repaint with their new buffer style.
+            reloadRows()
+        }
+        return n
+    }
+
+    /// B56: collapse identical node / strand effects up to the model
+    /// level. Returns count of effects promoted. Only meaningful on
+    /// `ModelElement` rows that have strand+node layers — typical
+    /// targets are sequences imported with strand-level data.
+    @discardableResult
+    func promoteNodeEffects(rowIndex: Int) -> Int {
+        let n = Int(document.promoteNodeEffects(onRow: Int32(rowIndex)))
+        if n > 0 { reloadRows() }
+        return n
+    }
+
     /// B47: insert `count` empty layers immediately below the row's
     /// own layer. Returns the number actually inserted.
     @discardableResult
@@ -2772,6 +2852,23 @@ class SequencerViewModel {
         return added
     }
 
+    /// LOR `.lms` timing import — Phase E follow-up. Same return
+    /// semantics as `importXTiming(path:)`.
+    @discardableResult
+    func importLorTiming(path: String) -> Int {
+        let added = Int(document.importLorTiming(fromPath: path))
+        if added > 0 { reloadRows() }
+        return added
+    }
+
+    /// Papagayo `.pgo` lyric-sync import — Phase E follow-up.
+    @discardableResult
+    func importPapagayoTiming(path: String) -> Int {
+        let added = Int(document.importPapagayoTiming(fromPath: path))
+        if added > 0 { reloadRows() }
+        return added
+    }
+
     /// B75: export the given timing row to `path` as `.xtiming`.
     @discardableResult
     func exportTimingTrack(rowIndex: Int, path: String) -> Bool {
@@ -2856,6 +2953,137 @@ class SequencerViewModel {
         let row = rows[rowIndex]
         guard row.timing != nil, row.layerIndex == 0 else { return false }
         return row.effects.contains(where: { !$0.name.isEmpty })
+    }
+
+    /// B84 (per-mark): break a single phrase mark into per-word
+    /// sub-marks, leaving sibling phrases on the row alone. Gated by
+    /// `canBreakdownPhrase(rowIndex:markIndex:)`.
+    @discardableResult
+    func breakdownPhrase(rowIndex: Int, markIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        guard rows[rowIndex].timing != nil else { return false }
+        if !document.breakdownPhrase(atRow: Int32(rowIndex),
+                                       atIndex: Int32(markIndex)) { return false }
+        reloadRows()
+        return true
+    }
+
+    /// True iff the mark is on the phrase layer and has a non-empty
+    /// label — gates the per-mark "Breakdown This Phrase" menu entry.
+    func canBreakdownPhrase(rowIndex: Int, markIndex: Int) -> Bool {
+        guard rowIndex >= 0, rowIndex < rows.count else { return false }
+        let row = rows[rowIndex]
+        guard row.timing != nil, row.layerIndex == 0 else { return false }
+        guard markIndex >= 0, markIndex < row.effects.count else { return false }
+        return !row.effects[markIndex].name.isEmpty
+    }
+
+    // MARK: - Find / Replace (B97)
+
+    /// Recompute `findResults` against `findText` — searches every
+    /// timing-row mark's `name`. Mirrors desktop's intentional
+    /// timing-tracks-only restriction (`EffectsGrid::Find`).
+    /// Resets `currentFindIndex` so the next `findNext()` selects
+    /// the first match.
+    func runFind() {
+        guard !findText.isEmpty else {
+            findResults = []
+            currentFindIndex = -1
+            return
+        }
+        let needle = findCaseSensitive ? findText : findText.lowercased()
+        var matches: [FindMatch] = []
+        for (rowIdx, row) in rows.enumerated() {
+            guard row.timing != nil else { continue }
+            for (mIdx, eff) in row.effects.enumerated() {
+                if eff.name.isEmpty { continue }
+                let hay = findCaseSensitive ? eff.name : eff.name.lowercased()
+                if hay.contains(needle) {
+                    matches.append(FindMatch(rowIndex: rowIdx, markIndex: mIdx))
+                }
+            }
+        }
+        findResults = matches
+        currentFindIndex = -1
+    }
+
+    /// Advance `currentFindIndex` and select + seek to that match.
+    /// No-op when there are no results. Wraps at the end.
+    @discardableResult
+    func findNext() -> Bool {
+        guard !findResults.isEmpty else { return false }
+        currentFindIndex = (currentFindIndex + 1) % findResults.count
+        focusFindMatch()
+        return true
+    }
+
+    @discardableResult
+    func findPrevious() -> Bool {
+        guard !findResults.isEmpty else { return false }
+        currentFindIndex = (currentFindIndex - 1 + findResults.count) % findResults.count
+        focusFindMatch()
+        return true
+    }
+
+    /// Replace every current match's label with `replacement`. Returns
+    /// the count actually changed. Bridge calls re-walk the timing
+    /// element after each, so we re-run the search at the end to
+    /// drain stale entries (e.g. when the replacement no longer
+    /// matches `findText`).
+    @discardableResult
+    func replaceAllFindMatches(with replacement: String) -> Int {
+        guard !findResults.isEmpty else { return 0 }
+        var n = 0
+        for match in findResults {
+            if document.setTimingMarkLabel(atRow: Int32(match.rowIndex),
+                                            at: Int32(match.markIndex),
+                                            label: replacement) {
+                n += 1
+            }
+        }
+        if n > 0 {
+            reloadRows()
+            // Re-run the search since renamed marks may no longer match.
+            runFind()
+        }
+        return n
+    }
+
+    /// Replace just the currently-focused match. Advances to the
+    /// next match after the replace so the panel feels live.
+    @discardableResult
+    func replaceCurrentFindMatch(with replacement: String) -> Bool {
+        guard currentFindIndex >= 0, currentFindIndex < findResults.count else { return false }
+        let match = findResults[currentFindIndex]
+        let ok = document.setTimingMarkLabel(atRow: Int32(match.rowIndex),
+                                              at: Int32(match.markIndex),
+                                              label: replacement)
+        if ok {
+            reloadRows()
+            // Re-run the search and try to advance to the same
+            // ordinal position — feels closer to the user's intent
+            // than always jumping to result 0.
+            let priorIndex = currentFindIndex
+            runFind()
+            if !findResults.isEmpty {
+                currentFindIndex = min(priorIndex, findResults.count - 1) - 1
+                findNext()
+            }
+        }
+        return ok
+    }
+
+    private func focusFindMatch() {
+        guard currentFindIndex >= 0, currentFindIndex < findResults.count else { return }
+        let m = findResults[currentFindIndex]
+        guard m.rowIndex < rows.count, m.markIndex < rows[m.rowIndex].effects.count else { return }
+        let mark = rows[m.rowIndex].effects[m.markIndex]
+        let centreMS = (mark.startTimeMS + mark.endTimeMS) / 2
+        seekTo(ms: centreMS)
+        // Selecting the timing mark is a no-op for selection state
+        // (timing marks aren't EffectSelections), so just centre on
+        // the mark; row scroll is handled by the seek + follow-
+        // playhead path if enabled.
     }
 
     /// Returns true if the mark at the given index on the given row
@@ -4975,6 +5203,28 @@ class SequencerViewModel {
         loadWaveform(startMS: startMS, endMS: endMS,
                       numSamples: waveformSampleCount)
         syncPlaybackToWaveformFilter()
+    }
+
+    /// B43: refresh `altAudioTrackNames` and `activeWaveformTrack`
+    /// from the bridge. Called after every sequence load.
+    func reloadAltTracks() {
+        let count = Int(document.altTrackCount())
+        altAudioTrackNames = (0..<count).map {
+            document.altTrackDisplayName(at: $0)
+        }
+        activeWaveformTrack = Int(document.activeWaveformTrack())
+        if activeWaveformTrack >= count { activeWaveformTrack = -1 }
+    }
+
+    /// B43: switch the waveform display source. -1 = main; 0..N-1 =
+    /// alt track. Reloads the waveform peaks for the current view
+    /// range. Playback is unaffected.
+    func setActiveWaveformTrack(_ index: Int) {
+        guard hasAudio else { return }
+        let clamped = (index < -1 || index >= altAudioTrackNames.count) ? -1 : index
+        document.setActiveWaveformTrack(clamped)
+        activeWaveformTrack = clamped
+        reloadWaveformCurrent()
     }
 
     /// Route the current `waveformFilter` through `AudioManager::

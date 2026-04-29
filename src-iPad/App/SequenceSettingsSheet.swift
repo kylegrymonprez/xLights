@@ -22,13 +22,14 @@ struct SequenceSettingsSheet: View {
     @Environment(SequencerViewModel.self) var viewModel
 
     private enum Tab: String, CaseIterable, Identifiable {
-        case info, metadata, media, render
+        case info, metadata, media, timings, render
         var id: String { rawValue }
         var label: String {
             switch self {
             case .info:     return "Info"
             case .metadata: return "Metadata"
             case .media:    return "Media"
+            case .timings:  return "Timings"
             case .render:   return "Render"
             }
         }
@@ -37,6 +38,7 @@ struct SequenceSettingsSheet: View {
             case .info:     return "info.circle"
             case .metadata: return "character.book.closed"
             case .media:    return "photo.stack"
+            case .timings:  return "metronome"
             case .render:   return "cpu"
             }
         }
@@ -69,6 +71,8 @@ struct SequenceSettingsSheet: View {
                         // shared toolbar via SwiftUI's toolbar
                         // composition.
                         MediaManagerContent(showsDoneButton: false)
+                    case .timings:
+                        TimingsTab()
                     case .render:
                         ScrollView { RenderTab().padding() }
                     }
@@ -265,6 +269,267 @@ private struct MetadataTab: View {
                     _ = viewModel.document.setHeaderInfo(new, forKey: key)
                 }
         }
+    }
+}
+
+// MARK: - Timings tab (per-track rename / delete / export + bulk import)
+
+/// Phase E follow-up — central management of timing tracks. Per-row
+/// rename/delete already exists on the row-header long-press menu;
+/// this tab adds bulk import (.xtiming, .lms, .pgo), per-track
+/// `.xtiming` export, and a single-place overview of every timing
+/// track in the sequence.
+private struct TimingsTab: View {
+    @Environment(SequencerViewModel.self) var viewModel
+
+    fileprivate struct TimingRow: Identifiable, Hashable {
+        let id: Int        // row index in the visible-row list
+        let name: String
+        let layerName: String
+    }
+
+    @State private var renameTarget: TimingRow?
+    @State private var renameText: String = ""
+    @State private var deleteTarget: TimingRow?
+    @State private var importing = false
+    @State private var importFormat: ImportFormat = .xtiming
+    @State private var exportTarget: TimingRow?
+    @State private var exportDoc: XTimingFile?
+
+    private enum ImportFormat: String, CaseIterable, Identifiable {
+        case xtiming, lor, papagayo
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .xtiming:  return "xLights (.xtiming)"
+            case .lor:      return "LOR (.lms)"
+            case .papagayo: return "Papagayo (.pgo)"
+            }
+        }
+        var ext: String {
+            switch self {
+            case .xtiming:  return "xtiming"
+            case .lor:      return "lms"
+            case .papagayo: return "pgo"
+            }
+        }
+    }
+
+    private var timingRows: [TimingRow] {
+        // Layer 0 of each timing element is the canonical "this is
+        // the timing track" row; sub-layers (Words / Phonemes) hang
+        // off layer > 0 of the same element. Filter to layer 0 so
+        // the user manipulates whole tracks rather than sub-layers.
+        viewModel.rows.enumerated().compactMap { idx, row in
+            guard let timing = row.timing, row.layerIndex == 0 else { return nil }
+            return TimingRow(id: idx, name: timing.elementName,
+                              layerName: timing.layerName)
+        }
+    }
+
+    var body: some View {
+        list
+            .listStyle(.inset)
+            .fileImporter(
+                isPresented: $importing,
+                allowedContentTypes: [importContentType],
+                allowsMultipleSelection: false
+            ) { result in
+                handleImport(result: result)
+            }
+            .modifier(RenameAlertModifier(target: $renameTarget,
+                                            text: $renameText,
+                                            viewModel: viewModel))
+            .modifier(DeleteAlertModifier(target: $deleteTarget,
+                                            viewModel: viewModel))
+            .fileExporter(
+                isPresented: Binding(
+                    get: { exportDoc != nil },
+                    set: { if !$0 { exportDoc = nil; exportTarget = nil } }
+                ),
+                document: exportDoc,
+                contentType: kXTimingFileType,
+                defaultFilename: exportDoc?.suggestedName ?? "Timing"
+            ) { _ in
+                exportDoc = nil
+                exportTarget = nil
+            }
+    }
+
+    @ViewBuilder
+    private var list: some View {
+        List {
+            Section("Tracks") {
+                if timingRows.isEmpty {
+                    Text("No timing tracks. Use the Import button to add one.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(timingRows) { tr in
+                        timingRow(tr)
+                    }
+                }
+            }
+            Section {
+                Picker("Format", selection: $importFormat) {
+                    ForEach(ImportFormat.allCases) { f in
+                        Text(f.label).tag(f)
+                    }
+                }
+                .pickerStyle(.menu)
+                Button {
+                    importing = true
+                } label: {
+                    Label("Import…", systemImage: "square.and.arrow.down")
+                }
+            } header: {
+                Text("Import")
+            } footer: {
+                Text("Imported tracks are appended to the sequence and become the active timing.")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func timingRow(_ tr: TimingRow) -> some View {
+        HStack {
+            VStack(alignment: .leading) {
+                Text(tr.name)
+                if !tr.layerName.isEmpty && tr.layerName != tr.name {
+                    Text(tr.layerName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Menu {
+                Button {
+                    renameText = tr.name
+                    renameTarget = tr
+                } label: { Label("Rename…", systemImage: "pencil") }
+                Button {
+                    exportTarget = tr
+                    exportDoc = XTimingFile(rowIndex: tr.id,
+                                              suggestedName: tr.name,
+                                              viewModel: viewModel)
+                } label: { Label("Export…", systemImage: "square.and.arrow.up") }
+                Button(role: .destructive) {
+                    deleteTarget = tr
+                } label: { Label("Delete", systemImage: "trash") }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+        }
+    }
+
+    private var importContentType: UTType {
+        switch importFormat {
+        case .xtiming:  return kXTimingFileType
+        case .lor:      return UTType(filenameExtension: "lms") ?? .xml
+        case .papagayo: return UTType(filenameExtension: "pgo") ?? .text
+        }
+    }
+
+    private func handleImport(result: Result<[URL], Error>) {
+        guard case .success(let urls) = result, let url = urls.first else { return }
+        let needsAccess = url.startAccessingSecurityScopedResource()
+        defer { if needsAccess { url.stopAccessingSecurityScopedResource() } }
+        _ = XLSequenceDocument.obtainAccess(toPath: url.path,
+                                              enforceWritable: false)
+        let added: Int
+        switch importFormat {
+        case .xtiming:  added = viewModel.importXTiming(path: url.path)
+        case .lor:      added = viewModel.importLorTiming(path: url.path)
+        case .papagayo: added = viewModel.importPapagayoTiming(path: url.path)
+        }
+        if added > 0 { viewModel.reloadRows() }
+    }
+}
+
+private struct RenameAlertModifier: ViewModifier {
+    @Binding var target: TimingsTab.TimingRow?
+    @Binding var text: String
+    let viewModel: SequencerViewModel
+    func body(content: Content) -> some View {
+        content.alert("Rename Timing Track",
+                      isPresented: Binding(
+                        get: { target != nil },
+                        set: { if !$0 { target = nil } }
+                      ),
+                      presenting: target) { _ in
+            TextField("Name", text: $text)
+            Button("OK") {
+                if let tgt = target, !text.isEmpty, text != tgt.name {
+                    _ = viewModel.document.renameTimingTrack(
+                        at: Int32(tgt.id), newName: text)
+                    viewModel.reloadRows()
+                }
+                target = nil
+            }
+            Button("Cancel", role: .cancel) { target = nil }
+        } message: { tgt in
+            Text("Rename \"\(tgt.name)\" to:")
+        }
+    }
+}
+
+private struct DeleteAlertModifier: ViewModifier {
+    @Binding var target: TimingsTab.TimingRow?
+    let viewModel: SequencerViewModel
+    func body(content: Content) -> some View {
+        content.alert("Delete Timing Track",
+                      isPresented: Binding(
+                        get: { target != nil },
+                        set: { if !$0 { target = nil } }
+                      ),
+                      presenting: target) { _ in
+            Button("Delete", role: .destructive) {
+                if let tgt = target {
+                    _ = viewModel.document.deleteTimingTrack(at: Int32(tgt.id))
+                    viewModel.reloadRows()
+                }
+                target = nil
+            }
+            Button("Cancel", role: .cancel) { target = nil }
+        } message: { tgt in
+            Text("Delete timing track \"\(tgt.name)\"? All marks on this track will be lost.")
+        }
+    }
+}
+
+/// Value-type FileDocument carrying a pre-rendered `.xtiming` blob.
+/// The export call (which has to run on the main actor since it
+/// touches the bridge) happens at construction time on the main
+/// queue; `fileWrapper(_:)` then just hands the bytes back without
+/// needing actor isolation.
+private struct XTimingFile: FileDocument {
+    static var readableContentTypes: [UTType] { [kXTimingFileType] }
+    static var writableContentTypes: [UTType] { [kXTimingFileType] }
+
+    let suggestedName: String
+    let payload: Data
+
+    /// Run the bridge export into a temp file and slurp the bytes
+    /// back. Returns nil when no row matches or the export failed.
+    @MainActor
+    init?(rowIndex: Int, suggestedName: String, viewModel: SequencerViewModel) {
+        let tmp = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension("xtiming")
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        guard viewModel.exportTimingTrack(rowIndex: rowIndex, path: tmp.path),
+              let data = try? Data(contentsOf: tmp) else {
+            return nil
+        }
+        self.suggestedName = suggestedName
+        self.payload = data
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        throw CocoaError(.featureUnsupported)
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: payload)
     }
 }
 

@@ -5,14 +5,15 @@ phase home; catalogued here so they don't fall off.
 
 ## Phase A — Core-path hardening
 
-- **Re-prompt on failed `ObtainAccessToURL`.** Desktop re-prompts
-  the user with `UIDocumentPickerViewController` when a stale
-  security-scoped bookmark fails to resolve; iPad currently
-  ignores the return value, so a stale bookmark leads to silent
-  lookup failure. Minimum version: check the return, log, and
-  drop the failed folder from `_mediaFolders` before handing it
-  to `FileUtils`. Full re-prompt UX needs a Swift callback +
-  `UIDocumentPickerViewController` hook.
+- ~~**Re-prompt on failed `ObtainAccessToURL`.**~~ Minimum version
+  landed 2026-04-28 (`iPadRenderContext::LoadShowFolder`): the
+  show-folder access failure is logged, and any media folder that
+  fails `ObtainAccessToURL` is dropped from `_mediaFolders` before
+  it reaches `FileUtils::SetFixFileDirectories`. Defensive logging
+  also added to `OpenSequence` and `SaveViewpoints`. Full re-prompt
+  UX (Swift callback into `UIDocumentPickerViewController`) is still
+  open — the current change just stops the silent-fail path that
+  led to phantom missing-media warnings.
 
 ## Phase E — Sequence management polish
 
@@ -46,13 +47,19 @@ Phase E closed 2026-04-21. Deferred items:
   door to FPP Connect / Batch Render integrations once those
   land on iPad.
 
-- **Sequence Settings → Timings import/export tab.** E-3
-  shipped without Timings. Row-header long-press already
-  covers rename / delete; the Settings dialog should
-  centralise those + add import (`.xtiming`, `.lms`, `.pgo`)
-  and export (`.xtiming`) flows matching desktop's
-  `SeqFileUtilities::ProcessXTiming` / `ProcessLorTiming` /
-  etc. P2.
+- ~~**Sequence Settings → Timings import/export tab.**~~ Landed
+  2026-04-28. New "Timings" tab in `SequenceSettingsSheet` lists
+  every timing element (layer 0 only) with per-track Rename /
+  Export… / Delete actions. Top "Import…" section accepts
+  `.xtiming` / `.lms` / `.pgo`. Bridge gained
+  `importLorTimingFromPath:` and `importPapagayoTimingFromPath:`
+  alongside the existing `.xtiming` import; both wrap
+  `SequenceFile::ProcessLorTiming` /
+  `SequenceFile::ProcessPapagayo` and follow the same
+  "make-newest-active + repopulate row info" post-import dance.
+  Per-track export rides a value-type `XTimingFile: FileDocument`
+  that captures bytes at construction time on the main actor so
+  `fileWrapper(_:)` stays actor-free.
 
 - **Sequence Settings → Audio Tracks tab.** Alt-audio tracks
   round-trip through XML untouched today; no authoring UI.
@@ -76,14 +83,16 @@ Phase C closed 2026-04-21. Small deferred items:
   simple dimmer intensity row; a reuse of `SketchPathEditor` on
   `MHPathDef`. P2.
 
-- **G8+ — Persist iPad-saved DMX states to
-  `xlights_rgbeffects.xml`.** `dmxSaveState` writes to the
-  model's in-memory `stateInfo` map; the save doesn't survive
-  show-folder close. Follow-up: mirror the `SaveViewpoints`
-  pattern in `iPadRenderContext` (reload XML, rewrite the
-  model's `<stateInfo>` children from `Model::WriteStateInfo`,
-  save). Needs per-model writable access + a "models that
-  changed state" tracker. P2.
+- ~~**G8+ — Persist iPad-saved DMX states to
+  `xlights_rgbeffects.xml`.**~~ Landed 2026-04-28.
+  `iPadRenderContext::SaveModelStates` mirrors `SaveViewpoints`:
+  walks `_dirtyStateModels`, locates each `<model name="…">` in
+  the on-disk rgbeffects XML, drops existing `<stateInfo>`
+  children, rewrites them via `Model::WriteStateInfo`, and saves.
+  `MarkModelStateDirty` is the public hook; `dmxSaveStateForRow`
+  in `XLSequenceDocument.mm` calls it then immediately invokes
+  `SaveModelStates` so each user-saved state survives show-folder
+  close.
 
 - **G2-c — Shader dynamic uniform grouping for large `.fs`
   files.** Most shaders declare < 10 uniforms so grouping isn't

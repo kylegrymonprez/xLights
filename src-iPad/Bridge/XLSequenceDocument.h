@@ -1,6 +1,7 @@
 #pragma once
 
 #import <Foundation/Foundation.h>
+#import <CoreGraphics/CGBase.h>
 
 // ObjC bridge for iPadRenderContext — callable from Swift.
 // Manages show folder loading and sequence access.
@@ -266,6 +267,27 @@
     NS_SWIFT_NAME(insertEffectLayersBelow(at:count:));
 - (BOOL)removeEffectLayerAtIndex:(int)rowIndex;
 
+// B55: rewrite each effect's `B_CHOICE_BufferStyle` setting from
+// "Per Preview" / "Default" / "Single Line" / "" to the matching
+// "Per Model …" variant. When `acrossAllLayers` is YES, walks every
+// layer of the row's element (model-scope menu); otherwise only
+// the row's own layer (layer-scope menu, mirrors desktop's two
+// menu entries). Returns the count of effects whose setting was
+// updated so the UI can show "N converted" if it wants. Triggers a
+// re-render of the affected model on success.
+- (int)convertEffectsToPerModelOnRow:(int)rowIndex acrossAllLayers:(BOOL)allLayers
+    NS_SWIFT_NAME(convertEffectsToPerModel(onRow:acrossAllLayers:));
+
+// B56: promote node-level "On" / "Color Wash" effects up the
+// strand → model hierarchy when every node carries an identical
+// copy at the same time range. Two-pass: nodes → strand layer 0,
+// then strand layer 0 → model layer 0 (only when there's > 1
+// strand). No-op for ModelGroup / SubModel rows. Returns the
+// number of effects coalesced; on success a model re-render is
+// triggered automatically.
+- (int)promoteNodeEffectsOnRow:(int)rowIndex
+    NS_SWIFT_NAME(promoteNodeEffects(onRow:));
+
 // B48: delete every layer on the row's element that has zero
 // effects (keeps the element's ≥ 1 layer invariant). Returns the
 // number of layers removed. Caller should `reloadRows` afterward.
@@ -328,6 +350,20 @@
 // `SequenceFile::ProcessXTiming({path}, iPadRenderContext)`.
 - (int)importXTimingFromPath:(NSString*)path
     NS_SWIFT_NAME(importXTiming(fromPath:));
+
+// LOR `.lms` timing import. Routes through `SequenceFile::
+// ProcessLorTiming({path}, iPadRenderContext)` which handles both
+// "regular" and "musical" LOR timings. Returns the number of
+// tracks added.
+- (int)importLorTimingFromPath:(NSString*)path
+    NS_SWIFT_NAME(importLorTiming(fromPath:));
+
+// Papagayo `.pgo` lyric-sync import. Routes through
+// `SequenceFile::ProcessPapagayo({path}, iPadRenderContext)` which
+// builds Phrase / Word / Phoneme layers. Returns the number of
+// tracks added.
+- (int)importPapagayoTimingFromPath:(NSString*)path
+    NS_SWIFT_NAME(importPapagayoTiming(fromPath:));
 
 // B78 import lyrics: replace the target timing element's layers
 // with a single phrase layer populated from `phrases`. Each non-
@@ -432,6 +468,16 @@
 // Returns NO on rejection.
 - (BOOL)breakdownPhrasesAtRow:(int)rowIndex
     NS_SWIFT_NAME(breakdownPhrases(atRow:));
+
+// B84 (per-mark): break a single phrase into per-word sub-marks
+// without touching the other phrases on the row. Creates the words
+// layer if missing; otherwise wipes any existing words + phonemes
+// that fall inside the target phrase's [start, end] range and
+// substitutes the fresh per-word marks. Rejects rows that aren't
+// the phrase layer (layer 0) and rejects when a locked
+// word/phoneme mark sits inside the range. Returns NO on rejection.
+- (BOOL)breakdownPhraseAtRow:(int)rowIndex atIndex:(int)phraseIndex
+    NS_SWIFT_NAME(breakdownPhrase(atRow:atIndex:));
 
 // B85: break every word mark on the Words layer (layer 1) into
 // per-phoneme sub-marks on a fresh Phonemes layer (layer 2). Uses
@@ -866,6 +912,16 @@
 - (void)audioPause;
 - (void)audioStop;
 - (void)audioSeekToMS:(long)positionMS;
+
+// B40: play a short audio window (`lengthMS` ms starting at
+// `positionMS`) without disturbing the main play/pause state. Used
+// to give an audible cue while the user drags the playhead. Safe
+// to call rapidly — AudioManager::Play(pos, len) handles overlapping
+// requests by re-seeking. No-op when audio isn't loaded or when
+// regular playback is in flight (we don't want to fight the
+// main playback engine).
+- (void)audioPlaySegmentFromMS:(long)positionMS lengthMS:(long)lengthMS
+    NS_SWIFT_NAME(audioPlaySegment(fromMS:lengthMS:));
 - (long)audioTellMS;
 - (int)audioPlayingState;  // 0=PLAYING, 1=PAUSED, 2=STOPPED
 - (void)setAudioVolume:(int)volume;
@@ -911,6 +967,16 @@
                       lowNote:(int)lowNote
                      highNote:(int)highNote
     NS_SWIFT_NAME(waveformData(fromMS:toMS:numSamples:filterType:lowNote:highNote:));
+
+// B43: alternate audio tracks (vocal stems, etc.). Used to switch
+// the *waveform* view between the main sequence audio and any of
+// the alt tracks declared in the .xsq. Playback always uses the
+// main track. -1 = main, 0..altTrackCount-1 = alt index.
+- (NSInteger)altTrackCount;
+- (NSString*)altTrackDisplayNameAtIndex:(NSInteger)index
+    NS_SWIFT_NAME(altTrackDisplayName(at:));
+- (NSInteger)activeWaveformTrack;
+- (void)setActiveWaveformTrack:(NSInteger)index;
 
 // A2 onset detection. Runs the spectral-flux detector over the full
 // audio track, returning onset positions in milliseconds (ascending).
@@ -1299,5 +1365,24 @@
 - (BOOL)dmxRemapChannelsForRow:(int)rowIndex
                         atIndex:(int)effectIndex
                          preset:(int)preset;
+
+// Effect bracket palette — sourced from the show folder's <colors>
+// node in xlights_rgbeffects.xml so user-customised desktop palettes
+// round-trip to iPad. Falls back to ColorManager defaults when the
+// show has no customised palette. Returns each component as a
+// 0..1 CGFloat through out-params (kept as scalars rather than
+// UIColor so the per-frame draw loop in EffectsMetalGridView can
+// feed them straight into appendLineX1's r/g/b args).
+typedef NS_ENUM(NSInteger, XLEffectBracketState) {
+    XLEffectBracketStateDefault = 0,
+    XLEffectBracketStateSelected,
+    XLEffectBracketStateLocked,
+    XLEffectBracketStateDisabled,
+};
+- (void)bracketColorForState:(XLEffectBracketState)state
+                         outR:(CGFloat*)outR
+                         outG:(CGFloat*)outG
+                         outB:(CGFloat*)outB
+    NS_SWIFT_NAME(bracketColor(forState:outR:outG:outB:));
 
 @end

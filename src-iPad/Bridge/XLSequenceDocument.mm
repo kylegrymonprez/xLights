@@ -54,6 +54,7 @@
 #include "xLightsVersion.h"
 
 #include <nlohmann/json.hpp>
+#include <spdlog/spdlog.h>
 
 #include <algorithm>
 #include <array>
@@ -966,6 +967,38 @@ static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
     return countAfter - countBefore;
 }
 
+- (int)importLorTimingFromPath:(NSString*)path {
+    if (!path || path.length == 0) return 0;
+    SequenceFile* sf = _context->GetSequenceFile();
+    if (!sf) return 0;
+    int countBefore = _context->GetSequenceElements().GetNumberOfTimingElements();
+    sf->ProcessLorTiming({ std::string([path UTF8String]) }, _context.get());
+    int countAfter = _context->GetSequenceElements().GetNumberOfTimingElements();
+    if (countAfter > countBefore) {
+        _context->GetSequenceElements().DeactivateAllTimingElements();
+        TimingElement* te = _context->GetSequenceElements().GetTimingElement(countAfter - 1);
+        if (te) te->SetActive(true);
+        _context->GetSequenceElements().PopulateRowInformation();
+    }
+    return countAfter - countBefore;
+}
+
+- (int)importPapagayoTimingFromPath:(NSString*)path {
+    if (!path || path.length == 0) return 0;
+    SequenceFile* sf = _context->GetSequenceFile();
+    if (!sf) return 0;
+    int countBefore = _context->GetSequenceElements().GetNumberOfTimingElements();
+    sf->ProcessPapagayo({ std::string([path UTF8String]) }, _context.get());
+    int countAfter = _context->GetSequenceElements().GetNumberOfTimingElements();
+    if (countAfter > countBefore) {
+        _context->GetSequenceElements().DeactivateAllTimingElements();
+        TimingElement* te = _context->GetSequenceElements().GetTimingElement(countAfter - 1);
+        if (te) te->SetActive(true);
+        _context->GetSequenceElements().PopulateRowInformation();
+    }
+    return countAfter - countBefore;
+}
+
 - (BOOL)exportTimingTrackAtRow:(int)rowIndex toPath:(NSString*)path {
     if (!path || path.length == 0) return NO;
     auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
@@ -1217,6 +1250,189 @@ static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
     return YES;
 }
 
+// B56: walk every strand of a model and promote node-level effects
+// up to strand level when every node carries an identical "On" or
+// "Color Wash" effect at the same time range. After the per-strand
+// pass, run the same coalescing one level higher (strands → model).
+// Mirrors `xLightsFrame::DoPromoteEffects` (tabSequencer.cpp:4238).
+// Pure structural walk — no SequenceData or rendering — so the
+// algorithm can live in the bridge without core changes.
+- (int)promoteNodeEffectsOnRow:(int)rowIndex {
+    auto& se = _context->GetSequenceElements();
+    auto* row = se.GetRowInformation(rowIndex);
+    if (!row || !row->element) return 0;
+    if (row->element->GetType() != ElementType::ELEMENT_TYPE_MODEL) return 0;
+    ModelElement* element = dynamic_cast<ModelElement*>(row->element);
+    if (!element) return 0;
+
+    auto effectMatches = [](Effect* a, Effect* b) {
+        if (!a || !b) return false;
+        if (a->GetEffectIndex() != b->GetEffectIndex()) return false;
+        if (a->GetStartTimeMS() != b->GetStartTimeMS()) return false;
+        if (a->GetEndTimeMS() != b->GetEndTimeMS()) return false;
+        return a->GetSettingsAsString() == b->GetSettingsAsString()
+            && a->GetPaletteAsString() == b->GetPaletteAsString();
+    };
+
+    se.get_undo_mgr().CreateUndoStep();
+    _context->AbortRender(5000);
+    int promoted = 0;
+
+    // Step 1: nodes → strands. For each strand, look at node 0's effects
+    // and try to collapse identical coverage across every other node
+    // layer up to the strand layer.
+    for (int x = 0; x < element->GetStrandCount(); ++x) {
+        StrandElement* strand = element->GetStrand(x);
+        if (!strand) continue;
+        EffectLayer* target = strand->GetEffectLayer(0);
+        // Single-strand models promote straight to model level.
+        if (element->GetStrandCount() <= 1) {
+            if (element->GetEffectLayer(0)->GetEffectCount() != 0) {
+                element->InsertEffectLayer(0);
+            }
+            target = element->GetEffectLayer(0);
+        }
+        if (strand->GetNodeLayerCount() == 0) continue;
+        NodeLayer* base = strand->GetNodeLayer(0);
+        for (int e = base->GetEffectCount() - 1; e >= 0; --e) {
+            Effect* eff = base->GetEffect(e);
+            if (!eff) continue;
+            if (target->HasEffectsInTimeRange(eff->GetStartTimeMS(),
+                                                eff->GetEndTimeMS())) continue;
+            const std::string& name = eff->GetEffectName();
+            if (name != "On" && name != "Color Wash") continue;
+            int mp = (eff->GetStartTimeMS() + eff->GetEndTimeMS()) / 2;
+            bool collapse = true;
+            for (int n = 1; n < strand->GetNodeLayerCount() && collapse; ++n) {
+                NodeLayer* node = strand->GetNodeLayer(n);
+                int nodeIndex = 0;
+                if (!node || !node->HitTestEffectByTime(mp, nodeIndex)
+                    || !effectMatches(eff, node->GetEffect(nodeIndex))) {
+                    collapse = false;
+                }
+            }
+            if (collapse) {
+                target->AddEffect(0, eff->GetEffectName(),
+                                   eff->GetSettingsAsString(),
+                                   eff->GetPaletteAsString(),
+                                   eff->GetStartTimeMS(),
+                                   eff->GetEndTimeMS(), false, false);
+                ++promoted;
+                for (int n = 0; n < strand->GetNodeLayerCount(); ++n) {
+                    NodeLayer* node = strand->GetNodeLayer(n);
+                    int nodeIndex = 0;
+                    if (node && node->HitTestEffectByTime(mp, nodeIndex)) {
+                        node->DeleteEffectByIndex(nodeIndex);
+                    }
+                }
+            }
+        }
+    }
+
+    // Step 2: strands → model (only meaningful when there's > 1 strand).
+    if (element->GetStrandCount() > 1) {
+        EffectLayer* base = element->GetStrand(0)->GetEffectLayer(0);
+        if (element->GetEffectLayer(0)->GetEffectCount() != 0) {
+            element->InsertEffectLayer(0);
+        }
+        EffectLayer* target = element->GetEffectLayer(0);
+        for (int e = base->GetEffectCount() - 1; e >= 0; --e) {
+            Effect* eff = base->GetEffect(e);
+            if (!eff) continue;
+            const std::string& name = eff->GetEffectName();
+            if (name != "On" && name != "Color Wash") continue;
+            int mp = (eff->GetStartTimeMS() + eff->GetEndTimeMS()) / 2;
+            bool collapse = true;
+            for (int n = 0; n < element->GetStrandCount() && collapse; ++n) {
+                StrandElement* strand = element->GetStrand(n);
+                if (!strand) { collapse = false; break; }
+                for (int l = 0; l < (int)strand->GetEffectLayerCount() && collapse; ++l) {
+                    EffectLayer* layer = strand->GetEffectLayer(l);
+                    if (layer == base) continue;
+                    int nodeIndex = 0;
+                    if (!layer || !layer->HitTestEffectByTime(mp, nodeIndex)
+                        || !effectMatches(eff, layer->GetEffect(nodeIndex))) {
+                        collapse = false;
+                    }
+                }
+            }
+            if (collapse) {
+                target->AddEffect(0, eff->GetEffectName(),
+                                   eff->GetSettingsAsString(),
+                                   eff->GetPaletteAsString(),
+                                   eff->GetStartTimeMS(),
+                                   eff->GetEndTimeMS(), false, false);
+                ++promoted;
+                for (int n = 0; n < element->GetStrandCount(); ++n) {
+                    StrandElement* strand = element->GetStrand(n);
+                    if (!strand) continue;
+                    for (int l = 0; l < (int)strand->GetEffectLayerCount(); ++l) {
+                        EffectLayer* layer = strand->GetEffectLayer(l);
+                        int nodeIndex = 0;
+                        if (layer && layer->HitTestEffectByTime(mp, nodeIndex)) {
+                            layer->DeleteEffectByIndex(nodeIndex);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (promoted > 0) {
+        se.PopulateRowInformation();
+        _context->RenderEffectForModel(element->GetModelName(), 0, 99999999, true);
+    }
+    return promoted;
+}
+
+- (int)convertEffectsToPerModelOnRow:(int)rowIndex acrossAllLayers:(BOOL)allLayers {
+    auto& se = _context->GetSequenceElements();
+    auto* row = se.GetRowInformation(rowIndex);
+    if (!row || !row->element) return 0;
+    Element* elem = row->element;
+
+    // Walk the relevant layer(s), counting effects whose buffer
+    // style ConvertEffectsToPerModel will rewrite. The actual
+    // conversion captures undo per modified effect, so the count
+    // is purely informational for the UI.
+    auto eligibleCount = [](EffectLayer* layer) {
+        if (!layer) return 0;
+        int n = 0;
+        for (int i = 0; i < layer->GetEffectCount(); ++i) {
+            Effect* e = layer->GetEffect(i);
+            if (!e) continue;
+            const auto& bs = e->GetSettings()["B_CHOICE_BufferStyle"];
+            if (bs.empty() || bs == "Per Preview" || bs == "Default" || bs == "Single Line") {
+                ++n;
+            }
+        }
+        return n;
+    };
+
+    se.get_undo_mgr().CreateUndoStep();
+    _context->AbortRender(5000);
+    int converted = 0;
+    if (allLayers) {
+        for (int i = 0; i < (int)elem->GetEffectLayerCount(); ++i) {
+            EffectLayer* layer = elem->GetEffectLayer(i);
+            converted += eligibleCount(layer);
+            if (layer) layer->ConvertEffectsToPerModel(se.get_undo_mgr());
+        }
+    } else {
+        if (row->layerIndex >= 0 && row->layerIndex < (int)elem->GetEffectLayerCount()) {
+            EffectLayer* layer = elem->GetEffectLayer(row->layerIndex);
+            converted = eligibleCount(layer);
+            if (layer) layer->ConvertEffectsToPerModel(se.get_undo_mgr());
+        }
+    }
+    if (converted > 0) {
+        // Force a re-render of the affected model so the new buffer
+        // style takes effect immediately.
+        _context->RenderEffectForModel(elem->GetModelName(), 0, 99999999, true);
+    }
+    return converted;
+}
+
 - (int)unusedLayerCountAtRow:(int)rowIndex {
     auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
     if (!row || !row->element) return 0;
@@ -1418,6 +1634,97 @@ static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
             curStart = curEnd;
         }
     }
+    se.PopulateRowInformation();
+    return YES;
+}
+
+- (BOOL)breakdownPhraseAtRow:(int)rowIndex atIndex:(int)phraseIndex {
+    auto& se = _context->GetSequenceElements();
+    auto* row = se.GetRowInformation(rowIndex);
+    if (!row || !row->element) return NO;
+    if (row->element->GetType() != ElementType::ELEMENT_TYPE_TIMING) return NO;
+    if (row->layerIndex != 0) return NO;
+    TimingElement* te = dynamic_cast<TimingElement*>(row->element);
+    if (!te) return NO;
+
+    EffectLayer* phraseLayer = te->GetEffectLayer(0);
+    if (!phraseLayer) return NO;
+    if (phraseIndex < 0 || phraseIndex >= phraseLayer->GetEffectCount()) return NO;
+    Effect* pe = phraseLayer->GetEffect(phraseIndex);
+    if (!pe) return NO;
+    std::string phrase = pe->GetEffectName();
+    if (phrase.empty()) return NO;
+
+    int phraseStart = pe->GetStartTimeMS();
+    int phraseEnd = pe->GetEndTimeMS();
+
+    // Reject when any locked word/phoneme already sits inside the
+    // target range — same safety the row-level breakdown enforces,
+    // narrowed to just this phrase's window.
+    auto overlapsRange = [&](Effect* eff) {
+        if (!eff) return false;
+        return eff->GetEndTimeMS() > phraseStart && eff->GetStartTimeMS() < phraseEnd;
+    };
+    for (int k = (int)te->GetEffectLayerCount() - 1; k > 0; --k) {
+        EffectLayer* ck = te->GetEffectLayer(k);
+        if (!ck) continue;
+        for (auto&& eff : ck->GetAllEffects()) {
+            if (eff && eff->IsLocked() && overlapsRange(eff)) return NO;
+        }
+    }
+
+    // Tokenize the phrase the same way the row-level breakdown does.
+    static const std::string delims = " \t:;,.-_!?{}[]()<>+=|";
+    std::vector<std::string> words;
+    {
+        size_t start = 0;
+        while (start < phrase.size()) {
+            size_t pos = phrase.find_first_of(delims, start);
+            if (pos != start) {
+                std::string w = phrase.substr(start, (pos == std::string::npos ? phrase.size() : pos) - start);
+                if (!w.empty()) words.push_back(std::move(w));
+            }
+            if (pos == std::string::npos) break;
+            start = pos + 1;
+        }
+    }
+    if (words.empty()) return NO;
+
+    // Ensure there's a words layer to write into. The row-level path
+    // wipes everything down to the phrase layer; the per-mark path
+    // is more surgical — preserve other phrases' words/phonemes.
+    te->SetFixedTiming(0);
+    EffectLayer* wordLayer = te->GetEffectLayer(1);
+    if (!wordLayer) wordLayer = te->AddEffectLayer();
+    if (!wordLayer) return NO;
+
+    // Wipe existing word effects that fall inside this phrase's window
+    // (and phonemes, if a layer 2 exists). DeleteEffect handles the
+    // layer's internal index updates so a copied id list is enough.
+    auto wipeOverlapping = [&](EffectLayer* layer) {
+        if (!layer) return;
+        auto effs = layer->GetAllEffectsByTime(phraseStart, phraseEnd);
+        for (auto* eff : effs) layer->DeleteEffect(eff->GetID());
+    };
+    wipeOverlapping(wordLayer);
+    if (te->GetEffectLayerCount() > 2) wipeOverlapping(te->GetEffectLayer(2));
+
+    double freq = se.GetFrequency();
+    double intervalMS = double(phraseEnd - phraseStart) / double(words.size());
+    int curStart = phraseStart;
+    for (int w = 0; w < (int)words.size(); w++) {
+        int curEnd = RoundToMultipleOfPeriod(
+            phraseStart + int(intervalMS * (w + 1)), freq);
+        if (w == (int)words.size() - 1 || curEnd > phraseEnd) {
+            curEnd = phraseEnd;
+        }
+        if (curEnd > curStart) {
+            wordLayer->AddEffect(0, words[w], "", "",
+                                  curStart, curEnd, 0, false);
+        }
+        curStart = curEnd;
+    }
+
     se.PopulateRowInformation();
     return YES;
 }
@@ -3150,6 +3457,24 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
     return _context->GetCurrentMediaManager();
 }
 
+- (NSInteger)altTrackCount {
+    return _context ? _context->GetAltTrackCount() : 0;
+}
+
+- (NSString*)altTrackDisplayNameAtIndex:(NSInteger)index {
+    if (!_context) return @"";
+    return [NSString stringWithUTF8String:
+        _context->GetAltTrackDisplayName((int)index).c_str()];
+}
+
+- (NSInteger)activeWaveformTrack {
+    return _context ? _context->GetWaveformTrackIndex() : -1;
+}
+
+- (void)setActiveWaveformTrack:(NSInteger)index {
+    if (_context) _context->SetWaveformTrackIndex((int)index);
+}
+
 - (BOOL)hasAudio {
     auto* am = [self audioManager];
     return am != nullptr && am->IsOk();
@@ -3173,6 +3498,17 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
 - (void)audioSeekToMS:(long)positionMS {
     auto* am = [self audioManager];
     if (am) am->Seek(positionMS);
+}
+
+- (void)audioPlaySegmentFromMS:(long)positionMS lengthMS:(long)lengthMS {
+    auto* am = [self audioManager];
+    if (!am || !am->IsOk()) return;
+    // Skip when the user is already playing back — the scrub burst
+    // would overlap with the live playback engine. The drag-to-scrub
+    // flow already pauses on its own through the view model.
+    if (am->GetPlayingState() == PLAYING) return;
+    if (lengthMS <= 0) return;
+    am->Play(positionMS, lengthMS);
 }
 
 - (long)audioTellMS {
@@ -3226,7 +3562,10 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
                    filterType:(int)filterType
                       lowNote:(int)lowNote
                      highNote:(int)highNote {
-    auto* am = [self audioManager];
+    // B43: route through GetWaveformMedia so an alt-track selection
+    // (set via setActiveWaveformTrack:) shows up in the waveform.
+    // Playback still uses the main track via [self audioManager].
+    auto* am = _context ? _context->GetWaveformMedia() : nullptr;
     if (!am || !am->IsOk() || numSamples <= 0) return nil;
 
     long rate = am->GetRate();
@@ -5084,9 +5423,14 @@ static int parseDMXColorRed(const std::string& hex) {
     }
 
     look.model->AddState(attributes);
-    // In-memory only for v1. When xlights_rgbeffects.xml gets
-    // persisted elsewhere the state shows up on reload; otherwise
-    // it's session-scoped. The DMX panel UI calls this out.
+    // Persist immediately so the saved state survives show-folder
+    // close. SaveModelStates rewrites just the dirty model's
+    // <stateInfo> children in xlights_rgbeffects.xml.
+    _context->MarkModelStateDirty(look.model->GetName());
+    if (!_context->SaveModelStates()) {
+        spdlog::warn("XLSequenceDocument: dmxSaveState added '{}' to '{}' in memory, but SaveModelStates failed — change is session-scoped",
+                     name, look.model->GetName());
+    }
     return YES;
 }
 
@@ -5227,6 +5571,24 @@ static int parseDMXColorRed(const std::string& hex) {
         look.effect->IncrementChangeCount();
     }
     return touched;
+}
+
+- (void)bracketColorForState:(XLEffectBracketState)state
+                         outR:(CGFloat*)outR
+                         outG:(CGFloat*)outG
+                         outB:(CGFloat*)outB {
+    iPadRenderContext::EffectBracketState s = iPadRenderContext::EffectBracketState::Default;
+    switch (state) {
+        case XLEffectBracketStateDefault:  s = iPadRenderContext::EffectBracketState::Default; break;
+        case XLEffectBracketStateSelected: s = iPadRenderContext::EffectBracketState::Selected; break;
+        case XLEffectBracketStateLocked:   s = iPadRenderContext::EffectBracketState::Locked; break;
+        case XLEffectBracketStateDisabled: s = iPadRenderContext::EffectBracketState::Disabled; break;
+    }
+    iPadRenderContext::PaletteColor pc{192, 192, 192};
+    if (_context) pc = _context->GetEffectBracketColor(s);
+    if (outR) *outR = (CGFloat)pc.r / 255.0;
+    if (outG) *outG = (CGFloat)pc.g / 255.0;
+    if (outB) *outB = (CGFloat)pc.b / 255.0;
 }
 
 @end
