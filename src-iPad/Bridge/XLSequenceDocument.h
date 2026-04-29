@@ -978,6 +978,27 @@
 - (NSInteger)activeWaveformTrack;
 - (void)setActiveWaveformTrack:(NSInteger)index;
 
+// Phase E follow-up — alt-track CRUD for the Sequence Settings
+// Audio Tracks tab. `addAltTrack:` / `setAltTrackPath:` route the
+// path through `SequenceFile::AddAltTrack` /
+// `SequenceFile::SetAltTrackPath` which use the show folder as the
+// FixFile root. `altTrackPath:` returns the resolved absolute path
+// (empty when unresolved); `altTrackShortname:` returns the user
+// label (may be empty — display fallback is "Track N"). All
+// mutators mark the sequence dirty.
+- (NSString*)altTrackPathAtIndex:(NSInteger)index
+    NS_SWIFT_NAME(altTrackPath(at:));
+- (NSString*)altTrackShortnameAtIndex:(NSInteger)index
+    NS_SWIFT_NAME(altTrackShortname(at:));
+- (BOOL)addAltTrackAtPath:(NSString*)path shortname:(NSString*)shortname
+    NS_SWIFT_NAME(addAltTrack(atPath:shortname:));
+- (BOOL)removeAltTrackAtIndex:(NSInteger)index
+    NS_SWIFT_NAME(removeAltTrack(at:));
+- (BOOL)setAltTrackPathAtIndex:(NSInteger)index path:(NSString*)path
+    NS_SWIFT_NAME(setAltTrackPath(at:path:));
+- (BOOL)setAltTrackShortnameAtIndex:(NSInteger)index shortname:(NSString*)shortname
+    NS_SWIFT_NAME(setAltTrackShortname(at:shortname:));
+
 // A2 onset detection. Runs the spectral-flux detector over the full
 // audio track, returning onset positions in milliseconds (ascending).
 // `sensitivity` is the adaptive-threshold multiplier: higher = fewer
@@ -1307,6 +1328,24 @@
 /// actually reads changes. Returns the count of fixtures updated.
 - (int)syncMovingHeadPositionForRow:(int)rowIndex
                               atIndex:(int)effectIndex;
+
+/// G3+ — read / write a packed MH command (e.g. "Color",
+/// "Dimmer", "Path") on the effect's active fixtures. The reader
+/// returns the value from the first active fixture (assumed
+/// uniform across fixtures); the writer replaces the command on
+/// every active fixture, or removes it when `value` is empty.
+/// Triggers a model re-render on success so the preview updates
+/// immediately. No-op when no fixtures are active or the row
+/// isn't a Moving Head effect.
+- (NSString*)movingHeadCommand:(NSString*)cmdName
+                          forRow:(int)rowIndex
+                         atIndex:(int)effectIndex
+    NS_SWIFT_NAME(movingHeadCommand(_:forRow:atIndex:));
+- (BOOL)setMovingHeadCommand:(NSString*)cmdName
+                         value:(NSString*)value
+                        forRow:(int)rowIndex
+                       atIndex:(int)effectIndex
+    NS_SWIFT_NAME(setMovingHeadCommand(_:value:forRow:atIndex:));
 
 // MARK: - DMX state + remap plumbing (G8 — C7)
 //

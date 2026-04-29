@@ -22,7 +22,7 @@ struct SequenceSettingsSheet: View {
     @Environment(SequencerViewModel.self) var viewModel
 
     private enum Tab: String, CaseIterable, Identifiable {
-        case info, metadata, media, timings, render
+        case info, metadata, media, timings, audio, render
         var id: String { rawValue }
         var label: String {
             switch self {
@@ -30,6 +30,7 @@ struct SequenceSettingsSheet: View {
             case .metadata: return "Metadata"
             case .media:    return "Media"
             case .timings:  return "Timings"
+            case .audio:    return "Audio"
             case .render:   return "Render"
             }
         }
@@ -39,6 +40,7 @@ struct SequenceSettingsSheet: View {
             case .metadata: return "character.book.closed"
             case .media:    return "photo.stack"
             case .timings:  return "metronome"
+            case .audio:    return "waveform"
             case .render:   return "cpu"
             }
         }
@@ -73,6 +75,8 @@ struct SequenceSettingsSheet: View {
                         MediaManagerContent(showsDoneButton: false)
                     case .timings:
                         TimingsTab()
+                    case .audio:
+                        AudioTracksTab()
                     case .render:
                         ScrollView { RenderTab().padding() }
                     }
@@ -530,6 +534,203 @@ private struct XTimingFile: FileDocument {
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
         FileWrapper(regularFileWithContents: payload)
+    }
+}
+
+// MARK: - Audio tracks tab (alt-track CRUD)
+
+/// Phase E follow-up — alternate audio tracks (vocal stems etc.).
+/// Tracks already round-trip through the .xsq XML and B43 added
+/// the waveform-side switcher; this tab adds authoring (add /
+/// remove / rename / replace path).
+private struct AudioTracksTab: View {
+    @Environment(SequencerViewModel.self) var viewModel
+
+    @State private var refreshTick: Int = 0
+    @State private var pickingAdd: URL?
+    @State private var replaceTarget: Int?
+    @State private var pickingReplace: URL?
+    @State private var renameTarget: Int?
+    @State private var renameText: String = ""
+    @State private var deleteTarget: Int?
+
+    private var trackCount: Int {
+        // refreshTick is read so SwiftUI re-evaluates after a mutation.
+        _ = refreshTick
+        return Int(viewModel.document.altTrackCount())
+    }
+
+    var body: some View {
+        list
+            .listStyle(.inset)
+            .mediaRelocationPrompt(picked: $pickingAdd,
+                                     subdirectory: "Audio") { stored in
+                _ = viewModel.document.addAltTrack(atPath: stored, shortname: "")
+                bumpRefresh()
+            }
+            .mediaRelocationPrompt(picked: $pickingReplace,
+                                     subdirectory: "Audio") { stored in
+                if let idx = replaceTarget {
+                    _ = viewModel.document.setAltTrackPath(at: idx, path: stored)
+                    bumpRefresh()
+                }
+                replaceTarget = nil
+            }
+            .modifier(AltTrackRenameAlertModifier(
+                target: $renameTarget,
+                text: $renameText,
+                viewModel: viewModel,
+                onCommit: bumpRefresh))
+            .modifier(AltTrackDeleteAlertModifier(
+                target: $deleteTarget,
+                viewModel: viewModel,
+                onCommit: bumpRefresh))
+    }
+
+    @ViewBuilder
+    private var list: some View {
+        List {
+            Section {
+                if trackCount == 0 {
+                    Text("No alternate audio tracks. Use Add… to import a vocal stem, instrumental, click track, etc.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(0..<trackCount, id: \.self) { idx in
+                        trackRow(idx)
+                    }
+                }
+            } header: {
+                Text("Tracks")
+            } footer: {
+                Text("Alternate tracks appear in the waveform's long-press menu so the user can switch which track is displayed. Playback stays on the main audio track.")
+            }
+            Section {
+                Button {
+                    // Picker will fire — actual file pick is handled
+                    // in the .fileImporter modifier below.
+                    pickingAddTrigger = true
+                } label: {
+                    Label("Add Track…", systemImage: "plus.circle")
+                }
+            }
+        }
+        .fileImporter(isPresented: $pickingAddTrigger,
+                      allowedContentTypes: [.audio],
+                      allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                pickingAdd = url
+            }
+        }
+        .fileImporter(isPresented: $pickingReplaceTrigger,
+                      allowedContentTypes: [.audio],
+                      allowsMultipleSelection: false) { result in
+            if case .success(let urls) = result, let url = urls.first {
+                pickingReplace = url
+            } else {
+                replaceTarget = nil
+            }
+        }
+    }
+
+    @State private var pickingAddTrigger = false
+    @State private var pickingReplaceTrigger = false
+
+    @ViewBuilder
+    private func trackRow(_ idx: Int) -> some View {
+        let displayName = viewModel.document.altTrackDisplayName(at: idx) ?? ""
+        let path = viewModel.document.altTrackPath(at: idx) ?? ""
+        HStack {
+            VStack(alignment: .leading) {
+                Text(displayName)
+                Text(path.isEmpty
+                     ? "(no file resolved — pick a replacement)"
+                     : URL(fileURLWithPath: path).lastPathComponent)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+            Menu {
+                Button {
+                    renameText = viewModel.document.altTrackShortname(at: idx) ?? ""
+                    renameTarget = idx
+                } label: { Label("Rename…", systemImage: "pencil") }
+                Button {
+                    replaceTarget = idx
+                    pickingReplaceTrigger = true
+                } label: { Label("Replace File…", systemImage: "arrow.triangle.2.circlepath") }
+                Button(role: .destructive) {
+                    deleteTarget = idx
+                } label: { Label("Remove", systemImage: "trash") }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+            }
+        }
+    }
+
+    private func bumpRefresh() {
+        refreshTick &+= 1
+        // The waveform-switcher menu mirrors `altAudioTrackNames` on
+        // the view model; refresh after every CRUD op so the
+        // submenu picks up adds / renames / removes immediately.
+        viewModel.reloadAltTracks()
+    }
+}
+
+private struct AltTrackRenameAlertModifier: ViewModifier {
+    @Binding var target: Int?
+    @Binding var text: String
+    let viewModel: SequencerViewModel
+    let onCommit: () -> Void
+
+    func body(content: Content) -> some View {
+        content.alert("Rename Audio Track",
+                      isPresented: Binding(
+                        get: { target != nil },
+                        set: { if !$0 { target = nil } }
+                      ),
+                      presenting: target) { _ in
+            TextField("Short name", text: $text)
+                .textInputAutocapitalization(.words)
+            Button("OK") {
+                if let idx = target {
+                    _ = viewModel.document.setAltTrackShortname(at: idx,
+                                                                 shortname: text)
+                    onCommit()
+                }
+                target = nil
+            }
+            Button("Cancel", role: .cancel) { target = nil }
+        } message: { _ in
+            Text("A short, descriptive label (e.g. \"Drums\", \"Vocals\"). Leave blank to fall back to \"Track N\".")
+        }
+    }
+}
+
+private struct AltTrackDeleteAlertModifier: ViewModifier {
+    @Binding var target: Int?
+    let viewModel: SequencerViewModel
+    let onCommit: () -> Void
+
+    func body(content: Content) -> some View {
+        content.alert("Remove Audio Track",
+                      isPresented: Binding(
+                        get: { target != nil },
+                        set: { if !$0 { target = nil } }
+                      ),
+                      presenting: target) { _ in
+            Button("Remove", role: .destructive) {
+                if let idx = target {
+                    _ = viewModel.document.removeAltTrack(at: idx)
+                    onCommit()
+                }
+                target = nil
+            }
+            Button("Cancel", role: .cancel) { target = nil }
+        } message: { idx in
+            Text("Remove \"\(viewModel.document.altTrackDisplayName(at: idx) ?? "")\"? The audio file on disk is not deleted.")
+        }
     }
 }
 

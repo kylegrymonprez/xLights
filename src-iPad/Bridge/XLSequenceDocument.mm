@@ -3475,6 +3475,71 @@ static const char* kFadeOutKey = "T_TEXTCTRL_Fadeout";
     if (_context) _context->SetWaveformTrackIndex((int)index);
 }
 
+- (NSString*)altTrackPathAtIndex:(NSInteger)index {
+    if (!_context) return @"";
+    SequenceFile* sf = _context->GetSequenceFile();
+    if (!sf) return @"";
+    if (index < 0 || index >= sf->GetAltTrackCount()) return @"";
+    return [NSString stringWithUTF8String:sf->GetAltTrack((int)index).path.c_str()];
+}
+
+- (NSString*)altTrackShortnameAtIndex:(NSInteger)index {
+    if (!_context) return @"";
+    SequenceFile* sf = _context->GetSequenceFile();
+    if (!sf) return @"";
+    if (index < 0 || index >= sf->GetAltTrackCount()) return @"";
+    return [NSString stringWithUTF8String:sf->GetAltTrack((int)index).shortname.c_str()];
+}
+
+- (BOOL)addAltTrackAtPath:(NSString*)path shortname:(NSString*)shortname {
+    if (!_context || !path || path.length == 0) return NO;
+    SequenceFile* sf = _context->GetSequenceFile();
+    if (!sf) return NO;
+    sf->AddAltTrack(_context->GetShowDirectory(),
+                     std::string([path UTF8String]),
+                     shortname ? std::string([shortname UTF8String]) : std::string());
+    _context->GetSequenceElements().IncrementChangeCount(nullptr);
+    return YES;
+}
+
+- (BOOL)removeAltTrackAtIndex:(NSInteger)index {
+    if (!_context) return NO;
+    SequenceFile* sf = _context->GetSequenceFile();
+    if (!sf) return NO;
+    if (index < 0 || index >= sf->GetAltTrackCount()) return NO;
+    // If the user removes the alt track currently driving the waveform,
+    // fall back to main so the next waveformData call doesn't deref a
+    // freed AudioManager.
+    int active = _context->GetWaveformTrackIndex();
+    if (active == (int)index) _context->SetWaveformTrackIndex(-1);
+    else if (active > (int)index) _context->SetWaveformTrackIndex(active - 1);
+    sf->RemoveAltTrack((int)index);
+    _context->GetSequenceElements().IncrementChangeCount(nullptr);
+    return YES;
+}
+
+- (BOOL)setAltTrackPathAtIndex:(NSInteger)index path:(NSString*)path {
+    if (!_context || !path) return NO;
+    SequenceFile* sf = _context->GetSequenceFile();
+    if (!sf) return NO;
+    if (index < 0 || index >= sf->GetAltTrackCount()) return NO;
+    sf->SetAltTrackPath(_context->GetShowDirectory(), (int)index,
+                         std::string([path UTF8String]));
+    _context->GetSequenceElements().IncrementChangeCount(nullptr);
+    return YES;
+}
+
+- (BOOL)setAltTrackShortnameAtIndex:(NSInteger)index shortname:(NSString*)shortname {
+    if (!_context) return NO;
+    SequenceFile* sf = _context->GetSequenceFile();
+    if (!sf) return NO;
+    if (index < 0 || index >= sf->GetAltTrackCount()) return NO;
+    sf->SetAltTrackShortname((int)index,
+                              shortname ? std::string([shortname UTF8String]) : std::string());
+    _context->GetSequenceElements().IncrementChangeCount(nullptr);
+    return YES;
+}
+
 - (BOOL)hasAudio {
     auto* am = [self audioManager];
     return am != nullptr && am->IsOk();
@@ -5230,6 +5295,65 @@ static void rewriteMovingHeadFixture(Effect& eff, int fixture) {
     }
 }
 
+/// Phase C G3+ helper: read the first active fixture's value for
+/// the named MH command (e.g. "Color", "Dimmer", "Path"). Returns
+/// empty string when no active fixture has the command. Caller
+/// promotes this as "the effect's current value" — fixtures that
+/// disagree get overwritten on the next set.
+static std::string readMHCommandFromActiveFixtures(Effect& eff,
+                                                     const std::string& cmdName) {
+    auto& settings = eff.GetSettings();
+    for (int i = 1; i <= 8; ++i) {
+        std::string key = std::string("E_TEXTCTRL_MH") + std::to_string(i) + "_Settings";
+        if (!settings.Contains(key)) continue;
+        std::string s = settings.Get(key, "");
+        if (s.empty()) continue;
+        for (auto& [c, v] : parseMovingHeadSettings(s)) {
+            if (c == cmdName) return v;
+        }
+    }
+    return "";
+}
+
+/// Replace (or insert) `cmdName: value` in every active fixture's
+/// command string. If `value` is empty the command is removed
+/// (used for Path-clear). Returns true if anything changed.
+static bool writeMHCommandToActiveFixtures(Effect& eff,
+                                            const std::string& cmdName,
+                                            const std::string& value) {
+    auto& settings = eff.GetSettings();
+    bool any = false;
+    for (int i = 1; i <= 8; ++i) {
+        std::string key = std::string("E_TEXTCTRL_MH") + std::to_string(i) + "_Settings";
+        if (!settings.Contains(key)) continue;
+        std::string existing = settings.Get(key, "");
+        if (existing.empty()) continue;
+        MHCommandList parsed = parseMovingHeadSettings(existing);
+        bool found = false;
+        MHCommandList rebuilt;
+        rebuilt.reserve(parsed.size() + 1);
+        for (auto& [c, v] : parsed) {
+            if (c == cmdName) {
+                if (!value.empty()) {
+                    rebuilt.emplace_back(cmdName, value);
+                }
+                found = true;
+            } else {
+                rebuilt.emplace_back(c, v);
+            }
+        }
+        if (!found && !value.empty()) {
+            rebuilt.emplace_back(cmdName, value);
+        }
+        std::string serialised = serialiseMovingHeadSettings(rebuilt);
+        if (serialised != existing) {
+            settings[key] = SettingValue(serialised);
+            any = true;
+        }
+    }
+    return any;
+}
+
 } // namespace
 
 - (int)movingHeadActiveFixturesForRow:(int)rowIndex
@@ -5297,6 +5421,43 @@ static void rewriteMovingHeadFixture(Effect& eff, int fixture) {
 
     look.effect->IncrementChangeCount();
     return YES;
+}
+
+- (NSString*)movingHeadCommand:(NSString*)cmdName
+                          forRow:(int)rowIndex
+                         atIndex:(int)effectIndex {
+    if (!_context || !cmdName) return @"";
+    auto look = lookupEffect(*_context, rowIndex, effectIndex);
+    if (!look.ok()) return @"";
+    if (look.effect->GetEffectName() != kMovingHeadEffectName) return @"";
+    std::string v = readMHCommandFromActiveFixtures(*look.effect,
+                                                     std::string([cmdName UTF8String]));
+    return [NSString stringWithUTF8String:v.c_str()];
+}
+
+- (BOOL)setMovingHeadCommand:(NSString*)cmdName
+                         value:(NSString*)value
+                        forRow:(int)rowIndex
+                       atIndex:(int)effectIndex {
+    if (!_context || !cmdName) return NO;
+    auto look = lookupEffect(*_context, rowIndex, effectIndex);
+    if (!look.ok()) return NO;
+    if (look.effect->GetEffectName() != kMovingHeadEffectName) return NO;
+    std::string cn([cmdName UTF8String]);
+    std::string v = value ? std::string([value UTF8String]) : std::string();
+    bool changed = writeMHCommandToActiveFixtures(*look.effect, cn, v);
+    if (changed) {
+        look.effect->IncrementChangeCount();
+        // Force a re-render of the active model so the new colour /
+        // dimmer takes effect in the preview immediately.
+        auto* row = _context->GetSequenceElements().GetRowInformation(rowIndex);
+        if (row && row->element) {
+            _context->RenderEffectForModel(row->element->GetModelName(),
+                                            look.effect->GetStartTimeMS(),
+                                            look.effect->GetEndTimeMS(), true);
+        }
+    }
+    return changed ? YES : NO;
 }
 
 // MARK: - DMX state + remap (G8 — C7)
