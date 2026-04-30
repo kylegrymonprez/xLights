@@ -224,11 +224,14 @@ else()
     find_path(CURL_INCLUDE_DIR curl/curl.h
         HINTS ${XL_INC}
         PATHS /usr/include /usr/local/include)
-    # On Windows the vendored file is a MinGW .dll.a — not usable by MSVC.
-    # Look for a proper .lib; if absent, skip linking (project may use WinHTTP).
     find_library(CURL_LIB NAMES libcurl_msvc curl libcurl curl_imp libcurl_a
         HINTS ${XL_LIB}/windows64
         PATHS /usr/lib /usr/local/lib)
+    # The vcxproj links via #pragma comment(lib,"libcurl.dll.a") which MSVC accepts.
+    # Fall back to the same vendored file when no .lib variant is found.
+    if(NOT CURL_LIB AND MSVC AND EXISTS "${XL_LIB}/windows64/libcurl.dll.a")
+        set(CURL_LIB "${XL_LIB}/windows64/libcurl.dll.a")
+    endif()
     if(CURL_LIB)
         set(CURL_LINK_TARGET ${CURL_LIB})
     else()
