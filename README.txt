@@ -11,6 +11,12 @@ Issue Tracker is found here: www.github.com/xLightsSequencer/xLights/issues
 XLIGHTS/NUTCRACKER RELEASE NOTES
 ---------------------------------
 2026.08  May ??, 2026
+    -enh (dkulp)                macOS: MetricKit collector subscribes at launch (macOS 12+) and writes hang / CPU /
+                                disk-write / crash diagnostics + daily metrics as JSON into a Diagnostics/ folder
+                                next to xLights_spdlog.log. Whatever has accumulated since the last submission is
+                                folded into the next debug-report zip under a MetricKit/ subfolder, giving us
+                                visibility into non-crashing failure modes (main-thread hangs, runaway CPU) that the
+                                existing signal-handler-based crash reports don't capture.
     -enh (dkulp)                Liquid effect: velocity slider rescaled to allow full use of range instead of just
                                 values between 0 and 6 providing visual changes
     -enh (dkulp)                Liquid effect: added an Enabled checkbox for particle source 1 (defaults to on)

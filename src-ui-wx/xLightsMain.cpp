@@ -4475,6 +4475,29 @@ void xLightsFrame::AddDebugFilesToReport(wxDebugReport& report)
     // if the rolled log exists, add it to just in case it has the information we need
     AddLogFile(CurrentDir, "xLights_spdlog.1.log", report);
 
+#ifdef __APPLE__
+    // MetricKit payloads (crash / hang / CPU / disk diagnostics + daily
+    // metrics) accumulate in a Diagnostics/ folder next to the spdlog
+    // file. Apple delivers payloads ~24h after the underlying event,
+    // so the directory contains everything since the last crash zip
+    // was processed; whichever zip ships next sweeps them up.
+    {
+        std::filesystem::path diagnosticsDir = GetLogFilePath().parent_path() / "Diagnostics";
+        std::error_code ec;
+        if (std::filesystem::exists(diagnosticsDir, ec) &&
+            std::filesystem::is_directory(diagnosticsDir, ec)) {
+            for (auto const& entry : std::filesystem::directory_iterator(diagnosticsDir, ec)) {
+                if (!entry.is_regular_file(ec)) continue;
+                std::string ext = entry.path().extension().string();
+                if (ext != ".json") continue;
+                std::string fullPath = entry.path().string();
+                std::string archiveName = std::string("MetricKit/") + entry.path().filename().string();
+                report.AddFile(wxString::FromUTF8(fullPath), wxString::FromUTF8(archiveName));
+            }
+        }
+    }
+#endif
+
     if (GetSeqXmlFileName() != "") {
         wxFileName fn2(GetSeqXmlFileName());
         if (FileExists(fn2) && !fn2.IsDir()) {

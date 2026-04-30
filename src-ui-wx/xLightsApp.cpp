@@ -44,6 +44,9 @@
 #include "utils/CurlManager.h"
 #include "render/SequencePackage.h"
 #include "utils/AppCallbacks.h"
+#ifdef __APPLE__
+#include "osxUtils/XLMetricKit.h"
+#endif
 #include <SpecialOptions.h>
 
 #ifndef __WXMSW__
@@ -520,6 +523,13 @@ bool xLightsApp::OnInit()
     AppCallbacks::SetSetupThreadCrashHandler([] {
         xlCrashHandler::SetupCrashHandlerForNonWxThread();
     });
+
+#ifdef __APPLE__
+    // MetricKit (macOS 12+): payloads land in {logfile parent}/Diagnostics/
+    // and AddDebugFilesToReport sweeps them into the next crash zip.
+    StartMetricKitCollection(
+        (GetLogFilePath().parent_path() / "Diagnostics").string());
+#endif
 
     spdlog::info("******* OnInit: XLights started.");
 #ifdef __WXMSW__

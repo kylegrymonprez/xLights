@@ -334,6 +334,21 @@ class SequencerViewModel {
     // Phase I-2 — Tools → Import Effects sheet. Reset to false after
     // the user dismisses the sheet (Apply or Cancel).
     var showingImportEffects = false
+
+    // Build the Package Logs zip on a background queue. Returned URL
+    // points into NSTemporaryDirectory and the caller (share sheet)
+    // owns its lifecycle — iOS cleans up tmp anyway, but explicit
+    // deletion after the share completes is preferable.
+    func packageLogs() async -> URL? {
+        let doc = document
+        return await Task.detached(priority: .utility) { () -> URL? in
+            do {
+                return try XLLogPackager.packageLogs(for: doc)
+            } catch {
+                return nil
+            }
+        }.value
+    }
     // Save As is a multi-step flow (persist, open exporter, handle
     // errors). The menu command bumps this counter; the SequencerView
     // `.onChange` reacts exactly once per command invocation even if

@@ -19,6 +19,7 @@
 #include <spdlog/sinks/rotating_file_sink.h>
 #include "graphics/GLContextManager.h"
 #include "osxUtils/MetalDeviceManager.h"
+#include "osxUtils/XLMetricKit.h"
 #include "render/SequenceMedia.h"
 #include "utils/FileUtils.h"
 #include "utils/xlImage.h"
@@ -148,10 +149,34 @@ static AnimatedImageData DecodeAnimatedImageIO(const uint8_t* data,
     if (sInitialized) return;
     sInitialized = true;
 
-    // Set up log file in the app's Documents directory
+    // Logs live in <sandbox>/Library/Logs/ — same relative path the
+    // sandboxed desktop app uses (~/Library/Containers/.../Library/Logs).
+    // Library/Logs is excluded from iCloud backup and not visible to the
+    // user via the Files app, both of which Documents/ would have wrong.
+    NSFileManager* fm = [NSFileManager defaultManager];
+    NSString* libraryPath = NSSearchPathForDirectoriesInDomains(
+        NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
+    NSString* logsDir = [libraryPath stringByAppendingPathComponent:@"Logs"];
+    [fm createDirectoryAtPath:logsDir
+        withIntermediateDirectories:YES
+                         attributes:nil
+                              error:nil];
+
+    // One-time migration: pre-2026.05 builds put xLights.log{,.1,.2}
+    // in Documents/. Move any survivors into Library/Logs/ so the new
+    // Package Logs flow picks them up.
     NSString* docsPath = NSSearchPathForDirectoriesInDomains(
         NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
-    std::string logPath = std::string([docsPath UTF8String]) + "/xLights.log";
+    for (NSString* name in @[@"xLights.log", @"xLights.1.log", @"xLights.2.log"]) {
+        NSString* legacy = [docsPath stringByAppendingPathComponent:name];
+        if ([fm fileExistsAtPath:legacy]) {
+            NSString* dest = [logsDir stringByAppendingPathComponent:name];
+            [fm removeItemAtPath:dest error:nil];
+            [fm moveItemAtPath:legacy toPath:dest error:nil];
+        }
+    }
+
+    std::string logPath = std::string([logsDir UTF8String]) + "/xLights.log";
 
     try {
         auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(logPath, 1024 * 1024 * 5, 3);
@@ -185,6 +210,11 @@ static AnimatedImageData DecodeAnimatedImageIO(const uint8_t* data,
     } catch (const spdlog::spdlog_ex& ex) {
         NSLog(@"spdlog init failed: %s", ex.what());
     }
+
+    // MetricKit collector — JSON payloads land alongside the log files,
+    // and Tools > Package Logs sweeps them into the user-shared zip.
+    std::string diagnosticsDir = std::string([logsDir UTF8String]) + "/Diagnostics";
+    StartMetricKitCollection(diagnosticsDir);
 
     // Register CoreGraphics-based TextDrawingContext for text/shape effects
     RegisterCoreGraphicsTextDrawingContext();

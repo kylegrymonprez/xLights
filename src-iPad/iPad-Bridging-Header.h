@@ -5,3 +5,4 @@
 #import "Bridge/XLValueCurve.h"
 #import "Bridge/XLColorCurve.h"
 #import "Bridge/XLImportSession.h"
+#import "Bridge/XLLogPackager.h"

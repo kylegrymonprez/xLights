@@ -124,14 +124,23 @@ quality" section unless noted otherwise.
 
 **P0 / P1 — TestFlight loop quality** (gap-analysis flagged):
 
-- **Log export** (P0). Zip rotate-files + show folder + open `.xsq`
-  → `UIActivityViewController`. Without it, every "weird thing
-  happened" report is unactionable.
+- ✓ **Log export** — Tools → Package Logs zips `xLights.log` +
+  rotated siblings, MetricKit JSON, show-folder XML, the open
+  sequence, threads + device-info sidecars, and hands the result
+  to `UIActivityViewController`. Logs moved from `Documents/` to
+  `Library/Logs/` so they no longer eat iCloud quota; one-time
+  migration in `XLiPadInit` brings legacy logs across.
+- ✓ **Crash telemetry** — `XLMetricKit` (shared with desktop, in
+  `macOS/src-apple-core/osxUtils/`) subscribes at launch and writes
+  metric / diagnostic payloads to `Library/Logs/Diagnostics/`. iPad
+  ships them via Package Logs; desktop folds them into the next
+  `wxDebugReportCompress` zip under `MetricKit/`. Hang / CPU /
+  disk-write diagnostics are the headline win — they don't trigger
+  the wx signal-handler-based crash path on Mac and have no
+  equivalent on iPad today.
 - **About + Help menu** (P1, S each). Version / build / EULA / dep
   credits, plus URLs (forum / docs / issue tracker) opened in
   `SFSafariViewController`.
-- **Crash telemetry** (P1, M). MetricKit beats Sentry on iOS
-  (no SDK churn, no privacy-manifest changes).
 - **Check Sequence runner** (P1, M). Validation report (duplicate
   universes, broken refs, missing media). Engine logic exists; just
   needs an iPad sheet.

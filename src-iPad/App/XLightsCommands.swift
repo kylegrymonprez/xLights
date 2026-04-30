@@ -249,6 +249,22 @@ struct XLSequencerCommands: Commands {
                 viewModel.showingImportEffects = true
             }
             .disabled(!viewModel.isSequenceLoaded)
+
+            Divider()
+
+            // Package Logs — bundles xLights logs, MetricKit
+            // diagnostics, the active show folder XML, the open
+            // sequence, and a device-info sidecar into a single
+            // zip and hands it to the system share sheet. Always
+            // enabled; useful even with no sequence loaded
+            // (TestFlight crash debugging).
+            Button("Package Logs…") {
+                Task { @MainActor in
+                    if let url = await viewModel.packageLogs() {
+                        XLPresentShareSheet(items: [url])
+                    }
+                }
+            }
         }
 
         // Playback menu.
