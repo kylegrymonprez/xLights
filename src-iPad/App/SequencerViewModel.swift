@@ -334,6 +334,9 @@ class SequencerViewModel {
     // Phase I-2 — Tools → Import Effects sheet. Reset to false after
     // the user dismisses the sheet (Apply or Cancel).
     var showingImportEffects = false
+    // Help → About xLights. Sheet is presented at ContentView level
+    // so it works regardless of show-folder / sequence load state.
+    var showingAbout = false
 
     // Build the Package Logs zip on a background queue. Returned URL
     // points into NSTemporaryDirectory and the caller (share sheet)

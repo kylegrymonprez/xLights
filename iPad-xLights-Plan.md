@@ -150,9 +150,13 @@ quality" section unless noted otherwise.
   Settings → xLights → "Send Crash Reports" (default on).
   `PrivacyInfo.xcprivacy` updated with `CrashData /
   PerformanceData / OtherDiagnosticData` entries.
-- **About + Help menu** (P1, S each). Version / build / EULA / dep
-  credits, plus URLs (forum / docs / issue tracker) opened in
-  `SFSafariViewController`.
+- ✓ **About + Help menu** — `Help` group in the menu bar with
+  About xLights… (sheet showing icon, version, build, GPL legal
+  text from the shared `XLIGHTS_LICENSE`, Privacy Policy + EULA
+  links) plus seven external link entries (Manual, Tutorial
+  Videos, Release Notes, Forum, Facebook, Issue Tracker,
+  xLights.org), each routed through `XLOpenURL` to the system
+  browser to match desktop's `wxLaunchDefaultBrowser` behaviour.
 - **Check Sequence runner** (P1, M). Validation report (duplicate
   universes, broken refs, missing media). Engine logic exists; just
   needs an iPad sheet.

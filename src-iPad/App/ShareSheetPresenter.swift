@@ -34,3 +34,13 @@ func XLPresentShareSheet(items: [Any],
     }
     presenter.present(vc, animated: true)
 }
+
+/// Opens `string` in the system browser. Used by the Help menu so
+/// each external link mirrors desktop's `wxLaunchDefaultBrowser`.
+/// Silently no-ops when the string isn't a valid URL — Help-menu
+/// destinations are hard-coded so this can only fire on a typo.
+@MainActor
+func XLOpenURL(_ string: String) {
+    guard let url = URL(string: string) else { return }
+    UIApplication.shared.open(url)
+}

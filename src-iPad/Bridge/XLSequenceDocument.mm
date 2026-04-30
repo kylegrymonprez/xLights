@@ -52,6 +52,7 @@
 #include "utils/ExternalHooks.h"
 #include "utils/xlImage.h"
 #include "xLightsVersion.h"
+#include "globals.h"
 
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
@@ -455,6 +456,14 @@
 
 - (NSString*)currentAppVersion {
     return [NSString stringWithUTF8String:xlights_version_string.c_str()];
+}
+
++ (NSString*)appVersion {
+    return [NSString stringWithUTF8String:xlights_version_string.c_str()];
+}
+
++ (NSString*)licenseText {
+    return [NSString stringWithUTF8String:XLIGHTS_LICENSE];
 }
 
 // MARK: - Sequence Settings (E-3)

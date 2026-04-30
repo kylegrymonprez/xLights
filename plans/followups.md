@@ -50,15 +50,6 @@ tester loop. Pull into MVP if there's bandwidth before H-5 wraps.
   the spdlog rotate-files + show folder + currently-open `.xsq`
   and present via `UIActivityViewController`. Without it, "weird
   thing happened" reports come back with nothing actionable.
-- **About dialog** (H-1). Version + build + EULA + dependency
-  credits. Reachable from the menu bar Help / About entry.
-- **Help menu populated** (H-2). Online docs / forum / tutorial
-  videos / issue tracker / donate. Just URLs opening in
-  `SFSafariViewController`.
-- **Crash telemetry** (H-4). MetricKit (no SDK churn, no privacy-
-  manifest changes) is the simpler choice over Sentry; pick before
-  wiring. Surfaces on-device crashes without waiting for a tester
-  to forward a `.crash`.
 - **Check Sequence runner** (T-1, P1). Validation report —
   duplicate universes, non-contiguous channels, missing media,
   broken model refs, etc. Engine logic already exists in

@@ -133,6 +133,15 @@
 - (NSString*)sequenceFileVersion;
 - (NSString*)currentAppVersion;
 
+// About-screen helpers. `appVersion` (without an instance) and
+// `licenseText` are both static — same value across the whole app
+// lifetime — so they're class methods so the About sheet doesn't
+// need a document handle. `licenseText` is the GPL preamble +
+// upstream credit text from `XLIGHTS_LICENSE` in `globals.h`,
+// shared with desktop's About dialog.
++ (NSString*)appVersion;
++ (NSString*)licenseText;
+
 // E-6 — autosave / `.xbkp` recovery. Write the current in-memory
 // sequence to `<basename>.xbkp` alongside the `.xsq` without
 // touching the canonical file or the dirty flag. Temporarily

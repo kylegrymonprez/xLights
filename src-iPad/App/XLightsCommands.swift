@@ -421,6 +421,49 @@ struct XLSequencerCommands: Commands {
                 .disabled(!viewModel.isSequenceLoaded
                            || !viewModel.tagPositions.contains(where: { $0 >= 0 }))
         }
+
+        // Help menu — replaces the system default so About + the
+        // five external link items live where iPadOS users expect.
+        // URLs mirror desktop's `Help_*` handlers in xLightsMain.cpp;
+        // each opens via `UIApplication.shared.open` (system Safari)
+        // to match desktop's `wxLaunchDefaultBrowser` behaviour.
+        CommandGroup(replacing: .help) {
+            Button("About xLights…") {
+                viewModel.showingAbout = true
+            }
+
+            Divider()
+
+            Button("xLights Manual") {
+                XLOpenURL("https://manual.xlights.org/")
+            }
+            Button("Tutorial Videos") {
+                XLOpenURL("https://videos.xlights.org")
+            }
+            Button("Release Notes") {
+                XLOpenURL("https://raw.githubusercontent.com/xLightsSequencer/xLights/"
+                          + XLSequenceDocument.appVersion()
+                          + "/README.txt")
+            }
+
+            Divider()
+
+            Button("xLights Forum") {
+                XLOpenURL("https://nutcracker123.com/forum/")
+            }
+            Button("Facebook Group") {
+                XLOpenURL("https://www.facebook.com/groups/628061113896314/")
+            }
+
+            Divider()
+
+            Button("Issue Tracker") {
+                XLOpenURL("https://github.com/xLightsSequencer/xLights/issues")
+            }
+            Button("xLights Website") {
+                XLOpenURL("https://xlights.org")
+            }
+        }
     }
 
     /// KeyEquivalent for a single digit 0..9. Used by the numbered-
