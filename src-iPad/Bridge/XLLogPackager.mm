@@ -89,17 +89,23 @@ NSString* ThreadsText() {
 
 } // namespace
 
-@implementation XLLogPackager
-
-+ (nullable NSURL*)packageLogsForDocument:(nullable XLSequenceDocument*)document
-                                    error:(NSError* _Nullable* _Nullable)outError {
+// Internal helper. `document` may be nil. `includeUserContent` controls
+// whether the show folder XML and open sequence are copied in.
+// `destDir` is the final directory where the zip should live (caller's
+// choice — NSTemporaryDirectory for share-sheet, Library/Logs/PendingUpload
+// for auto-upload). Returns the resulting zip URL or nil.
+static NSURL* BuildLogZip(XLSequenceDocument* _Nullable document,
+                          BOOL includeUserContent,
+                          NSURL* destDir,
+                          NSString* baseNameStem,
+                          NSError** outError) {
     NSFileManager* fm = [NSFileManager defaultManager];
 
     NSDateFormatter* fmt = [[NSDateFormatter alloc] init];
     fmt.dateFormat = @"yyyyMMdd-HHmmss";
     fmt.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
     NSString* stamp = [fmt stringFromDate:[NSDate date]];
-    NSString* baseName = [NSString stringWithFormat:@"xLights-logs-%@", stamp];
+    NSString* baseName = [NSString stringWithFormat:@"%@-%@", baseNameStem, stamp];
 
     NSURL* tmpDir = [NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES];
     NSURL* stagingDir = [tmpDir URLByAppendingPathComponent:baseName isDirectory:YES];
@@ -121,6 +127,7 @@ NSString* ThreadsText() {
     NSPredicate* logFilter = [NSPredicate predicateWithBlock:
         ^BOOL(NSString* path, NSDictionary*) {
             if ([path hasPrefix:@"Diagnostics"]) return NO;
+            if ([path hasPrefix:@"Sessions"]) return NO;
             return [path.lastPathComponent hasPrefix:@"xLights"];
         }];
     CopyTreeIntoStaging(fm, logsDir, stagingDir.path, logFilter);
@@ -130,28 +137,30 @@ NSString* ThreadsText() {
     NSString* diagnosticsDst = [stagingDir.path stringByAppendingPathComponent:@"Diagnostics"];
     CopyTreeIntoStaging(fm, diagnosticsSrc, diagnosticsDst, nil);
 
-    // 3. Show folder XML + currently-open sequence.
-    if (document.showFolderPath.length > 0) {
-        NSString* showStaging = [stagingDir.path stringByAppendingPathComponent:@"show"];
-        [fm createDirectoryAtPath:showStaging
-      withIntermediateDirectories:YES
-                       attributes:nil
-                            error:nil];
-        for (NSString* name in @[@"xlights_networks.xml", @"xlights_rgbeffects.xml"]) {
-            NSString* src = [document.showFolderPath stringByAppendingPathComponent:name];
-            if ([fm fileExistsAtPath:src]) {
-                [fm copyItemAtPath:src
-                            toPath:[showStaging stringByAppendingPathComponent:name]
-                             error:nil];
+    // 3. Show folder XML + currently-open sequence — full-payload only.
+    if (includeUserContent) {
+        if (document.showFolderPath.length > 0) {
+            NSString* showStaging = [stagingDir.path stringByAppendingPathComponent:@"show"];
+            [fm createDirectoryAtPath:showStaging
+          withIntermediateDirectories:YES
+                           attributes:nil
+                                error:nil];
+            for (NSString* name in @[@"xlights_networks.xml", @"xlights_rgbeffects.xml"]) {
+                NSString* src = [document.showFolderPath stringByAppendingPathComponent:name];
+                if ([fm fileExistsAtPath:src]) {
+                    [fm copyItemAtPath:src
+                                toPath:[showStaging stringByAppendingPathComponent:name]
+                                 error:nil];
+                }
             }
         }
-    }
-    if (document.isSequenceLoaded && document.currentSequencePath.length > 0) {
-        NSString* seqPath = document.currentSequencePath;
-        if ([fm fileExistsAtPath:seqPath]) {
-            NSString* dst = [stagingDir.path
-                stringByAppendingPathComponent:seqPath.lastPathComponent];
-            [fm copyItemAtPath:seqPath toPath:dst error:nil];
+        if (document.isSequenceLoaded && document.currentSequencePath.length > 0) {
+            NSString* seqPath = document.currentSequencePath;
+            if ([fm fileExistsAtPath:seqPath]) {
+                NSString* dst = [stagingDir.path
+                    stringByAppendingPathComponent:seqPath.lastPathComponent];
+                [fm copyItemAtPath:seqPath toPath:dst error:nil];
+            }
         }
     }
 
@@ -166,8 +175,13 @@ NSString* ThreadsText() {
                          error:nil];
 
     // 5. Zip via NSFileCoordinator. .forUploading hands back a
-    //    temporary zipped copy of the directory; we move it to a
-    //    stable tmp name so the share sheet has a predictable URL.
+    //    temporary zipped copy of the directory; copy it into the
+    //    caller's chosen destination directory.
+    [fm createDirectoryAtURL:destDir
+   withIntermediateDirectories:YES
+                    attributes:nil
+                         error:nil];
+
     __block NSURL* finalZip = nil;
     NSError* coordErr = nil;
     NSFileCoordinator* coord = [[NSFileCoordinator alloc] init];
@@ -175,7 +189,7 @@ NSString* ThreadsText() {
                               options:NSFileCoordinatorReadingForUploading
                                 error:&coordErr
                            byAccessor:^(NSURL* zippedURL) {
-        NSURL* dst = [tmpDir URLByAppendingPathComponent:
+        NSURL* dst = [destDir URLByAppendingPathComponent:
             [NSString stringWithFormat:@"%@.zip", baseName]];
         [fm removeItemAtURL:dst error:nil];
         NSError* copyErr = nil;
@@ -193,6 +207,32 @@ NSString* ThreadsText() {
         return nil;
     }
     return finalZip;
+}
+
+@implementation XLLogPackager
+
++ (nullable NSURL*)packageLogsForDocument:(nullable XLSequenceDocument*)document
+                                    error:(NSError* _Nullable* _Nullable)outError {
+    NSURL* tmpDir = [NSURL fileURLWithPath:NSTemporaryDirectory() isDirectory:YES];
+    return BuildLogZip(document,
+                       /*includeUserContent=*/YES,
+                       tmpDir,
+                       @"xLights-logs",
+                       outError);
+}
+
++ (nullable NSURL*)stagePendingUploadWithError:(NSError* _Nullable* _Nullable)outError {
+    NSString* libraryPath = NSSearchPathForDirectoriesInDomains(
+        NSLibraryDirectory, NSUserDomainMask, YES).firstObject;
+    NSURL* pendingDir = [NSURL fileURLWithPath:
+        [[libraryPath stringByAppendingPathComponent:@"Logs"]
+                stringByAppendingPathComponent:@"PendingUpload"]
+                                   isDirectory:YES];
+    return BuildLogZip(/*document=*/nil,
+                       /*includeUserContent=*/NO,
+                       pendingDir,
+                       @"xLights-diag",
+                       outError);
 }
 
 @end

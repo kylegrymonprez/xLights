@@ -138,6 +138,18 @@ quality" section unless noted otherwise.
   disk-write diagnostics are the headline win — they don't trigger
   the wx signal-handler-based crash path on Mac and have no
   equivalent on iPad today.
+- ✓ **Auto-upload of crash zips** — `XLDiagnosticUploader.swift`
+  posts staged zips from `Library/Logs/PendingUpload/` to the same
+  `crashUpload/index.php` endpoint the desktop app uses, so iPad
+  reports land in the existing triage bin. Triggered three ways:
+  (a) MetricKit notification → stage + upload, (b) prior-session
+  sentinel left behind by a crash → stage + upload at next launch,
+  (c) every `scenePhase = .active`. Auto-upload uses a smaller
+  payload than user-initiated Package Logs (no show folder XML, no
+  open sequence) to keep size + PII small. Opt-in toggle in iOS
+  Settings → xLights → "Send Crash Reports" (default on).
+  `PrivacyInfo.xcprivacy` updated with `CrashData /
+  PerformanceData / OtherDiagnosticData` entries.
 - **About + Help menu** (P1, S each). Version / build / EULA / dep
   credits, plus URLs (forum / docs / issue tracker) opened in
   `SFSafariViewController`.

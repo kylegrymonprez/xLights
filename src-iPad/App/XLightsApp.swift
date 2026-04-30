@@ -54,6 +54,7 @@ struct XLightsApp: App {
         // iPadRenderContext whose EffectManager needs the resources directory
         // to load effectmetadata JSON files.
         XLiPadInit.initialize()
+        XLDiagnosticUploader.shared.bootstrap()
         let vm = SequencerViewModel()
         vm.startMemoryMonitoring()
         // Attempt to restore the previously-selected show folder + media
@@ -98,9 +99,11 @@ struct XLightsApp: App {
                 // threads exit cleanly before the teardown race —
                 // otherwise they crash mid-frame on freed
                 // SequenceElements / SequenceData.
+                XLDiagnosticUploader.shared.endCurrentSession()
                 viewModel.shutdownForBackground()
             case .active:
-                break
+                XLDiagnosticUploader.shared.beginCurrentSession()
+                XLDiagnosticUploader.shared.kickoff()
             @unknown default:
                 break
             }

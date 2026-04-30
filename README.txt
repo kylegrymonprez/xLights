@@ -16,7 +16,9 @@ XLIGHTS/NUTCRACKER RELEASE NOTES
                                 next to xLights_spdlog.log. Whatever has accumulated since the last submission is
                                 folded into the next debug-report zip under a MetricKit/ subfolder, giving us
                                 visibility into non-crashing failure modes (main-thread hangs, runaway CPU) that the
-                                existing signal-handler-based crash reports don't capture.
+                                existing signal-handler-based crash reports don't capture. The MetricKit subscriber
+                                also posts an XLMetricKitDidReceivePayloads NSNotification — desktop ignores it;
+                                the iPad app uses it to drive auto-upload of crash bundles.
     -enh (dkulp)                Liquid effect: velocity slider rescaled to allow full use of range instead of just
                                 values between 0 and 6 providing visual changes
     -enh (dkulp)                Liquid effect: added an Enabled checkbox for particle source 1 (defaults to on)
