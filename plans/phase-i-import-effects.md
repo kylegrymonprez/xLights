@@ -1,19 +1,22 @@
 # Phase I — Import Effects (iPad)
 
-**Status: I-1 landed; I-2 v1.1 + timing-tracks + alias polish
-landed.** Tools menu → Import Effects… opens a SwiftUI sheet that
-loads `.xsq` (loose) or `.xsqz` (vendor package — extracts to
-temp dir via `SequencePackage::Extract`), builds the full model /
-submodel / strand / node tree on both source and destination
-sides, supports tap-to-map and Auto Map at every level (model,
+**Status: I-1 and I-2 landed (2026-04-29).** Tools menu →
+Import Effects… opens a SwiftUI sheet that loads `.xsq` (loose)
+or `.xsqz` (vendor package — extracts to temp dir via
+`SequencePackage::Extract`), builds the full model / submodel /
+strand / node tree on both source and destination sides,
+supports tap-to-map and Auto Map at every level (model,
 submodel, strand, node) with alias-driven matching that now
 strips punctuation on aliases too, surfaces source timing tracks
 in a popover with per-track toggles + "already exists" hints,
-and applies imports through the core `EffectMapper` family.
-Both desktop and iPad-lib debug builds green; include policy
-clean. Remaining in I-2: model-blending toggle (niche),
-LSItemContentTypes registration. Manual end-to-end regression on
-a real vendor sequence is the next checkpoint.
+saves map-hints, and applies imports through the core
+`EffectMapper` family. Both desktop and iPad-lib debug builds
+green; include policy clean. Deferred to follow-up: model-
+blending toggle (niche), `LSItemContentTypes` registration in
+Info.plist, and surfacing the convert-render-style toggle
+(currently hardcoded `false` pending vendor practice). Next
+push: I-3 — Auto Map polish + manual end-to-end regression on a
+real vendor sequence.
 
 ## Why this matters
 
