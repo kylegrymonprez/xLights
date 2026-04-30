@@ -33,3 +33,15 @@ equivalent.
   header overflow menu alongside Save / Load / Import.
 - Same service can back an AI entry for the Media manager
   (G33 — already tracked separately in Phase C C5 / future).
+
+## Cross-references (gap analysis 2026-04-23 §2.15)
+
+- **AI-1** AIColorPaletteDialog (desktop) — song title or free
+  prompt + service dropdown → palette suggestions in HtmlWindow.
+  This is the smallest of the AI surfaces (S effort) and the
+  best entry point — ship with ChatGPT only first, add Apple
+  Intelligence path when AI-3 lands.
+- Pairs with AI-3 / AI-4 / AI-5 in
+  [`future-ai-image-generate.md`](future-ai-image-generate.md).
+  PR-9 ServicesPanel is the shared infrastructure; ship once,
+  use for both palette + image.

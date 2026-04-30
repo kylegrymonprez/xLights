@@ -39,3 +39,19 @@ into the sequence's image cache. iPad has no equivalent.
   `Images/` subdirectory with a descriptive filename, then
   routed through the normal per-effect relocation path so the
   stored reference is show-relative.
+
+## Cross-references (gap analysis 2026-04-23 §2.15)
+
+- **AI-2** AIImageDialog (desktop) — prompt input, generate, crop
+  tool, resize/reset/save.
+- **AI-3** AppleIntelligence service (Image Playground + Foundation
+  Models LLM) — macOS-only today; would need an iOS port. Apple
+  Intelligence on iOS requires entitlement + iOS 18.2+.
+- **AI-4** ChatGPT service (OpenAI API) — works the same on both
+  platforms; needs PR-9 ServicesPanel for API-key storage.
+- **AI-5** ServicesPanel (PR-9 in [`future-preferences.md`](future-preferences.md))
+  — iOS Keychain-backed API key storage. Required infrastructure.
+
+The vendor-side parts of this surface (ShaderDownload, VendorModel,
+VendorMusic, MatrixFaceDownload) live in the AI / vendor-downloader
+slice of Phase O — not yet split into a dedicated future plan.

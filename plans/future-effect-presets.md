@@ -43,3 +43,12 @@ Outstanding work:
 
 Re-scope into Phase C (or a dedicated follow-up phase) when
 real users ask to keep presets across launches.
+
+## Pairs with EffectTree dialog
+
+The 2026-04-23 gap analysis (AP-4 in §2.19) recommends shipping
+the disk-persistent half together with the EffectTree / EffectList
+dialog — preset-tree UI, drag-to-apply, manage / search / import /
+export, GIF preview animation. They share a backing store and a
+data model; landing one without the other leaves UX rough edges.
+See [`future-aux-panels.md`](future-aux-panels.md) AP-4.

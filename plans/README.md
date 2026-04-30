@@ -13,7 +13,7 @@ for the details.
 | [phase-h-app-store.md](phase-h-app-store.md) | H — App Store readiness | H-5: screenshots, App Store Connect metadata, submission |
 | [phase-i-import-effects.md](phase-i-import-effects.md) | I — Import Effects | I-3 vendor-sequence regression + Auto Map UX polish, I-4 (`.sup`), I-5 (`.lms`/`.las`) |
 | [phase-b-grid-parity.md](phase-b-grid-parity.md) | B — Effects grid parity | 2 P2 named (B77 MIDI, B79 AI Speech 2 Lyrics) + 3 deferred |
-| [followups.md](followups.md) | Cross-phase | Small items left over from A / C / E / H |
+| [followups.md](followups.md) | Cross-phase | Small items left over from A / C / E / H plus a "TestFlight quality" bundle (log export, About, Help menu, crash telemetry, Check Sequence, …) |
 
 ## Residual sub-plans (phase complete)
 
@@ -28,15 +28,42 @@ prose is in git history.
 
 ## Future / post-MVP
 
-No commitment — captured so we don't lose the design context.
+No commitment — captured so we don't lose the design context. Most
+items here trace back to the 2026-04-23 gap analysis.
 
-| File | Topic | Blocker |
+| File | Topic | Severity / scale |
 |---|---|---|
-| [future-effect-presets.md](future-effect-presets.md) | Disk-persistent effect presets | In-session ship covers the common path; needs preset-tree UI + bridge |
-| [future-pictures-frame-editor.md](future-pictures-frame-editor.md) | Pictures / GIF frame-timing editor | Desktop side needs redesign too |
-| [future-ai-palette-generate.md](future-ai-palette-generate.md) | AI palette generation | Needs shared iOS AI bridge |
-| [future-ai-image-generate.md](future-ai-image-generate.md) | AI image generation | Same iOS AI bridge dependency |
-| [future-layout-editing.md](future-layout-editing.md) | Layout-editor overlays / model manipulation | Largest scope; explicit post-MVP |
+| [future-controllers-tab.md](future-controllers-tab.md) | Controllers tab — discovery, list, edit, upload (Phase R / R-pro) | P1 / XL+ — biggest single near-feature gap |
+| [future-audio-authoring.md](future-audio-authoring.md) | Onset / tempo → timing tracks, spectrogram, pitch contour (Phase J) | P1 / M each |
+| [future-aux-panels.md](future-aux-panels.md) | Search / Find / EffectTree / Jukebox / SequenceVideo / bulk-edit (Phase L) | P1 (Search, EffectTree) / others P2 |
+| [future-preferences.md](future-preferences.md) | Preferences (10 panels, 96 options) + ColorManager + backup (Phase M) | P2 / L overall |
+| [future-help-diagnostics.md](future-help-diagnostics.md) | Tip-of-Day, in-app log viewer, Package Show, RestoreBackup (Phase P) | P2 / M |
+| [future-imports-exports.md](future-imports-exports.md) | Vixen 3, Papagayo, Audacity, MIDI, etc. + 14-format export + Convert dialog (Phase N) | P2 / L |
+| [future-effect-presets.md](future-effect-presets.md) | Disk-persistent effect presets (G12) + EffectTree pairing | P1 / M |
+| [future-pictures-frame-editor.md](future-pictures-frame-editor.md) | Pictures / GIF frame-timing editor + Effect Assist panels (EA-1..3) | P2 / XL each |
+| [future-ai-palette-generate.md](future-ai-palette-generate.md) | AI palette generation (AI-1) | P2 / S |
+| [future-ai-image-generate.md](future-ai-image-generate.md) | AI image generation (AI-2..AI-5) | P2 / M each |
+| [future-layout-editing.md](future-layout-editing.md) | Layout panel — model placement, world layout (Phase S / S-pro) | P2 / XXL — multi-year |
+| [future-custom-models.md](future-custom-models.md) | Custom model + Face/State + DMX deep + Wiring (Phases T/U/V/W) | P2 / XXL |
+
+## Hard misses (no realistic iOS path)
+
+Documented for the record so we don't keep re-litigating:
+
+- **VAMP plugin host** (polyphonic transcription, custom user
+  plugins). No iOS replacement. CoreML-based feature extraction is
+  XXL and doesn't preserve plugin extensibility.
+- **Python scripting** (pybind11 + Python 3 embedding). App Store
+  hostile.
+- **Lua scripting via JIT.** Same App Store concern; could ship
+  interpreted but workflow value is low.
+- **3D Connexion / SpaceMouse input.** Desktop peripheral.
+- **FFmpeg whole library.** Bundling adds ~50 MB + licensing /
+  review risk; AVFoundation-only is the policy.
+- **Custom KeyBindings editor.** Touch-first iPad uses gestures +
+  menu items.
+- **AUI Manager perspectives.** Single-window iPad layout doesn't
+  benefit.
 
 ---
 
@@ -51,3 +78,6 @@ No commitment — captured so we don't lose the design context.
 4. When a phase completes, the sub-plan shrinks to a residual file
    covering deferrals + caveats only — or is deleted entirely if
    nothing future-relevant remains.
+5. The `future-*.md` files are not commitments. Severities and
+   effort estimates are recommendations from the gap analysis;
+   the team decides what ships.

@@ -118,23 +118,47 @@ and unblock independently.
 ## Could pull into MVP during testing
 
 If H-5 prep + I-3 testing leaves spare cycles, these are the high-
-ROI items that would **measurably improve** what testers experience:
+ROI items that would **measurably improve** what testers experience.
+Detailed in [`plans/followups.md`](plans/followups.md) "TestFlight
+quality" section unless noted otherwise.
 
-- **I-4 (`.sup` SuperStar import).** Same UI as I-2 — just hoist the
+**P0 / P1 — TestFlight loop quality** (gap-analysis flagged):
+
+- **Log export** (P0). Zip rotate-files + show folder + open `.xsq`
+  → `UIActivityViewController`. Without it, every "weird thing
+  happened" report is unactionable.
+- **About + Help menu** (P1, S each). Version / build / EULA / dep
+  credits, plus URLs (forum / docs / issue tracker) opened in
+  `SFSafariViewController`.
+- **Crash telemetry** (P1, M). MetricKit beats Sentry on iOS
+  (no SDK churn, no privacy-manifest changes).
+- **Check Sequence runner** (P1, M). Validation report (duplicate
+  universes, broken refs, missing media). Engine logic exists; just
+  needs an iPad sheet.
+- **Incompatible-video warning at sequence load** (P1, S).
+  Per-effect probe already exists; needs a load-time sweep so
+  testers don't get silent black frames mid-playback.
+- **Re-prompt on failed `ObtainAccessToURL`** (P1, S). Currently
+  logs and silently degrades. `UIDocumentPickerViewController`
+  fallback turns iCloud-eviction failures into one-tap recovery.
+
+**P2 — feature additions worth a tester sprint**:
+
+- **I-4 SuperStar `.sup` import.** Same UI as I-2; just hoist the
   parser from `SuperStarImportDialog.cpp` to
-  `src-core/import_export/SuperStarImporter.{h,cpp}` and add `.sup`
-  to the iPad UTType filter. Vendor relevance matches `.xsq` for a
-  meaningful slice of the user base.
-- **B77 MIDI import.** Concrete user request from the parity audit;
-  iOS-native via AVFoundation `MIDIFile`. Adds a feature testers
-  can exercise.
-- **Re-prompt on failed `ObtainAccessToURL`.** Currently logs and
-  silently degrades (empty models, missing media). A
-  `UIDocumentPickerViewController` fallback turns the most common
-  iCloud-eviction failure mode into a one-tap recovery.
-- **Video compat badge in Media Manager.** Per-effect probe already
-  exists; sequence-wide inventory still labels everything
-  "External". One-day fix, big diagnostic clarity win.
+  `src-core/import_export/SuperStarImporter.{h,cpp}`. Vendor
+  relevance ≈ `.xsq` for a meaningful slice of users.
+- **B77 MIDI import.** Concrete user request; iOS-native via
+  AVFoundation `MIDIFile`.
+- **Audio onset → timing track** (A-1, P1, M). Replaces 5–10 minutes
+  of manual mark-tapping with one button.
+- **Live-output controller list (read-only)** (gap-analysis O-3,
+  P1, M). Even just *seeing* what's configured (without setup UI)
+  is a tester clarity win.
+- **Recent Show Folders list** (L-1b). Recent Sequences exists;
+  Recent Show Folders does not.
+- **Video compat badge in Media Manager.** Per-effect probe
+  already exists; one-day fix, big diagnostic clarity win.
 
 Items **not** worth pulling in even with spare cycles:
 
@@ -144,6 +168,17 @@ Items **not** worth pulling in even with spare cycles:
   design exercise, not a quick port.
 - Shader uniform grouping (G2-c) — only matters for shader packs
   with 20+ uniforms, which are vanishingly rare.
+- Anything from [`plans/future-layout-editing.md`](plans/future-layout-editing.md),
+  [`plans/future-custom-models.md`](plans/future-custom-models.md),
+  or [`plans/future-controllers-tab.md`](plans/future-controllers-tab.md) —
+  all multi-month efforts.
+
+**Catalogue of full post-MVP scope.** The 2026-04-23 gap analysis
+(in the sibling working tree at
+`xLights/plans/gap-analysis-2026-04-23.md`) inventoried the full
+desktop surface and recommended ~12 phases beyond MVP totalling
+20–30 person-months. Each major domain is now tracked in a
+`plans/future-*.md` file — see [`plans/README.md`](plans/README.md).
 
 ## Preview scope
 

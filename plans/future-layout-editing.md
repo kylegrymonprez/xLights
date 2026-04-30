@@ -11,6 +11,24 @@ Until then these items should not re-surface as gaps in other phase
 audits; the relevant phase plans should reference this file when
 calling them out-of-scope.
 
+The 2026-04-23 gap analysis (§2.2) split this work into two phases:
+
+- **Phase S (minimum viable)** — LA-1 toolbar (Add Model buttons),
+  LA-2 model tree, LA-3 basic property grid, LA-4 2D canvas
+  (single-select + drag), LA-7 sticky-button → place flow, LA-9
+  minimal model-group create/delete, LA-10 Layout Views, LA-11
+  locking, LA-16 layout undo/redo, LA-18 background/grid overlays,
+  VO-1 ImageObject controls, VO-2 GridlinesObject editing.
+  Estimated 3 months.
+- **Phase S-pro** — LA-5 3D canvas (gizmo, gestures, no SpaceMouse),
+  LA-6 right-click menus, LA-8 alignment, LA-12 bulk-edit (15+ ops),
+  LA-13 ImportPreviewsModelsDialog, LA-15 DXF/STL/VRML export, VO-3
+  MeshObject, VO-4 TerrainObject (heightmap painting), VO-5
+  RulerObject, VO-6 ViewObjectPanel. Estimated 3+ months.
+
+Custom model authoring, Face/State editing, DMX deep authoring, and
+the Wiring view live in [`future-custom-models.md`](future-custom-models.md).
+
 ---
 
 ## L-1. Model name / info / first-pixel overlays

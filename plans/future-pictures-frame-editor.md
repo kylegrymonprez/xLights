@@ -28,3 +28,23 @@ per-frame timing. iPad has the filename picker only — no frame UI.
   `src-core/` to see whether the per-frame timing edit surface
   wants to live in core (which would naturally make the iPad
   side cheaper).
+
+## Cross-references (gap analysis 2026-04-23 §2.11)
+
+PicturesAssistPanel is one of three Effect Assist sub-panels that
+desktop ships and iPad doesn't:
+
+- **EA-1 SketchAssistPanel** (XL) — XY canvas, Bezier handles,
+  pen mode, SVG import, path management list, grid toggle,
+  background image overlay. Used by the Sketch effect.
+- **EA-2 PicturesAssistPanel** (XL) — multi-frame canvas,
+  pencil/eraser/eyedropper/select/copy paint tools, palette
+  manager (8-color swatches), color picker, image load / save /
+  resize, pixel selection, multi-format support
+  (PNG/BMP/JPG/GIF/WEBP). This file.
+- **EA-3 MorphAssistPanel** (M) — 4-corner quadrilateral editor,
+  start/end linking, region drag. Smallest of the three; could
+  be pulled in independently.
+
+Each is a separate XL effort. EA-3 Morph is the only one likely
+to fit into a small follow-up rather than a phase commitment.
