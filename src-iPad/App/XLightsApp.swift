@@ -731,7 +731,7 @@ struct SequencePickerView: View {
     @Environment(SequencerViewModel.self) var viewModel
     @Binding var showFolderConfig: Bool
 
-    @State private var recent: [RecentSequences.Entry] = RecentSequences.load()
+    @State private var recent: [RecentSequences.Entry] = []
     @State private var showingNewWizard: Bool = false
     @State private var showingBatchRender: Bool = false
     @State private var openErrorMessage: String? = nil
@@ -763,8 +763,9 @@ struct SequencePickerView: View {
                             }
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
-                                    RecentSequences.remove(path: entry.path)
-                                    recent = RecentSequences.load()
+                                    RecentSequences.remove(path: entry.path,
+                                                            forShowFolder: viewModel.showFolderPath)
+                                    recent = RecentSequences.load(forShowFolder: viewModel.showFolderPath)
                                 } label: {
                                     Label("Remove", systemImage: "xmark.bin")
                                 }
@@ -824,7 +825,7 @@ struct SequencePickerView: View {
                     ToolbarItem(placement: .topBarLeading) {
                         Menu {
                             Button(role: .destructive) {
-                                RecentSequences.clear()
+                                RecentSequences.clear(forShowFolder: viewModel.showFolderPath)
                                 recent = []
                             } label: {
                                 Label("Clear Recent", systemImage: "clock.badge.xmark")
@@ -836,13 +837,19 @@ struct SequencePickerView: View {
                 }
             }
             .onAppear {
-                recent = RecentSequences.load()
+                recent = RecentSequences.load(forShowFolder: viewModel.showFolderPath)
+            }
+            .onChange(of: viewModel.showFolderPath) { _, _ in
+                // Show-folder change via the folder-config sheet —
+                // swap the picker's recent list to the new show's
+                // entries so users don't see stale cross-show paths.
+                recent = RecentSequences.load(forShowFolder: viewModel.showFolderPath)
             }
             .sheet(isPresented: $showingNewWizard) {
                 NewSequenceWizardView()
                     .environment(viewModel)
                     .onDisappear {
-                        recent = RecentSequences.load()
+                        recent = RecentSequences.load(forShowFolder: viewModel.showFolderPath)
                     }
             }
             .sheet(isPresented: $showingBatchRender) {
@@ -880,8 +887,8 @@ struct SequencePickerView: View {
             && !FileManager.default.fileExists(atPath: path) {
             let name = (path as NSString).lastPathComponent
             openErrorMessage = "\"\(name)\" no longer exists. It has been removed from Recent."
-            RecentSequences.remove(path: path)
-            recent = RecentSequences.load()
+            RecentSequences.remove(path: path, forShowFolder: viewModel.showFolderPath)
+            recent = RecentSequences.load(forShowFolder: viewModel.showFolderPath)
             return
         }
         guard status == .notDownloaded else {

@@ -530,7 +530,7 @@ class SequencerViewModel {
             startBackgroundRender()
             startDirtyPolling()
             scheduleBrokenMediaScan()
-            RecentSequences.record(path: savePath)
+            RecentSequences.record(path: savePath, forShowFolder: showFolderPath)
         }
         return ok
     }
@@ -574,9 +574,10 @@ class SequencerViewModel {
             // cache has settled, then hop back to main to update the
             // banner count. Keeps the open path from blocking on I/O.
             scheduleBrokenMediaScan()
-            // E-5 — push to the Recent list so the next cold launch
-            // surfaces it on the empty-state screen.
-            RecentSequences.record(path: path)
+            // E-5 — push to the Recent list (scoped to the current
+            // show folder) so the next visit to the picker surfaces
+            // it. Different show folders keep independent lists.
+            RecentSequences.record(path: path, forShowFolder: showFolderPath)
             // E-6 — begin autosave writes for this session. The
             // recovery prompt (when the `.xbkp` is newer than the
             // `.xsq`) is presented by the UI shell after open.

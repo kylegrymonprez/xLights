@@ -79,10 +79,9 @@ tester loop. Pull into MVP if there's bandwidth before H-5 wraps.
   exists; sequence-load pass needs to walk every VideoEffect and
   surface a one-shot summary so the tester knows up front instead
   of getting silent black frames mid-playback.
-- **Recent Show Folders list** (L-1b). Recent Sequences exists;
-  Recent Show Folders does not. The folder-config sheet
-  (reachable from the `folder.badge.gearshape` toolbar button on
-  the sequence picker) supports changing the active show folder
-  but doesn't remember previous ones — add a "Recent" section so
-  users can flip between shows without re-picking from Files
-  every time.
+- **Recent Show Folders list** (L-1b). Recent Sequences is
+  scoped per show folder (2026-04-30 refactor — flipping shows
+  swaps the picker's recent list cleanly), but the folder-config
+  sheet itself only remembers the *current* show folder. Add a
+  "Recent Show Folders" section so users can flip between shows
+  without re-picking from Files every time.
