@@ -71,6 +71,19 @@ class SequencerViewModel {
     /// fired from `scrubSeekTo`. Used to throttle bursts to ~50ms.
     @ObservationIgnored var lastScrubAudioBurstAt: TimeInterval = 0
 
+    /// Phase A re-prompt UX. When `obtainAccess(toPath:)` fails for a
+    /// persisted bookmark (show folder, media folder, sequence file),
+    /// the affected operation enqueues an `AccessRepromptRequest` here
+    /// and ContentView surfaces a `UIDocumentPickerViewController` so
+    /// the user can re-grant access. `accessRepromptQueue` lets a
+    /// single `loadShowFolder` call surface stale show-folder + media
+    /// folders one at a time; `afterAccessQueueEmpty` runs the
+    /// deferred operation (the real `document.loadShowFolder` /
+    /// `document.openSequence`) once the queue drains.
+    var accessReprompt: AccessRepromptRequest?
+    @ObservationIgnored private var accessRepromptQueue: [AccessRepromptRequest] = []
+    @ObservationIgnored private var afterAccessQueueEmpty: (() -> Void)?
+
     /// B97: Find / Replace state. Search is over timing-mark labels
     /// only (matches desktop's intentional restriction in
     /// `EffectsGrid::Find`). `findResults` caches `(rowIndex,
@@ -477,9 +490,57 @@ class SequencerViewModel {
     /// each media folder have their security-scoped bookmarks refreshed via
     /// iPadRenderContext::LoadShowFolder (which calls ObtainAccessToURL for
     /// each) before reading files.
+    ///
+    /// Phase A re-prompt UX: a stale persisted bookmark (iCloud eviction,
+    /// iOS aging out the security-scoped bookmark) silently fails inside
+    /// `ObtainAccessToURL`, leaving every subsequent file open broken.
+    /// Pre-check here from Swift; any path whose access we can't refresh
+    /// is queued for an `AccessRepromptRequest` so the user gets a
+    /// `UIDocumentPickerViewController` to re-grant. The C++ load is
+    /// deferred until the queue drains; media folders we still can't
+    /// access after the re-grant pass are dropped (matches the previous
+    /// silent-drop behavior in `iPadRenderContext::LoadShowFolder`).
     func loadShowFolder(path: String, mediaFolders: [String]) {
         showFolderPath = path
         mediaFolderPaths = mediaFolders
+
+        let showOK = XLSequenceDocument.obtainAccess(toPath: path, enforceWritable: false)
+        var stale: [(path: String, label: String)] = []
+        if !showOK {
+            stale.append((path, "show folder"))
+        }
+        for folder in mediaFolders where !XLSequenceDocument.obtainAccess(toPath: folder, enforceWritable: false) {
+            stale.append((folder, "media folder"))
+        }
+
+        if stale.isEmpty {
+            performLoadShowFolder(path: path, mediaFolders: mediaFolders)
+            return
+        }
+
+        for entry in stale {
+            enqueueAccessReprompt(label: entry.label, originalPath: entry.path, pickPath: entry.path)
+        }
+        afterAccessQueueEmpty = { [weak self] in
+            guard let self else { return }
+            // After the re-grant pass: if the show folder is still not
+            // accessible (user skipped, picked a different folder),
+            // leave the app un-loaded so ContentView keeps showing the
+            // setup affordance. Otherwise load with whatever media
+            // folders survived re-grant.
+            guard XLSequenceDocument.obtainAccess(toPath: path, enforceWritable: false) else {
+                self.isShowFolderLoaded = false
+                return
+            }
+            let surviving = mediaFolders.filter {
+                XLSequenceDocument.obtainAccess(toPath: $0, enforceWritable: false)
+            }
+            self.performLoadShowFolder(path: path, mediaFolders: surviving)
+        }
+        runNextAccessReprompt()
+    }
+
+    private func performLoadShowFolder(path: String, mediaFolders: [String]) {
         isShowFolderLoaded = document.loadShowFolder(path, mediaFolders: mediaFolders)
         if isShowFolderLoaded {
             scanForSequenceFiles(at: path)
@@ -488,12 +549,65 @@ class SequencerViewModel {
 
     /// Attempt to load the persisted show folder at app startup.
     /// Returns true if a show folder was configured and loaded successfully.
+    /// May also return false transiently when a re-prompt is queued —
+    /// the queued operation finishes the load asynchronously once the
+    /// user re-picks the folder.
     @discardableResult
     func restorePersistedShowFolder() -> Bool {
         guard let path = FolderConfig.showFolder else { return false }
         let mediaFolders = FolderConfig.mediaFolders
         loadShowFolder(path: path, mediaFolders: mediaFolders)
         return isShowFolderLoaded
+    }
+
+    // MARK: - Access re-prompt queue
+
+    private func enqueueAccessReprompt(label: String, originalPath: String, pickPath: String) {
+        accessRepromptQueue.append(AccessRepromptRequest(
+            label: label,
+            originalPath: originalPath,
+            pickPath: pickPath))
+    }
+
+    private func runNextAccessReprompt() {
+        if accessReprompt != nil { return }   // sheet still showing
+        if let next = accessRepromptQueue.first {
+            accessRepromptQueue.removeFirst()
+            accessReprompt = next
+        } else {
+            let cb = afterAccessQueueEmpty
+            afterAccessQueueEmpty = nil
+            cb?()
+        }
+    }
+
+    /// Called by `AccessRepromptSheet` when the user picks a folder.
+    /// We register a fresh bookmark for the picked URL via
+    /// `obtainAccess(toPath:)` (which writes the persisted bookmark
+    /// keyed by path), then advance the queue. The deferred operation
+    /// (in `afterAccessQueueEmpty`) re-checks access for its original
+    /// paths and proceeds with whatever now resolves.
+    func acceptReprompt(pickedURL: URL) {
+        // Picker URL carries an active security scope; calling
+        // obtainAccess records a persistent bookmark so future launches
+        // can resolve it. iOS grants children of a picked folder
+        // transitively, so picking the parent restores access to a
+        // previously-stale sequence file as well.
+        _ = XLSequenceDocument.obtainAccess(toPath: pickedURL.path,
+                                             enforceWritable: false)
+        FolderConfig.registerBookmark(from: pickedURL)
+        accessReprompt = nil
+        runNextAccessReprompt()
+    }
+
+    /// Called when the user dismisses the re-grant sheet (Skip /
+    /// swipe-down). The deferred operation runs anyway and decides
+    /// what to do with the still-stale path — typically log + drop or
+    /// leave the app un-loaded so ContentView keeps showing the setup
+    /// affordance.
+    func cancelReprompt() {
+        accessReprompt = nil
+        runNextAccessReprompt()
     }
 
     // MARK: - Sequence
@@ -536,6 +650,28 @@ class SequencerViewModel {
     }
 
     func openSequence(path: String, forceRender: Bool = false) {
+        // Phase A re-prompt UX: pre-check the sequence file's
+        // security-scoped bookmark from Swift. Stale bookmark =>
+        // queue a re-pick of the parent folder (iOS grants child
+        // access transitively). The actual `document.openSequence`
+        // call is deferred until the user re-grants.
+        if !XLSequenceDocument.obtainAccess(toPath: path, enforceWritable: false) {
+            let parent = (path as NSString).deletingLastPathComponent
+            enqueueAccessReprompt(label: "sequence file",
+                                   originalPath: path,
+                                   pickPath: parent)
+            afterAccessQueueEmpty = { [weak self] in
+                guard let self else { return }
+                guard XLSequenceDocument.obtainAccess(toPath: path, enforceWritable: false) else { return }
+                self.performOpenSequence(path: path, forceRender: forceRender)
+            }
+            runNextAccessReprompt()
+            return
+        }
+        performOpenSequence(path: path, forceRender: forceRender)
+    }
+
+    private func performOpenSequence(path: String, forceRender: Bool) {
         if document.openSequence(path) {
             isSequenceLoaded = true
             isDirty = false

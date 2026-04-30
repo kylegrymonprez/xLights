@@ -238,6 +238,23 @@ struct ContentView: View {
             FolderConfigView()
                 .environment(viewModel)
         }
+        // Phase A re-prompt UX. When a persisted security-scoped
+        // bookmark goes stale (iCloud eviction, iOS aging out the
+        // bookmark) `SequencerViewModel` queues an
+        // `AccessRepromptRequest` here instead of silently degrading
+        // to empty models / missing media. Bind `item:` to the
+        // observable so swipe-down ⇒ cancelReprompt (drains queue +
+        // surfaces the next stale path).
+        .sheet(item: Binding(
+            get: { viewModel.accessReprompt },
+            set: { newValue in
+                if newValue == nil { viewModel.cancelReprompt() }
+            })) { req in
+            AccessRepromptSheet(
+                request: req,
+                onPicked: { url in viewModel.acceptReprompt(pickedURL: url) },
+                onCancel: { viewModel.cancelReprompt() })
+        }
         .onAppear {
             // Auto-open the dialog on first launch when nothing is configured.
             if !viewModel.isShowFolderLoaded && FolderConfig.showFolder == nil {

@@ -3,16 +3,6 @@
 Small items left over from phases that otherwise landed. No new
 phase home; catalogued here so they don't fall off.
 
-## Phase A — Core-path hardening
-
-- **Re-prompt on failed `ObtainAccessToURL`.** Minimum-version
-  defensive logging is in place (`iPadRenderContext::LoadShowFolder`
-  drops media folders that fail `ObtainAccessToURL`; `OpenSequence`
-  and `SaveViewpoints` log too). Still missing: full re-prompt UX
-  that surfaces a `UIDocumentPickerViewController` so the user can
-  re-grant access when a bookmark goes stale, instead of just seeing
-  empty models / missing-media warnings.
-
 ## Phase E — Sequence management polish
 
 - **Sequence Settings → Data Layers tab.** Image-data layers

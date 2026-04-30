@@ -70,7 +70,7 @@ variants in `libdbg-ios/`.
 
 | Phase | Title | Status | Sub-plan |
 |---|---|---|---|
-| A | Core-path hardening | ✓ complete | 1 follow-up in [`followups.md`](plans/followups.md) |
+| A | Core-path hardening | ✓ complete | — |
 | B | Effects grid parity | ✓ P0 + P1 closed; 2 P2 + 3 deferred remain | [`phase-b-grid-parity.md`](plans/phase-b-grid-parity.md) |
 | B-Metal | Grid render pipeline (CG → Metal) | ✓ complete | — |
 | C | Effect settings inspector | ✓ complete | 3 small follow-ups in [`followups.md`](plans/followups.md) |
@@ -110,10 +110,10 @@ The 3 deferred Phase B items (B16 drag-from-palette ghost, B24 Find
 Possible Source Effects, B56 Convert-to-Effect) are explicitly
 parked — substantial new work, not blocking submission.
 
-The follow-ups in [`followups.md`](plans/followups.md) (re-prompt UX,
-Data Layers tab, MH waypoint authoring, shader uniform grouping,
-video compat badge, sACN multicast entitlement) are quality-of-life
-and unblock independently.
+The follow-ups in [`followups.md`](plans/followups.md) (Data Layers
+tab, MH waypoint authoring, shader uniform grouping, video compat
+badge, sACN multicast entitlement) are quality-of-life and unblock
+independently.
 
 ## Could pull into MVP during testing
 
