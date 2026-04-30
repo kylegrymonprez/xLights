@@ -1,31 +1,45 @@
 # Future — Effect Presets on iPad
 
-Not in the first-pass Phase C scope. Captured here so it isn't lost.
+## Status
 
-## Gap
+**Partial — in-session presets shipped.** `SequencerViewModel`
+exposes `saveSelectedEffectAsPreset(name:)` /
+`applyPreset(_:)` / `deletePreset(_:)` and the effect
+context menu in `SequencerGridV2View.swift` exercises them.
+The store is `var presets: [EffectPreset]` — session-only,
+cleared on app launch. **Disk-persistent presets remain
+unshipped** and are still tracked here.
 
-**G12 — Effect presets (save / load named bundles).** Desktop ships
-`EffectPresetManager` + an effect-tree UI that lets users save a
-full effect + palette + buffer + blending settings bundle under a
-friendly name and re-apply it to new effects. iPad has no save /
-load preset UI. Presets round-trip through a file format the
-desktop already reads, so the iPad work is purely:
+## Gap (still open)
 
-- Bridge method to list existing presets from `xLights/presets/`.
+**G12 — Effect presets (save / load named bundles, persistent).**
+Desktop ships `EffectPresetManager` + an effect-tree UI that
+persists presets into `xLights/presets/` and re-applies them
+across sessions. iPad has the in-session capture/apply, but
+nothing on disk and no preset-tree UI.
+
+Outstanding work:
+
+- Bridge method to list existing presets from `xLights/presets/`
+  (and surface bundled / show-folder presets too).
 - Bridge method to read the full effect settings string at a
   preset path + apply it to the currently-selected effect.
 - SwiftUI sheet: preset tree, Save-As, Apply, Delete.
-- "Save Effect as Preset…" entry in the inspector's overflow menu
-  or long-press on an effect bar in the grid.
+- Promote the existing in-session presets array onto the new
+  persistent store (write captured presets to disk on save,
+  not just keep them in memory).
 
-## Why deferred
+## Why not done yet
 
-- Not day-to-day blocking — users primarily pick effect types from
-  the palette and tweak per-instance. Presets are a power-user
-  workflow.
-- The file-format plumbing is already shared via desktop; no core
-  changes needed when we get to it. Cleanly layered on top of the
-  current inspector.
+- The in-session shortcut already covers the "I want to copy
+  this effect's settings to a few siblings within one editing
+  session" workflow, which is the most common reason power
+  users reach for presets day-to-day.
+- The on-disk side needs a real picker UI and round-trips with
+  desktop's preset tree — non-trivial enough to defer until
+  user demand calls it in.
+- File-format plumbing is already shared via desktop; no core
+  changes needed when we get to it.
 
-Re-scope into Phase C (or a dedicated follow-up phase) when first-
-pass C lands and real users ask for it.
+Re-scope into Phase C (or a dedicated follow-up phase) when
+real users ask to keep presets across launches.
