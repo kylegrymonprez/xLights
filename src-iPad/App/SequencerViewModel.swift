@@ -278,12 +278,6 @@ class SequencerViewModel {
 
     // Selection & editing
     var selectedEffect: EffectSelection?
-    /// B28: snapshot of the selection that was active immediately
-    /// before the current one. Used by the grid to render a subtle
-    /// "reference" highlight so users can compare settings between
-    /// the previous and current selection. Cleared on any
-    /// `clearSelection`.
-    var previousSelectedEffect: EffectSelection?
     /// Full set of selected effects. Always mirrors `selectedEffect`:
     /// single-select sets it to `[primary]`, multi-select via marquee
     /// fills it with N, clear empties it. When multi-selected, the
@@ -337,6 +331,176 @@ class SequencerViewModel {
     // Help → About xLights. Sheet is presented at ContentView level
     // so it works regardless of show-folder / sequence load state.
     var showingAbout = false
+    // Tools → Check Sequence. Sheet is presented at ContentView
+    // level (gated on `isSequenceLoaded` because it walks the
+    // currently-loaded SequenceElements via the bridge).
+    var showingCheckSequence = false
+
+    /// Run Check Sequence on a background queue and report progress
+    /// while it walks. The bridge's `SequenceChecker` calls back from
+    /// the worker thread; the callback hops to MainActor so SwiftUI
+    /// state updates happen on the right thread.
+    ///
+    /// Returns an empty array when no sequence is loaded.
+    func runSequenceCheckAsync(
+        progress: @escaping @MainActor (Int, String) -> Void
+    ) async -> [XLCheckSequenceIssue] {
+        let doc = document
+        return await Task.detached(priority: .userInitiated) {
+            return doc.runSequenceCheck { percent, step in
+                let stepText = step ?? ""
+                Task { @MainActor in progress(Int(percent), stepText) }
+            }
+        }.value
+    }
+
+    /// Move the playhead to `startTimeMS`, locate the row whose model
+    /// name matches `modelName` (switching to Master View when not
+    /// already showing it — Master is the only view guaranteed to
+    /// contain every model), and select the effect at that time on
+    /// that row. The grid's `onChange(of: selectedEffect)` then
+    /// scrolls the row + timeline into view automatically.
+    ///
+    /// Returns `true` when an effect was selected. Returns `false`
+    /// (caller should fall back to a plain `seekTo`) when:
+    /// - `modelName` is empty or no matching row exists in any view;
+    /// - no effect at that time matches `effectName` on the row.
+    @discardableResult
+    func jumpToEffect(modelName: String?,
+                       effectName: String?,
+                       startTimeMS: Int,
+                       layerIndex: Int) -> Bool {
+        let cleanModel = (modelName ?? "").trimmingCharacters(in: .whitespaces)
+        guard !cleanModel.isEmpty else {
+            seekTo(ms: max(0, startTimeMS))
+            return false
+        }
+
+        // Pass 1: try the current view. Submodel / strand rows return
+        // their parent model name from `rowModelName`, so a top-level
+        // model match catches both. Prefer top-level (lowest nestDepth)
+        // to avoid landing on a strand row when the issue is anchored
+        // to the model itself.
+        if let hit = findEffectRow(matchingModel: cleanModel,
+                                    effectName: effectName,
+                                    startTimeMS: startTimeMS,
+                                    layerIndex: layerIndex) {
+            applyEffectSelection(hit)
+            return true
+        }
+
+        // Pass 2: jump to Master View (index 0) and retry. Master
+        // contains every model in the layout; if it's still not
+        // there, the sequence references a model that doesn't exist
+        // in the current show — surface to the caller.
+        if document.currentViewIndex() != 0 {
+            document.setCurrentViewIndex(0)
+            reloadRows()
+            if let hit = findEffectRow(matchingModel: cleanModel,
+                                        effectName: effectName,
+                                        startTimeMS: startTimeMS,
+                                        layerIndex: layerIndex) {
+                applyEffectSelection(hit)
+                return true
+            }
+        }
+
+        // Couldn't find the row / effect — at least move the playhead.
+        seekTo(ms: max(0, startTimeMS))
+        return false
+    }
+
+    private struct EffectLocation {
+        let rowIndex: Int
+        let effectIndex: Int
+    }
+
+    private func findEffectRow(matchingModel modelName: String,
+                                 effectName: String?,
+                                 startTimeMS: Int,
+                                 layerIndex: Int) -> EffectLocation? {
+        // Prefer the top-level model row (smallest nestDepth) so the
+        // selection lands on the canonical row rather than a strand /
+        // node child. Within the matching rows, prefer one whose
+        // `layerIndex` matches the issue's: when an effect type
+        // appears on multiple layers of the same model only one of
+        // them is anchored to a real check-sequence issue, and the
+        // layer is the only signal that disambiguates them.
+        var candidates: [Int] = []
+        for row in rows {
+            guard row.timing == nil else { continue }
+            let rowName = (document.rowModelName(at: Int32(row.id)) as String?) ?? ""
+            if rowName == modelName {
+                candidates.append(row.id)
+            }
+        }
+        if candidates.isEmpty { return nil }
+        candidates.sort { (a, b) in
+            let rowA = rows.first(where: { $0.id == a })
+            let rowB = rows.first(where: { $0.id == b })
+            // 1) shallower nest first (top-level model row before
+            //    strands / nodes).
+            let nestA = rowA?.nestDepth ?? Int.max
+            let nestB = rowB?.nestDepth ?? Int.max
+            if nestA != nestB { return nestA < nestB }
+            // 2) exact-layer match wins. -1 means the issue isn't
+            //    anchored to a layer (rare; treat all layers equal).
+            if layerIndex >= 0 {
+                let matchA = (rowA?.layerIndex == layerIndex) ? 0 : 1
+                let matchB = (rowB?.layerIndex == layerIndex) ? 0 : 1
+                if matchA != matchB { return matchA < matchB }
+            }
+            // 3) deterministic fall-through: earlier-numbered row wins.
+            return a < b
+        }
+        for rowId in candidates {
+            guard let row = rows.first(where: { $0.id == rowId }) else { continue }
+            // If the issue is anchored to a specific layer, only
+            // accept rows on that layer. We leave the candidate
+            // sort above in place (instead of pre-filtering) so the
+            // diagnostic at the end of the function — fall-back to
+            // any matching row — still has something to work with
+            // when the layerIndex didn't survive the round trip.
+            if layerIndex >= 0 && row.layerIndex != layerIndex { continue }
+            // Try to match the exact (effectName, startTimeMS) pair
+            // first; fall back to "effect at startTimeMS" if the name
+            // is empty or doesn't line up.
+            if let name = effectName, !name.isEmpty {
+                if let idx = row.effects.firstIndex(where: {
+                    $0.startTimeMS == startTimeMS && $0.name == name
+                }) {
+                    return EffectLocation(rowIndex: rowId, effectIndex: idx)
+                }
+            }
+            if let idx = row.effects.firstIndex(where: { $0.startTimeMS == startTimeMS }) {
+                return EffectLocation(rowIndex: rowId, effectIndex: idx)
+            }
+        }
+
+        // Layer-strict pass found nothing: try again ignoring the
+        // layer. Better to land on a same-time / same-name effect on
+        // a sibling layer than to silently fail.
+        if layerIndex >= 0 {
+            for rowId in candidates {
+                guard let row = rows.first(where: { $0.id == rowId }) else { continue }
+                if let name = effectName, !name.isEmpty {
+                    if let idx = row.effects.firstIndex(where: {
+                        $0.startTimeMS == startTimeMS && $0.name == name
+                    }) {
+                        return EffectLocation(rowIndex: rowId, effectIndex: idx)
+                    }
+                }
+                if let idx = row.effects.firstIndex(where: { $0.startTimeMS == startTimeMS }) {
+                    return EffectLocation(rowIndex: rowId, effectIndex: idx)
+                }
+            }
+        }
+        return nil
+    }
+
+    private func applyEffectSelection(_ loc: EffectLocation) {
+        selectEffect(rowIndex: loc.rowIndex, effectIndex: loc.effectIndex)
+    }
 
     // Build the Package Logs zip on a background queue. Returned URL
     // points into NSTemporaryDirectory and the caller (share sheet)
@@ -1840,12 +2004,6 @@ class SequencerViewModel {
             startTimeMS: effect.startTimeMS,
             endTimeMS: effect.endTimeMS
         )
-        // B28: capture what we're moving away from (only when it's
-        // a different effect — repeat-selects shouldn't overwrite).
-        if let old = selectedEffect,
-           !(old.rowIndex == sel.rowIndex && old.effectIndex == sel.effectIndex) {
-            previousSelectedEffect = old
-        }
         selectedEffect = sel
         selectedEffects = [sel]
         showInspector = true
@@ -1877,7 +2035,6 @@ class SequencerViewModel {
     func clearSelection() {
         selectedEffect = nil
         selectedEffects = []
-        previousSelectedEffect = nil   // B28
         selectedEffectSettings = [:]
         selectedEffectMetadata = nil
         stopScrub()

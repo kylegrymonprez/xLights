@@ -1063,7 +1063,8 @@
     <ClCompile Include="..\src-core\ai\claude.cpp">
       <Filter>ai</Filter>
     </ClCompile>
-    <ClCompile Include="..\src-ui-wx\diagnostics\CheckSequenceReport.cpp" />
+    <ClCompile Include="..\src-core\diagnostics\CheckSequenceReport.cpp" />
+    <ClCompile Include="..\src-core\diagnostics\SequenceChecker.cpp" />
     <ClCompile Include="..\src-core\ai\ollama.cpp">
       <Filter>ai</Filter>
     </ClCompile>
@@ -2409,7 +2410,8 @@
     <ClInclude Include="..\src-core\ai\claude.h">
       <Filter>ai</Filter>
     </ClInclude>
-    <ClInclude Include="..\src-ui-wx\diagnostics\CheckSequenceReport.h" />
+    <ClInclude Include="..\src-core\diagnostics\CheckSequenceReport.h" />
+    <ClInclude Include="..\src-core\diagnostics\SequenceChecker.h" />
     <ClInclude Include="..\src-core\ai\ollama.h">
       <Filter>ai</Filter>
     </ClInclude>

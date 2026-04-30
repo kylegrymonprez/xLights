@@ -98,6 +98,7 @@
 #include "effects/ShaderDownloadDialog.h"
 #include "utils/SpecialOptions.h"
 #include "app-shell/SplashDialog.h"
+#include "diagnostics/SequenceChecker.h"
 #include "diagnostics/ShowFolderSearchDialog.h"
 #include "sequencer/TopEffectsPanel.h"
 #include "utils/TraceLog.h"
@@ -4951,27 +4952,14 @@ void xLightsFrame::OnMenuItem_ViewLogSelected(wxCommandEvent& event)
     }
 }
 
-void LogAndWrite(wxFile& f, const std::string& msg)
-{
-    
-    spdlog::debug("CheckSequence: " + msg);
-    if (f.IsOpened()) {
-        f.Write(msg + "<br>");
-    }
-}
-
-bool compare_modelstartchannel(const Model* first, const Model* second) {
-    int firstmodelstart = first->GetNumberFromChannelString(first->ModelStartChannel);
-    int secondmodelstart = second->GetNumberFromChannelString(second->ModelStartChannel);
-
-    return firstmodelstart < secondmodelstart;
-}
+namespace {
 
 void LogCheckSequenceMsg(const std::string& msg) {
-    
     spdlog::debug("CheckSequence: " + msg);
 }
 
+// Helpers used by the wx-only network / preferences / OS sections of CheckSequence.
+// The bulk of the checks delegate to SequenceChecker which has its own RecordIssue.
 void LogAndTrack(CheckSequenceReport& report,
                  const std::string& sectionId, CheckSequenceReport::ReportIssue::Type type, const std::string& msg,
                  const std::string& category, size_t& errcount, size_t& warncount) {
@@ -4992,50 +4980,45 @@ void LogAndTrackInfo(CheckSequenceReport& report,
     report.AddIssue(sectionId, CheckSequenceReport::ReportIssue(CheckSequenceReport::ReportIssue::INFO, msg, category));
 }
 
+// Forwards SequenceChecker callbacks to the wx desktop:
+//  - Reads per-check disable toggles from xLightsFrame's static accessor.
+//  - Returns the desktop's render-cache preference string.
+//  - Drives the wxProgressDialog the wx wrapper opened.
+//  - FFmpeg desktop builds decode every video format, so the codec
+//    compatibility probe always reports OK.
+class DesktopCheckCallbacks : public SequenceCheckerCallbacks {
+public:
+    DesktopCheckCallbacks(xLightsFrame* frame, wxProgressDialog* prog) : _frame(frame), _prog(prog) {}
 
-// recursively check whether a start channel refers to a model in a way that creates a referencing loop
-bool xLightsFrame::CheckStart(wxFile& f, CheckSequenceReport& report, bool writeToTextFile, size_t& errcount, size_t& warncount, const std::string& startmodel, std::list<std::string>& seen, std::string& nextmodel) {
-    Model* m = AllModels.GetModel(nextmodel);
-    if (m == nullptr) {
-        return true; // this is actually an error but we have already reported these errors
-    } else {
-        std::string start = m->ModelStartChannel;
+    bool IsCheckOptionDisabled(const std::string& option) const override {
+        return xLightsFrame::IsCheckSequenceOptionDisabledS(option);
+    }
 
-        if (start[0] == '>' || start[0] == '@') {
-            seen.push_back(nextmodel);
-            size_t colon = start.find(':', 1);
-            std::string reference = start.substr(1, colon - 1);
+    std::string GetRenderCacheMode() const override {
+        return _frame->EnableRenderCache().ToStdString();
+    }
 
-            if (std::find(seen.begin(), seen.end(), reference) != seen.end()) {
-                wxString msg = wxString::Format("    ERR: Model '%s' start channel results in a reference loop.", startmodel);
-                if (writeToTextFile) {
-                    LogAndWrite(f, msg.ToStdString());
-                    for (const auto& it : seen) {
-                        msg = wxString::Format("       '%s' ->", it);
-                        LogAndWrite(f, msg.ToStdString());
-                    }
-                    msg = wxString::Format("       '%s'", reference);
-                    LogAndWrite(f, msg.ToStdString());
-                    errcount++;
-                } else {
-                    std::string chainMsg = msg.ToStdString() + "\n";
-                    for (const auto& it : seen) {
-                        chainMsg += wxString::Format("       '%s' ->\n", it).ToStdString();
-                    }
-                    chainMsg += wxString::Format("       '%s'", reference).ToStdString();
-                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL,
-                                chainMsg, "channels", errcount, warncount);
-                }
-                return false;
-            } else {
-                return CheckStart(f, report, writeToTextFile, errcount, warncount, startmodel, seen, reference);
-            }
-        } else {
-            // it resolves to something ok
-            return true;
+    std::string CheckVideoCompatibility(const std::string& /*path*/) override {
+        return "";
+    }
+
+    void OnProgress(int percent, const std::string& step) override {
+        if (_prog != nullptr) {
+            // SequenceChecker reports 0..100 across all four Run* calls. The
+            // wrapper carves out 5..95 for the delegated checks (network/prefs
+            // get 0..5 and OS checks get 95..100).
+            int scaled = 5 + (percent * 90) / 100;
+            _prog->Update(scaled, step);
+            wxYield();
         }
     }
-}
+
+private:
+    xLightsFrame* _frame;
+    wxProgressDialog* _prog;
+};
+
+} // namespace
 
 std::string xLightsFrame::CheckSequence(bool displayInEditor, bool writeToFile)
 {
@@ -5227,1409 +5210,126 @@ std::string xLightsFrame::CheckSequence(bool displayInEditor, bool writeToFile)
     errcount = 0;
     warncount = 0;
 
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Inactive Controller Checks");
+    // Delegate the bulk of the checks to SequenceChecker (controllers, models,
+    // per-effect/per-element walk, file references). The wx-only chunks above
+    // (network/preferences) and below (AllObjects, OS performance probe, HTML)
+    // stay here.
+    DesktopCheckCallbacks cb(this, &prog);
+    SequenceChecker checker(_sequenceElements, AllModels, _outputManager,
+                            CurrentSeqXmlFile, GetShowDirectory(), &cb);
 
-    prog.Update(3, "Checking controllers");
-    wxYield();
-
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Checking for inactive controllers");
-
-    // Check for inactive outputs
-    for (const auto& c : _outputManager.GetControllers()) {
-        if (!c->IsEnabled() && c->CanSendData() && c->GetModel() != "FPP Player Only" && c->GetModel() != "FPP Video Playing Remote Only" ) {
-            wxString msg = wxString::Format("    WARN: Inactive controller %s %s:%s.",
-                                            c->GetName(), c->GetColumn1Label(), c->GetColumn2Label());
-            LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "inactive", errcount, warncount);
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    // multiple outputs to same universe and same IP
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Multiple outputs sending to same destination");
-
-    std::list<std::string> used;
-    for (const auto& o : _outputManager.GetAllOutputs()) {
-        if (o->IsIpOutput() && (o->GetType() == OUTPUT_E131 || o->GetType() == OUTPUT_ARTNET || o->GetType() == OUTPUT_KINET)) {
-            std::string usedval = o->GetIP() + "|" + o->GetUniverseString();
-
-            if (std::find(used.begin(), used.end(), usedval) != used.end()) {
-                int32_t sc;
-                auto c = _outputManager.GetController(o->GetStartChannel(), sc);
-
-                wxString msg = wxString::Format("    ERR: Multiple outputs being sent to the same controller '%s' (%s) and universe %s.",
-                                                (const char*)c->GetName().c_str(),
-                                                (const char*)o->GetIP().c_str(),
-                                                (const char*)o->GetUniverseString().c_str());
-                LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "duplicates", errcount, warncount);
-            } else {
-                used.push_back(usedval);
-            }
-        } else if (o->IsSerialOutput()) {
-            if (o->GetCommPort() != "NotConnected") {
-                if (std::find(used.begin(), used.end(), o->GetCommPort()) != used.end()) {
-                    wxString msg = wxString::Format("    ERR: Multiple outputs being sent to the same comm port %s '%s'.", (const char*)o->GetType().c_str(), (const char*)o->GetCommPort().c_str());
-                    LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "duplicates", errcount, warncount);
-                } else {
-                    used.push_back(o->GetCommPort());
-                }
-            }
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    LogCheckSequenceMsg(wxString::Format("\nSection Errors (Controllers): %u. Warnings: %u", (unsigned int)errcount, (unsigned int)warncount).ToStdString());
+    int sectionStartErrors = report.GetTotalErrors();
+    int sectionStartWarnings = report.GetTotalWarnings();
+    checker.RunControllerChecks(report);
+    LogCheckSequenceMsg(wxString::Format("\nSection Errors (Controllers): %u. Warnings: %u",
+                                         (unsigned int)(report.GetTotalErrors() - sectionStartErrors),
+                                         (unsigned int)(report.GetTotalWarnings() - sectionStartWarnings)).ToStdString());
     LogCheckSequenceMsg("-----------------------------------------------------------------------------------------------------------------");
-    toterrcount += errcount;
-    totwarncount += warncount;
-    errcount = 0;
-    warncount = 0;
-
-    // Controller Checks
-    // do these checks for all Managed Controllers
-    std::list<Controller*> uniqueControllers;
-    for (const auto& it : _outputManager.GetControllers()) {
-        auto eth = dynamic_cast<ControllerEthernet*>(it);
-        if (eth != nullptr && (eth->GetProtocol() == OUTPUT_ZCPP || eth->GetProtocol() == OUTPUT_DDP || eth->IsManaged())) {
-            uniqueControllers.push_back(eth);
-        }
-    }
-
-    if (uniqueControllers.size() > 0) {
-        LogCheckSequenceMsg("");
-        LogCheckSequenceMsg("Controller Checks");
-        LogCheckSequenceMsg("");
-
-        // controller ip address must only be on one output ... no duplicates
-        for (const auto& it : uniqueControllers) {
-            for (const auto& itc : _outputManager.GetControllers()) {
-                auto eth = dynamic_cast<ControllerEthernet*>(itc);
-                if (eth != nullptr) {
-                    if (eth != it && it->GetIP() != "MULTICAST" && (it->GetIP() == eth->GetIP() || it->GetIP() == eth->GetResolvedIP(false))) {
-                        wxString msg = wxString::Format("    ERR: %s IP Address '%s' for controller '%s' used on another controller '%s'. This is not allowed.",
-                                                        (const char*)it->GetProtocol().c_str(),
-                                                        (const char*)it->GetIP().c_str(),
-                                                        (const char*)it->GetName().c_str(),
-                                                        (const char*)eth->GetName().c_str());
-                        LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "overlap", errcount, warncount);
-                        break;
-                    }
-                }
-            }
-        }
-
-        std::map<std::string, std::map<std::string, std::list<Model*>>> modelsByPortByController;
-        for (const auto& it : AllModels) {
-            if (it.second->GetControllerName() != "") {
-                auto c = _outputManager.GetController(it.second->GetControllerName());
-                if (c != nullptr) {
-                    auto caps = c->GetControllerCaps();
-                    if (!it.second->IsControllerConnectionValid() && (caps != nullptr && caps->GetMaxPixelPort() != 0 && caps->GetMaxSerialPort() != 0)) {
-                        wxString msg = wxString::Format("    ERR: Model %s on %s controller '%s:%s' has invalid controller connection '%s'.",
-                                                        (const char*)it.second->GetName().c_str(),
-                                                        (const char*)c->GetProtocol().c_str(),
-                                                        (const char*)c->GetName().c_str(),
-                                                        (const char*)c->GetIP().c_str(),
-                                                        (const char*)it.second->GetControllerConnectionString().c_str());
-                        LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "invalid", errcount, warncount);
-                    }
-
-                    if (modelsByPortByController.find(c->GetName()) == modelsByPortByController.end()) {
-                        std::map<std::string, std::list<Model*>> pm;
-                        modelsByPortByController[c->GetName()] = pm;
-                    }
-                    modelsByPortByController[c->GetName()][wxString::Format("%s:%d:%d", it.second->IsPixelProtocol() ? _("PIXEL") : _("SERIAL"), it.second->GetControllerPort(), it.second->GetSmartRemote()).Lower().ToStdString()].push_back(it.second);
-                }
-            }
-        }
-
-        // Models with chains to models that dont exist or are not on same controller and port
-        // Multiple models with the same chain value on the same port on the same controller
-        // Loops in model chains
-
-        // for each controller
-        for (auto& it : modelsByPortByController) {
-            // it->first is controller
-            // it->second is a list of ports
-
-            auto c = _outputManager.GetController(it.first);
-
-            // for each port
-            for (auto& itp : it.second) {
-                // itp->first is the port name
-                // itp->second  is the model list
-
-                // dont scan serial because the chaining rules are different
-                if (Contains(itp.first, "pixel")) {
-                    // validate that all chained
-
-                    // order the models
-                    std::string last = "";
-
-                    while (itp.second.size() > 0) {
-                        bool pushed = false;
-                        for (auto itms = begin(itp.second); itms != end(itp.second); ++itms) {
-                            if (((*itms)->GetModelChain() == "Beginning" && last == "") ||
-                                (*itms)->GetModelChain() == last ||
-                                (*itms)->GetModelChain() == ">" + last) {
-                                pushed = true;
-                                last = (*itms)->GetName();
-                                itp.second.erase(itms);
-                                break;
-                            }
-                        }
-
-                        if (!pushed && itp.second.size() > 0) {
-                            // chain is broken ... so just put the rest in in random order
-                            while (itp.second.size() > 0) {
-                                wxString msg = wxString::Format("    ERR: Model %s on ZCPP controller '%s:%s' on port '%s' has invalid Model Chain '%s'. It may be a duplicate or point to a non existent model on this controller port or there may be a loop.",
-                                                                (const char*)itp.second.front()->GetName().c_str(),
-                                                                (const char*)c->GetIP().c_str(),
-                                                                (const char*)c->GetName().c_str(),
-                                                                (const char*)itp.second.front()->GetControllerConnectionString().c_str(),
-                                                                (const char*)itp.second.front()->GetModelChain().c_str());
-                                LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "duplicate", errcount, warncount);
-                                itp.second.pop_front();
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Apply the vendor specific validations
-        for (const auto& it : _outputManager.GetControllers()) {
-            std::string controllerId = wxString::Format("%s:%s", it->GetName(), it->GetIP()).ToStdString();
-            wxString msg = wxString::Format("Applying controller rules for %s:%s:%s", it->GetName(), it->GetIP(), it->GetDescription());
-            LogAndTrackInfo(report, "controllers", msg.ToStdString(), "vendor:" + controllerId);
-
-            std::string check;
-            UDController edc(it, &_outputManager, &AllModels, false);
-
-            check = "";
-            auto fcr = ControllerCaps::GetControllerConfig(it->GetVendor(), it->GetModel(), it->GetVariant());
-
-            if (fcr != nullptr) {
-                if (!edc.Check(fcr, check)) {
-                    std::istringstream stream(check);
-                    std::string line;
-                    while (std::getline(stream, line)) {
-                        if (line.find("ERR:") != std::string::npos) {
-                            LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::CRITICAL, line, "vendor:" + controllerId, errcount, warncount);
-                        } else if (line.find("WARN:") != std::string::npos) {
-                            LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::WARNING, line, "vendor:" + controllerId, errcount, warncount);
-                        }
-                    }
-                }
-            } else {
-                LogAndTrackInfo(report, "controllers", "Unknown controller vendor - vendor specific checks skipped.", "vendor:" + controllerId);
-            }
-        }
-
-        if (errcount + warncount == errcountsave + warncountsave) {
-            LogCheckSequenceMsg("    No problems found");
-        }
-        errcountsave = errcount;
-        warncountsave = warncount;
-    }
-
-    if (!IsCheckSequenceOptionDisabled("DupUniv")) {
-        // multiple outputs to same universe/ID
-        LogCheckSequenceMsg("");
-        LogCheckSequenceMsg("Multiple outputs with same universe/id number");
-
-        std::map<int, int> useduid;
-        auto outputs = _outputManager.GetAllOutputs();
-        for (auto o : outputs) {
-            if (o->GetType() != OUTPUT_ZCPP) {
-                useduid[o->GetUniverse()]++;
-            }
-        }
-
-        for (auto u : useduid) {
-            if (u.second > 1) {
-                wxString msg = wxString::Format("    WARN: Multiple outputs (%d) with same universe/id number %d. If using #universe:start_channel result may be incorrect.", u.second, u.first);
-                LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "multiple", errcount, warncount);
-            }
-        }
-
-        if (errcount + warncount == errcountsave + warncountsave) {
-            LogCheckSequenceMsg("    No problems found");
-        }
-        errcountsave = errcount;
-        warncountsave = warncount;
-    } else {
-        LogCheckSequenceMsg("");
-        LogAndTrackInfo(report, "controllers", "Multiple outputs with same universe/id number - CHECK DISABLED", "checkdisabled");
-    }
-
-    // Controller universes out of order
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Controller universes out of order - because some controllers care");
-
-    std::map<std::string, int> lastuniverse;
-    for (auto n : _outputManager.GetAllOutputs()) {
-        if (n->IsIpOutput() && (n->GetType() == OUTPUT_E131 || n->GetType() == OUTPUT_ARTNET)) {
-            if (lastuniverse.find(n->GetIP()) == lastuniverse.end()) {
-                lastuniverse[n->GetIP()] = n->GetUniverse();
-            } else {
-                if (lastuniverse[n->GetIP()] > n->GetUniverse()) {
-                    wxString msg = wxString::Format("    WARN: Controller %s Universe %d occurs after universe %d. Some controllers do not like out of order universes.",
-                                                    n->GetIP(), n->GetUniverse(), lastuniverse[n->GetIP()]);
-                    LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "order", errcount, warncount);
-                } else {
-                    lastuniverse[n->GetIP()] = n->GetUniverse();
-                }
-            }
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    // controllers sending to routable IP addresses
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Invalid controller IP addresses");
-
-    for (const auto& c : _outputManager.GetControllers()) {
-        auto eth = c;
-        if (eth->GetIP() != "" && eth->GetIP() != "MULTICAST") {
-            if (!ip_utils::IsIPValidOrHostname(eth->GetIP())) {
-                wxString msg = wxString::Format("    WARN: IP address '%s' on controller '%s' does not look valid.",
-                                                (const char*)eth->GetIP().c_str(),
-                                                (const char*)eth->GetName().c_str());
-                LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "ip_validation", errcount, warncount);
-            } else {
-                wxArrayString ipElements = wxSplit(eth->GetIP(), '.');
-                if (ipElements.size() > 3) {
-                    // looks like an IP address
-                    int ip1 = wxAtoi(ipElements[0]);
-                    int ip2 = wxAtoi(ipElements[1]);
-                    int ip3 = wxAtoi(ipElements[2]);
-                    int ip4 = wxAtoi(ipElements[3]);
-
-                    if (ip1 == 10) {
-                        if (ip2 == 255 && ip3 == 255 && ip4 == 255) {
-                            wxString msg = wxString::Format("    ERR: IP address '%s' on controller '%s' is a broadcast address.",
-                                                            (const char*)eth->GetIP().c_str(),
-                                                            (const char*)eth->GetName().c_str());
-                            LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "ip_validation", errcount, warncount);
-                        }
-                        // else this is valid
-                    } else if (ip1 == 192 && ip2 == 168) {
-                        if (ip3 == 255 && ip4 == 255) {
-                            wxString msg = wxString::Format("    ERR: IP address '%s' on controller '%s' is a broadcast address.",
-                                                            (const char*)eth->GetIP().c_str(),
-                                                            (const char*)eth->GetName().c_str());
-                            LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "ip_validation", errcount, warncount);
-                        }
-                        // else this is valid
-                    } else if (ip1 == 172 && ip2 >= 16 && ip2 <= 31) {
-                        // this is valid
-                    } else if (ip1 == 255 && ip2 == 255 && ip3 == 255 && ip4 == 255) {
-                        wxString msg = wxString::Format("    ERR: IP address '%s' on controller '%s' is a broadcast address.",
-                                                        (const char*)eth->GetIP().c_str(),
-                                                        (const char*)eth->GetName().c_str());
-                        LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "ip_validation", errcount, warncount);
-                    } else if (ip1 == 0) {
-                        wxString msg = wxString::Format("    ERR: IP address '%s' on controller '%s' not valid.",
-                                                        (const char*)eth->GetIP().c_str(),
-                                                        (const char*)eth->GetName().c_str());
-                        LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "ip_validation", errcount, warncount);
-                    } else if (ip1 >= 224 && ip1 <= 239) {
-                        wxString msg = wxString::Format("    ERR: IP address '%s' on controller '%s' is a multicast address.",
-                                                        (const char*)eth->GetIP().c_str(),
-                                                        (const char*)eth->GetName().c_str());
-                        LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "ip_validation", errcount, warncount);
-                    } else {
-                        wxString msg = wxString::Format("    WARN: IP address '%s' on controller '%s' in internet routable ... are you sure you meant to do this.",
-                                                        (const char*)eth->GetIP().c_str(),
-                                                        (const char*)eth->GetName().c_str());
-                        LogAndTrack(report, "controllers", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "ip_validation", errcount, warncount);
-                    }
-                }
-            }
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Models spanning controllers");
-    for (const auto& it : AllModels) {
-        if (it.second->GetDisplayAs() != DisplayAsType::ModelGroup && it.second->GetDisplayAs() != DisplayAsType::Label) {
-            int32_t start = it.second->GetFirstChannel() + 1;
-            int32_t end = it.second->GetLastChannel() + 1;
-
-            int32_t sc;
-            Controller* ostart = _outputManager.GetController(start, sc);
-            Controller* oend = _outputManager.GetController(end, sc);
-
-            auto eth_ostart = dynamic_cast<ControllerEthernet*>(ostart);
-            auto eth_oend = dynamic_cast<ControllerEthernet*>(oend);
-            auto ser_ostart = dynamic_cast<ControllerSerial*>(ostart);
-            auto ser_oend = dynamic_cast<ControllerSerial*>(oend);
-
-            if (ostart != nullptr && oend == nullptr) {
-                wxString msg = wxString::Format("    ERR: Model '%s' starts on controller '%s' but ends at channel %d which is not on a controller.", it.first, ostart->GetName(), end);
-                LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "channels", errcount, warncount);
-            } else if (ostart == nullptr || oend == nullptr) {
-                wxString msg = wxString::Format("    ERR: Model '%s' is not configured for a controller.", it.first);
-                if (!it.second->IsActive()) {
-                    msg = wxString::Format("    WARN: Model '%s' is not configured for a controller.", it.first);
-                }
-                auto issueType = !it.second->IsActive()
-                                     ? CheckSequenceReport::ReportIssue::WARNING
-                                     : CheckSequenceReport::ReportIssue::CRITICAL;
-                LogAndTrack(report, "models", issueType, msg.ToStdString(), "unconfigured", errcount, warncount);
-            } else if (ostart->GetType() != oend->GetType()) {
-                wxString msg = wxString::Format("    WARN: Model '%s' starts on controller '%s' of type '%s' but ends on a controller '%s' of type '%s'.", it.first, ostart->GetName(), ostart->GetType(), oend->GetDescription(), oend->GetType());
-                LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "config", errcount, warncount);
-            } else if (eth_ostart != nullptr && eth_oend != nullptr && eth_ostart->GetIP() == "MULTICAST" && eth_oend->GetIP() == "MULTICAST") {
-                // ignore these
-            } else if (eth_ostart != nullptr && eth_oend != nullptr && eth_ostart->GetIP() + eth_oend->GetIP() != "") {
-                if (eth_ostart->GetIP() != eth_oend->GetIP()) {
-                    wxString msg = wxString::Format("    WARN: Model '%s' starts on controller '%s' with IP '%s' but ends on a controller '%s' with IP '%s'.",
-                                                    it.first,
-                                                    ostart->GetName(),
-                                                    eth_ostart->GetIP(),
-                                                    oend->GetName(),
-                                                    eth_oend->GetIP());
-                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "config", errcount, warncount);
-                }
-            } else if (ser_ostart != nullptr && ser_oend != nullptr && ser_ostart->GetPort() + ser_oend->GetPort() != "") {
-                if (ser_ostart->GetPort() != ser_oend->GetPort()) {
-                    wxString msg = wxString::Format("    WARN: Model '%s' starts on controller '%s' with CommPort '%s' but ends on a controller '%s' with CommPort '%s'.",
-                                                    it.first,
-                                                    ostart->GetName(),
-                                                    ser_ostart->GetPort(),
-                                                    ser_oend->GetName(),
-                                                    ser_oend->GetPort());
-                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "config", errcount, warncount);
-                }
-            }
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    LogCheckSequenceMsg(wxString::Format("\nSection Errors (Controllers): %u. Warnings: %u", (unsigned int)errcount, (unsigned int)warncount).ToStdString());
-    LogCheckSequenceMsg("-----------------------------------------------------------------------------------------------------------------");
-    toterrcount += errcount;
-    totwarncount += warncount;
-    errcount = 0;
-    warncount = 0;
-
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Model Channel Checks");
-
-    prog.Update(50, "Checking models");
-    wxYield();
-
-    for (const auto& it : AllModels) {
-        if (it.second->GetDisplayAs() != DisplayAsType::ModelGroup && it.second->GetDisplayAs() != DisplayAsType::Label) {
-            std::string start = it.second->ModelStartChannel;
-
-            if (start[0] == '>' || start[0] == '@') {
-                size_t colon = start.find(':', 1);
-                std::string reference = start.substr(1, colon - 1);
-
-                if (reference == it.first) {
-                    wxString msg = wxString::Format("    ERR: Model '%s' start channel '%s' refers to itself.", it.first, start);
-                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "channels", errcount, warncount);
-                } else {
-                    Model* m = AllModels.GetModel(reference);
-                    if (m == nullptr) {
-                        wxString msg = wxString::Format("    ERR: Model '%s' start channel '%s' refers to non existent model '%s'.", it.first, start, reference);
-                        LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "channels", errcount, warncount);
-                    }
-                }
-            } else if (start[0] == '!') {
-                auto comp = wxSplit(start.substr(1), ':');
-                if (_outputManager.GetController(comp[0]) == nullptr) {
-                    wxString msg = wxString::Format("    ERR: Model '%s' start channel '%s' refers to non existent controller '%s'.", it.first, start, comp[0]);
-                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "channels", errcount, warncount);
-                }
-            }
-            if (it.second->GetLastChannel() == (unsigned int)-1) {
-                wxString msg = wxString::Format("    ERR: Model '%s' start channel '%s' evaluates to an illegal channel number.", it.first, start);
-                LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "channels", errcount, warncount);
-            }
-        }
-    }
-
-    for (const auto& it : AllModels) {
-        if (it.second->GetDisplayAs() != DisplayAsType::ModelGroup && it.second->GetDisplayAs() != DisplayAsType::Label) {
-            std::string start = it.second->ModelStartChannel;
-
-            if (start[0] == '>' || start[0] == '@') {
-                std::list<std::string> seen;
-                seen.push_back(it.first);
-                size_t colon = start.find(':', 1);
-                if (colon != std::string::npos) {
-                    std::string reference = start.substr(1, colon - 1);
-                    if (reference != it.first) {
-                        if (!CheckStart(f, report, false, errcount, warncount, it.first, seen, reference)) {
-                            errcount++;
-                        }
-                    }
-                } else {
-                    wxString msg = wxString::Format("    ERR: Model '%s' start channel '%s' invalid.", it.first, start);
-                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "channels", errcount, warncount);
-                }
-            } else if (start[0] == '#') {
-                size_t colon = start.find(':', 1);
-                if (colon != std::string::npos) {
-                    size_t colon2 = start.find(':', colon + 1);
-                    if (colon2 == std::string::npos) {
-                        colon2 = colon;
-                        colon = 0;
-                    }
-                    int universe = wxAtoi(wxString(start.substr(colon + 1, colon2 - 1)));
-
-                    Output* o = _outputManager.GetOutput(universe, "");
-
-                    if (o == nullptr) {
-                        wxString msg = wxString::Format("    ERR: Model '%s' start channel '%s' refers to undefined universe %d.", it.first, start, universe);
-                        LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "channels", errcount, warncount);
-                    }
-                } else {
-                    wxString msg = wxString::Format("    ERR: Model '%s' start channel '%s' invalid.", it.first, start);
-                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "channels", errcount, warncount);
-                }
-            } else if (start[0] == '!') {
-                // nothing to check
-            } else if (start.find(':') != std::string::npos) {
-                size_t colon = start.find(':');
-                int output = wxAtoi(wxString(start.substr(0, colon)));
-
-                auto cnt = _outputManager.GetOutputCount();
-
-                if (output < 1 || output > cnt) {
-                    wxString msg = wxString::Format("    ERR: Model '%s' start channel '%s' refers to undefined output %d. Only %d outputs are defined.", it.first, start, output, cnt);
-                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "channels", errcount, warncount);
-                }
-            }
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Overlapping model channels");
-
-    // Check for overlapping channels in models
-    for (auto it = std::begin(AllModels); it != std::end(AllModels); ++it) {
-        if (it->second->GetDisplayAs() != DisplayAsType::ModelGroup) {
-            if(it->second->GetModelStartChannel().starts_with("@") && it->second->GetDisplayAs() == DisplayAsType::SingleLine && it->second->GetNumStrings() > 1) {
-                spdlog::debug("Skipping Overlap Checking for {} [{}]", it->second->GetFullName().c_str(), it->second->GetModelStartChannel().c_str());
-                continue;
-            }
-
-            auto m1start = it->second->GetFirstChannel() + 1;
-            auto m1end = it->second->GetLastChannel() + 1;
-
-            for (auto it2 = std::next(it); it2 != std::end(AllModels); ++it2) {
-                if (it2->second->GetDisplayAs() != DisplayAsType::ModelGroup && it2->second->GetShadowModelFor() != it->first && it->second->GetShadowModelFor() != it2->first) {
-                    auto m2start = it2->second->GetFirstChannel() + 1;
-                    auto m2end = it2->second->GetLastChannel() + 1;
-
-                    if (m2start <= m1end && m2end >= m1start) {
-                        wxString msg = wxString::Format("    WARN: Probable model overlap '%s' (%d-%d) and '%s' (%d-%d).",
-                                                        it->first, m1start, m1end,
-                                                        it2->first, m2start, m2end);
-                        LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "overlap", errcount, warncount);
-                    }
-                }
-            }
-        }
-    }
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    // Check for non contiguous models on the same controller connection
-    if (!IsCheckSequenceOptionDisabled("NonContigChOnPort")) {
-        LogCheckSequenceMsg("");
-        LogCheckSequenceMsg("Non contiguous channels on controller ports");
-
-        std::map<std::string, std::list<Model*>*> modelsByPort;
-        for (const auto& it : AllModels) {
-            if (it.second->GetDisplayAs() != DisplayAsType::ModelGroup) {
-                std::string cc = "";
-                if (it.second->IsControllerConnectionValid()) {
-                    cc = wxString::Format("%s:%s:%d:%d", it.second->IsPixelProtocol() ? _("pixel") : _("serial"), it.second->GetControllerProtocol(), it.second->GetControllerPort(), it.second->GetSmartRemote()).ToStdString();
-                }
-                if (cc != "") {
-                    int32_t start = it.second->GetFirstChannel() + 1;
-                    int32_t sc;
-                    Output* o = _outputManager.GetOutput(start, sc);
-
-                    if (o != nullptr && o->IsIpOutput() && o->GetIP() != "MULTICAST") {
-                        std::string key = o->GetIP() + cc;
-                        if (modelsByPort.find(key) == modelsByPort.end()) {
-                            modelsByPort[key] = new std::list<Model*>();
-                        }
-                        modelsByPort[key]->push_back(it.second);
-                    }
-                }
-            }
-        }
-
-        for (auto& it : modelsByPort) {
-            if (it.second->size() == 1 || Contains(it.first, "serial")) {
-                // we dont need to check this one because one model or a serial protocol
-            } else {
-                it.second->sort(compare_modelstartchannel);
-
-                auto it2 = it.second->begin();
-                auto it3 = it2;
-                ++it3;
-
-                while (it3 != it.second->end()) {
-                    int32_t m1start = (*it2)->GetNumberFromChannelString((*it2)->ModelStartChannel);
-                    int32_t m1end = m1start + (*it2)->GetChanCount() - 1;
-                    int32_t m2start = (*it3)->GetNumberFromChannelString((*it3)->ModelStartChannel);
-
-                    if (m1end + 1 != m2start && m2start - m1end - 1 > 0) {
-                        int32_t sc;
-                        Output* o = _outputManager.GetOutput(m1start, sc);
-                        wxString msg;
-                        if (m2start - m1end - 1 <= 30) {
-                            msg = wxString::Format("    WARN: Model '%s' and Model '%s' are on controller IP '%s' Output Connection '%s' but there is a small gap of %d channels between them. Maybe these are NULL Pixels?",
-                                                   (*it2)->GetName(),
-                                                   (*it3)->GetName(),
-                                                   o->GetIP(),
-                                                   (*it2)->GetControllerConnectionString(),
-                                                   m2start - m1end - 1);
-                        } else {
-                            msg = wxString::Format("    WARN: Model '%s' and Model '%s' are on controller IP '%s' Output Connection '%s' but there is a gap of %d channels between them.",
-                                                   (*it2)->GetName(),
-                                                   (*it3)->GetName(),
-                                                   o->GetIP(),
-                                                   (*it2)->GetControllerConnectionString(),
-                                                   m2start - m1end - 1);
-                        }
-                        LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "overlapgap", errcount, warncount);
-                    }
-
-                    ++it2;
-                    ++it3;
-                }
-            }
-            delete it.second;
-            it.second = nullptr;
-        }
-
-        if (errcount + warncount == errcountsave + warncountsave) {
-            LogCheckSequenceMsg("    No problems found");
-        }
-        errcountsave = errcount;
-        warncountsave = warncount;
-    } else {
-        LogCheckSequenceMsg("");
-        LogAndTrackInfo(report, "models", "Non contiguous channels on controller ports - CHECK DISABLED", "checkdisabled");
-    }
-
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Model nodes not allocated to layers correctly");
-
-    for (auto it = AllModels.begin(); it != AllModels.end(); ++it) {
-        if (it->second->GetDisplayAs() != DisplayAsType::ModelGroup) {
-            if (wxString(it->second->GetStringType()).EndsWith("Nodes") && !it->second->AllNodesAllocated()) {
-                wxString msg = wxString::Format("    WARN: %s model '%s' Node Count and Layer Size allocations dont match.", DisplayAsTypeToString(it->second->GetDisplayAs()).c_str(), it->first);
-                LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "overlapnodes", errcount, warncount);
-            }
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Models with issues");
-
-    for (const auto& it : AllModels) {
-        std::list<std::string> warnings = it.second->CheckModelSettings();
-        for (const auto& it : warnings) {
-            auto issueType = (it.find("WARN:") != std::string::npos)
-                                 ? CheckSequenceReport::ReportIssue::WARNING
-                                 : CheckSequenceReport::ReportIssue::CRITICAL;
-            LogAndTrack(report, "models", issueType, it, "settings", errcount, warncount);
-        }
-
-        if ((it.second->GetPixelStyle() == Model::PIXEL_STYLE::PIXEL_STYLE_SOLID_CIRCLE || it.second->GetPixelStyle() == Model::PIXEL_STYLE::PIXEL_STYLE_BLENDED_CIRCLE) && it.second->GetNodeCount() > 100) {
-            wxString msg = wxString::Format("    WARN: model '%s' uses pixel style '%s' which is known to render really slowly. Consider using a different pixel style.", it.first, Model::GetPixelStyleDescription(it.second->GetPixelStyle()));
-            LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "render", errcount, warncount);
-        }
-    }
-
+    toterrcount += (report.GetTotalErrors() - sectionStartErrors);
+    totwarncount += (report.GetTotalWarnings() - sectionStartWarnings);
+
+    sectionStartErrors = report.GetTotalErrors();
+    sectionStartWarnings = report.GetTotalWarnings();
+    checker.RunModelChecks(report);
+
+    // ViewObjects live on xLightsFrame (wx-bound); run their settings checks
+    // here so the resulting issues fold into the same Models section.
     for (const auto& it : AllObjects) {
         std::list<std::string> warnings = it.second->CheckModelSettings();
-        for (const auto& it : warnings) {
-            auto issueType = (it.find("WARN:") != std::string::npos)
+        for (const auto& w : warnings) {
+            auto issueType = (w.find("WARN:") != std::string::npos)
                                  ? CheckSequenceReport::ReportIssue::WARNING
                                  : CheckSequenceReport::ReportIssue::CRITICAL;
-            LogAndTrack(report, "models", issueType, it, "settings", errcount, warncount);
+            LogAndTrack(report, "models", issueType, w, "settings", errcount, warncount);
         }
     }
+    LogCheckSequenceMsg(wxString::Format("\nSection Errors (Models): %u. Warnings: %u",
+                                         (unsigned int)(report.GetTotalErrors() - sectionStartErrors),
+                                         (unsigned int)(report.GetTotalWarnings() - sectionStartWarnings)).ToStdString());
+    LogCheckSequenceMsg("-----------------------------------------------------------------------------------------------------------------");
+    toterrcount += (report.GetTotalErrors() - sectionStartErrors);
+    totwarncount += (report.GetTotalWarnings() - sectionStartWarnings);
+    errcount = 0;
+    warncount = 0;
 
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
+    sectionStartErrors = report.GetTotalErrors();
+    sectionStartWarnings = report.GetTotalWarnings();
+    checker.RunSequenceChecks(report);
 
-    if (!IsCheckSequenceOptionDisabled("PreviewGroup")) {
-        LogCheckSequenceMsg("");
-        LogCheckSequenceMsg("Model Groups containing models from different previews");
-
-        for (const auto& it : AllModels) {
-            if (it.second->GetDisplayAs() == DisplayAsType::ModelGroup) {
-                std::string mgp = it.second->GetLayoutGroup();
-
-                ModelGroup* mg = dynamic_cast<ModelGroup*>(it.second);
-                if (mg == nullptr) {
-                    // this should never happen
-                    wxString msg = wxString::Format("Model %s says it is a model group but it doesn't cast as one.", (const char*)it.second->GetName().c_str());
-                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "grouperrors", errcount, warncount);
-                } else {
-                    auto models = mg->ModelNames();
-
-                    for (auto it2 : models) {
-                        Model* m = AllModels.GetModel(it2);
-                        if (m == nullptr) {
-                            // this should never happen
-                            wxString msg = wxString::Format("Model Group %s contains non existent model %s.", (const char*)mg->GetName().c_str(), (const char*)it2.c_str());
-                            LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "grouperrors", errcount, warncount);
-                        } else if (m->GetDisplayAs() != DisplayAsType::ModelGroup) {
-                            // If model is in all previews dont report it as a problem
-                            if (m->GetLayoutGroup() != "All Previews" && mg->GetLayoutGroup() != "All Previews" && mgp != m->GetLayoutGroup()) {
-                                wxString msg = wxString::Format("    WARN: Model Group '%s' in preview '%s' contains model '%s' which is in preview '%s'. This will cause the '%s' model to also appear in the '%s' preview.", mg->GetName(), mg->GetLayoutGroup(), m->GetName(), m->GetLayoutGroup(), m->GetName(), mg->GetLayoutGroup());
-                                LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "grouppreview", errcount, warncount);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (errcount + warncount == errcountsave + warncountsave) {
-            LogCheckSequenceMsg("    No problems found");
-        }
-        errcountsave = errcount;
-        warncountsave = warncount;
-    } else {
-        LogCheckSequenceMsg("");
-        LogAndTrackInfo(report, "models", "Model Groups containing models from different previews - CHECK DISABLED", "checkdisabled");
-    }
-
-    // Check for duplicate model/model group names
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Model/Model Groups without distinct names");
-
-    for (auto it = std::begin(AllModels); it != std::end(AllModels); ++it) {
-        for (auto it2 = std::next(it); it2 != std::end(AllModels); ++it2) {
-            if (it->second->GetName() == it2->second->GetName()) {
-                wxString msg = wxString::Format("    ERR: Duplicate Model/Model Group Name '%s'.", it->second->GetName());
-                LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "groupdistinctnames", errcount, warncount);
-            }
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    // Check for model groups containing itself or other model groups
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Model Groups containing non existent models");
-
-    std::list<std::string> emptyModelGroups;
-
-    for (const auto& it : AllModels) {
-        if (it.second->GetDisplayAs() == DisplayAsType::ModelGroup) {
-            ModelGroup* mg = dynamic_cast<ModelGroup*>(it.second);
-            if (mg != nullptr) { // this should never fail
-                auto models = mg->ModelNames();
-
-                int modelCount = 0;
-
-                for (const auto& m : models) {
-                    Model* model = AllModels.GetModel(m);
-
-                    if (model == nullptr) {
-                        wxString msg = wxString::Format("    ERR: Model group '%s' refers to non existent model '%s'.", mg->GetName(), m.c_str());
-                        LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "groupnonexistent", errcount, warncount);
-                    } else {
-                        modelCount++;
-                        if (model->GetName() == mg->GetName()) {
-                            wxString msg = wxString::Format("    ERR: Model group '%s' contains reference to itself.", mg->GetName());
-                            LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "groupnonexistent", errcount, warncount);
-                        }
-                    }
-                }
-                if (modelCount == 0) {
-                    emptyModelGroups.push_back(it.first);
-                }
-            }
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    // Check for model groups containing no valid models
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Model Groups containing no models that exist");
-
-    for (const auto& it : emptyModelGroups) {
-        wxString msg = wxString::Format("    ERR: Model group '%s' contains no models.", it);
-        LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "groupnonexistent", errcount, warncount);
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    if (!IsCheckSequenceOptionDisabled("DupNodeMG")) {
-        LogCheckSequenceMsg("");
-        LogCheckSequenceMsg("Model Groups containing duplicate nodes");
-
-        for (const auto& it : AllModels) {
-            ModelGroup* mg = dynamic_cast<ModelGroup*>(it.second);
-            if (mg != nullptr) {
-                std::map<long, Model*> usedch;
-                std::map<std::string, bool> warned;
-                for (const auto& m : mg->Models()) {
-                    std::vector<NodeBaseClassPtr> nodes;
-                    int bufwi;
-                    int bufhi;
-                    m->InitRenderBufferNodes("Default", "2D", "None", nodes, bufwi, bufhi, 0);
-                    for (const auto& n : nodes) {
-                        auto e = usedch.find(n->ActChan);
-                        if (e != end(usedch)) {
-                            if (m->GetFullName() != e->second->GetFullName()) { // dont warn about duplicate nodes within a model
-                                std::string warn = mg->Name() + m->Name() + e->second->Name();
-                                if (warned.find(warn) == end(warned)) {
-                                    warned[warn] = true;
-                                    wxString msg = wxString::Format("    WARN: Model group '%s' contains model '%s' and model '%s' which contain at least one overlapping node (ch %u). This may not render as expected.", (const char*)mg->Name().c_str(), (const char*)m->GetFullName().c_str(), (const char*)e->second->GetFullName().c_str(), n->ActChan);
-                                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "groupoverlap", errcount, warncount);
-                                }
-                            }
-                        } else {
-                            usedch[n->ActChan] = m;
-                        }
-                    }
-                }
-            }
-        }
-
-        if (errcount + warncount == errcountsave + warncountsave) {
-            LogCheckSequenceMsg("    No problems found");
-        }
-        errcountsave = errcount;
-        warncountsave = warncount;
-    } else {
-        LogCheckSequenceMsg("");
-        LogCheckSequenceMsg("Model Groups containing duplicate nodes - CHECK DISABLED");
-    }
-
-    // Check for model groups and DMX models and common problems
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Model Groups with DMX models likely to cause issues");
-
-    std::list<ModelGroup*> modelGroupsWithDMXModels;
-    for (const auto& it : AllModels) {
-        ModelGroup* mg = dynamic_cast<ModelGroup*>(it.second);
-
-        if (mg != nullptr) {
-            for (const auto& it2 : mg->ModelNames()) {
-                auto m = AllModels[it2];
-                if (m != nullptr && m->IsDMXModel()) {
-                    modelGroupsWithDMXModels.push_back(mg);
+#ifndef __WXOSX__
+    // OpenGL core-profile guard for shader effects — wx-bound because the
+    // canvas wrapper lives in src-ui-wx/.
+    bool sequenceUsesShader = false;
+    for (size_t i = 0; i < _sequenceElements.GetElementCount(MASTER_VIEW); i++) {
+        Element* e = _sequenceElements.GetElement(i);
+        if (e == nullptr || e->GetType() == ElementType::ELEMENT_TYPE_TIMING)
+            continue;
+        for (const auto& el : e->GetEffectLayers()) {
+            for (const auto& ef : el->GetEffects()) {
+                if (ef->GetEffectName() == "Shader") {
+                    sequenceUsesShader = true;
                     break;
                 }
             }
-        }
-    }
-
-    // now we have a list of groups containing models ... look for model groups containing those groups
-    for (const auto& it : AllModels) {
-        ModelGroup* mg = dynamic_cast<ModelGroup*>(it.second);
-
-        if (mg != nullptr) {
-            for (const auto& it2 : modelGroupsWithDMXModels) {
-                if (mg->DirectlyContainsModel(it2)) {
-                    wxString msg = wxString::Format("    WARN: Model group '%s' contains model group '%s' which contains one or more DMX models. This is not likely to work as expected.", (const char*)mg->Name().c_str(), (const char*)it2->Name().c_str());
-                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "groupdmx", errcount, warncount);
-                }
-            }
-        }
-    }
-
-    // Also check those groups only contain models which are all DMX and the same number of channels
-    for (const auto& it : modelGroupsWithDMXModels) {
-        int numchannels = -1;
-        for (const auto& it2 : it->ModelNames()) {
-            auto m = AllModels[it2];
-            if (m == nullptr || !m->IsDMXModel()) {
-                wxString msg = wxString::Format("    WARN: Model group '%s' contains a mix of DMX and non DMX models. This is not likely to work as expected.", (const char*)it->Name().c_str());
-                LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "groupdmx", errcount, warncount);
+            if (sequenceUsesShader)
                 break;
-            } else {
-                if (numchannels == -1) {
-                    numchannels = m->GetChanCount();
-                } else {
-                    if ((uint32_t)numchannels != m->GetChanCount()) {
-                        wxString msg = wxString::Format("    WARN: Model group '%s' contains DMX models with varying numbers of channels. This is not likely to work as expected.", (const char*)it->Name().c_str());
-                        LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "groupdmx", errcount, warncount);
-                        break;
-                    }
-                }
-            }
         }
+        if (sequenceUsesShader)
+            break;
     }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
+    if (sequenceUsesShader && mainSequencer != nullptr && mainSequencer->PanelEffectGrid != nullptr &&
+        !mainSequencer->PanelEffectGrid->IsCoreProfile()) {
+        wxString msg = "    ERR: Sequence has one or more shader effects but open GL version is lower than version 3. These effects may not render.";
+        LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "sequencegeneral", errcount, warncount);
     }
-    errcountsave = errcount;
-    warncountsave = warncount;
+#endif
 
-    // Check for model groups containing moving heads where the heads are all numbered MH1
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Model Groups containing moving heads which have not been numbered");
-
-    for (const auto& it : AllModels) {
-        if (it.second->GetDisplayAs() == DisplayAsType::ModelGroup) {
-            ModelGroup* mg = dynamic_cast<ModelGroup*>(it.second);
-            if (mg != nullptr) { // this should never fail
-                auto models = mg->ModelNames();
-
-                bool allMovingHeads = true;
-                uint32_t count = 0;
-                for (const auto& m : models) {
-                    Model* model = AllModels.GetModel(m);
-
-                    if (model != nullptr) {
-                        if (model->GetDisplayAs() != DisplayAsType::DmxMovingHeadAdv && model->GetDisplayAs() != DisplayAsType::DmxMovingHead) {
-							allMovingHeads = false;
-							break;
-						}
-                        ++count;
-                    }
-                }
-
-                if (count > 1 && allMovingHeads) {
-                    bool numberOK = false;
-
-                    // now check if any are not MH1
-                    for (const auto& m : models) {
-                        Model* model = AllModels.GetModel(m);
-
-                        if (model != nullptr) {
-                            if (dynamic_cast <DmxMovingHeadComm*>(model)->GetFixture() != "MH1") {
-                                numberOK = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (!numberOK) {
-                        wxString msg = wxString::Format("    WARN: Model group '%s' contains multiple moving heads but they are all numbered MH1. This may not work as expected with the moving head effect if you want to do fans.", mg->GetName());
-                        LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "groupmovinghead", errcount, warncount);
-                    }
-                }
-            }
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    // Check for submodels with no nodes
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("SubModels with no nodes");
-
-    for (const auto& it : AllModels) {
-        if (it.second->GetDisplayAs() != DisplayAsType::ModelGroup) {
-            for (int i = 0; i < it.second->GetNumSubModels(); ++i) {
-                Model* sm = it.second->GetSubModel(i);
-                if (sm->GetNodeCount() == 0) {
-                    wxString msg = wxString::Format("    ERR: SubModel '%s' contains no nodes.", sm->GetFullName());
-                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "submodelsnodes", errcount, warncount);
-                }
-            }
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    // Check for submodels with duplicate nodes
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("SubModels with duplicate nodes");
-
-    for (const auto& it : AllModels) {
-        if (it.second->GetDisplayAs() != DisplayAsType::ModelGroup) {
-            for (int i = 0; i < it.second->GetNumSubModels(); ++i) {
-                SubModel* sm = dynamic_cast<SubModel*>(it.second->GetSubModel(i));
-                if (sm != nullptr) {
-                    std::string sameDups = sm->GetSameLineDuplicates();
-                    std::string crossDups = sm->GetCrossLineDuplicates();
-
-                    if (sameDups != "") {
-                        wxString msg = wxString::Format("    WARN: SubModel '%s' contains same line duplicate nodes: %s.",
-                                                        (const char*)sm->GetFullName().c_str(),
-                                                        (const char*)sameDups.c_str());
-                        LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "submodelsdups", errcount, warncount);
-                    }
-
-                    if (crossDups != "") {
-                        wxString msg = wxString::Format("    WARN: SubModel '%s' contains cross line duplicate nodes: %s.",
-                                                        (const char*)sm->GetFullName().c_str(),
-                                                        (const char*)crossDups.c_str());
-                        LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "submodelsdups", errcount, warncount);
-                    }
-                }
-            }
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    // Check for SubModels that point to nodes outside parent model name
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("SubModels with nodes not in parent model");
-
-    for (const auto& it : AllModels) {
-        if (it.second->GetDisplayAs() != DisplayAsType::ModelGroup) {
-            for (int i = 0; i < it.second->GetNumSubModels(); ++i) {
-                SubModel* sm = (SubModel*)it.second->GetSubModel(i);
-                if (!sm->IsNodesAllValid()) {
-                    wxString msg = wxString::Format("    ERR: SubModel '%s' has invalid nodes outside the range of the parent model.", sm->GetFullName());
-                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "submodelsrange", errcount, warncount);
-                }
-            }
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    if (IsCheckSequenceOptionDisabled("CustomSizeCheck")) {
-        LogCheckSequenceMsg("");
-        LogAndTrackInfo(report, "models", "Custom models with excessive blank cells - CHECK DISABLED", "checkdisabled");
-    }
-
-    std::list<std::string> allfiles;
-
-    // Check for matrix faces where the file does not exist
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Missing matrix face images");
-
-    for (const auto& it : AllModels) {
-        auto facefiles = it.second->GetFaceFiles(std::list<std::string>(), true, true);
-        allfiles.splice(allfiles.end(), it.second->GetFileReferences());
-
-        for (const auto& fit : facefiles) {
-            auto ff = wxSplit(fit, '|', wxUniChar(0));
-            if (ff.size() < 2) {
-                wxString msg = wxString::Format("    ERR: Model '%s' has a malformed face entry '%s'.", it.second->GetFullName(), fit);
-                LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "faces", errcount, warncount);
-                continue;
-            }
-            if (!FileExists(ff[1])) {
-                wxString msg = wxString::Format("    ERR: Model '%s' face '%s' image missing %s.", it.second->GetFullName(), ff[0], ff[1]);
-                LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "faces", errcount, warncount);
-            }
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    // Check for large blocks of unused channels
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Large blocks of unused channels that bloats memory usage and the the fseq file.");
-
-    std::list<Model*> modelssorted;
-    for (const auto& it : AllModels) {
-        if (it.second->GetDisplayAs() != DisplayAsType::ModelGroup) {
-            modelssorted.push_back(it.second);
-        }
-    }
-
-    modelssorted.sort(compare_modelstartchannel);
-
-    int32_t last = 0;
-    Model* lastm = nullptr;
-    for (const auto& m : modelssorted) {
-        int32_t start = m->GetNumberFromChannelString(m->ModelStartChannel);
-        int32_t gap = start - last - 1;
-        if (gap > 511) // 511 is the maximum acceptable gap ... at that point the user has wasted an entire universe
-        {
-            auto issueType = (gap > 49999)
-                                 ? CheckSequenceReport::ReportIssue::CRITICAL
-                                 : CheckSequenceReport::ReportIssue::WARNING;
-            wxString level = (issueType == CheckSequenceReport::ReportIssue::CRITICAL) ? "ERR" : "WARN";
-            wxString msg;
-            if (lastm == nullptr) {
-                msg = wxString::Format("    %s: First Model '%s' starts at channel %d leaving a block of %d of unused channels.",
-                                       level, m->GetName(), start, start - 1);
-            } else {
-                msg = wxString::Format("    %s: Model '%s' starts at channel %d leaving a block of %d of unused channels between this and the prior model '%s'.",
-                                       level, m->GetName(), start, gap, lastm->GetName());
-            }
-            LogAndTrack(report, "models", issueType, msg.ToStdString(), "universe", errcount, warncount);
-        }
-        long newlast = start + m->GetChanCount() - 1;
-        if (newlast > last) {
-            last = newlast;
-            lastm = m;
-        }
-        // Check for single line models with correct physical orientation
-        if (m->GetDisplayAs() == DisplayAsType::SingleLine) {
-            size_t nodeCount = m->GetNodeCount();
-            if (nodeCount < 2)
-                continue; // Not a valid line
-
-            TwoPointScreenLocation& screenLoc = dynamic_cast<TwoPointScreenLocation&>(m->GetBaseObjectScreenLocation());
-            // x2, y2, z2 are offsets from the start (green square) to the end (blue square)
-            float dx = screenLoc.GetX2();
-            float dy = screenLoc.GetY2();
-            float dz = screenLoc.GetZ2();
-
-            float deltaX = fabs(dx);
-            float deltaY = fabs(dy);
-            float deltaZ = fabs(dz);
-            if (deltaX > deltaY && deltaX > deltaZ) {
-                // Horizontal line: green square should be on the left (dx > 0)
-                if (dx < 0) {
-                    wxString msg = wxString::Format("    %s: Model '%s' should have the green square on the left of the blue square for best render results.",
-                        "WARN", m->GetName());
-                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "config", errcount, warncount);
-                }
-            } else if (deltaY > deltaX && deltaY > deltaZ) {
-                // Vertical line: green square should be on the bottom (dy > 0)
-                if (dy < 0) {
-                    wxString msg = wxString::Format("    %s: Model '%s' should have the green square on the bottom of the blue square for best render results.",
-                        "WARN", m->GetName());
-                    LogAndTrack(report, "models", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "config", errcount, warncount);
-                }
-            }
-        }
-    }
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    LogCheckSequenceMsg(wxString::Format("\nSection Errors (Models): %u. Warnings: %u", (unsigned int)errcount, (unsigned int)warncount).ToStdString());
+    LogCheckSequenceMsg(wxString::Format("\nSection Errors (Sequence): %u. Warnings: %u",
+                                         (unsigned int)(report.GetTotalErrors() - sectionStartErrors),
+                                         (unsigned int)(report.GetTotalWarnings() - sectionStartWarnings)).ToStdString());
     LogCheckSequenceMsg("-----------------------------------------------------------------------------------------------------------------");
-    toterrcount += errcount;
-    totwarncount += warncount;
+    toterrcount += (report.GetTotalErrors() - sectionStartErrors);
+    totwarncount += (report.GetTotalWarnings() - sectionStartWarnings);
     errcount = 0;
     warncount = 0;
 
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Sequence problems");
-    LogCheckSequenceMsg("");
+    // RunFileReferenceChecks emits show-folder-name-repeated warnings into the
+    // "os" section. Run it here so its issues are counted alongside the
+    // BadDriveAccess probe below.
+    sectionStartErrors = report.GetTotalErrors();
+    sectionStartWarnings = report.GetTotalWarnings();
+    checker.RunFileReferenceChecks(report);
 
-    if (CurrentSeqXmlFile != nullptr) {
-        LogCheckSequenceMsg("Uncommon and often undesirable settings");
-
-        if (CurrentSeqXmlFile->GetRenderMode() == SequenceFile::CANVAS_MODE) {
-            wxString msg = wxString::Format("    WARN: Render mode set to canvas mode. Unless you specifically know you need this it is not recommended.");
-            LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "general", errcount, warncount);
-        }
-
-        if (!mSaveFseqOnSave) {
-            wxString msg = wxString::Format("    WARN: Save FSEQ on save is turned off. This means every time you open the sequence you will need to render all to play your sequence. This is not recommended.");
-            LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "general", errcount, warncount);
-        }
-
-        if (IsCheckSequenceOptionDisabled("TransTime")) {
-            LogCheckSequenceMsg("");
-            LogAndTrackInfo(report, "sequence", "Effect transition times - CHECK DISABLED.", "checkdisabled");
-        }
-
-        bool dataLayer = false;
-        DataLayerSet& data_layers = CurrentSeqXmlFile->GetDataLayers();
-        for (int j = 0; j < data_layers.GetNumLayers(); ++j) {
-            DataLayer* dl = data_layers.GetDataLayer(j);
-            if (dl->GetName() != "Nutcracker") {
-                dataLayer = true;
-                break;
-            }
-        }
-
-        if (dataLayer) {
-            wxString msg = wxString::Format("    WARN: Sequence includes a data layer. There is nothing wrong with this but it is uncommon and not always intended.");
-            LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "general", errcount, warncount);
-        }
-
-        if (errcount + warncount == errcountsave + warncountsave) {
-            LogCheckSequenceMsg("    No problems found");
-        }
-
-        if (CurrentSeqXmlFile->GetSequenceType() == "Media") {
-            LogCheckSequenceMsg("");
-            LogCheckSequenceMsg("Checking media file");
-
-            if (!FileExists(CurrentSeqXmlFile->GetMediaFile())) {
-                wxString msg = wxString::Format("    ERR: media file %s does not exist.", CurrentSeqXmlFile->GetMediaFile());
-                LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "general", errcount, warncount);
-            } else {
-                LogCheckSequenceMsg("    No problems found");
-            }
-        }
-        errcountsave = errcount;
-        warncountsave = warncount;
-
-        LogCheckSequenceMsg("");
-        LogCheckSequenceMsg("Checking autosave");
-
-        if (CurrentSeqXmlFile->FileExists()) {
-            // set to log if >1MB and autosave is more than every 10 minutes
-            std::error_code ec;
-            auto size = std::filesystem::file_size(CurrentSeqXmlFile->GetFullPath(), ec);
-            if (!ec && size > 1000000 && mAutoSaveInterval < 10 && mAutoSaveInterval > 0) {
-                double mb = (double)size / 1000000.0;
-                wxString msg = wxString::Format("    WARN: Sequence file size %.1fMb is large. Consider making autosave less frequent to prevent xlights pausing too often when it autosaves.", mb);
-                LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "autosave", errcount, warncount);
-            } else if (!ec && size < 1000000 && mAutoSaveInterval > 10) {
-                double mb = (double)size / 1000000.0;
-                wxString msg = wxString::Format("    WARN: Sequence file size %.1fMb is small. Consider making autosave more frequent to prevent loss in the event of abnormal termination.", mb);
-                LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "autosave", errcount, warncount);
-            }
-
-            if (errcount + warncount == errcountsave + warncountsave) {
-                LogCheckSequenceMsg("    No problems found");
-            }
-            errcountsave = errcount;
-            warncountsave = warncount;
-        } else {
-            LogAndTrackInfo(report, "sequence", "    Test skipped as sequence has never been saved.", "autosave");
-        }
-
-        // Only warn about model hiding if model blending is turned off.
-        if (!CurrentSeqXmlFile->supportsModelBlending()) {
-            LogCheckSequenceMsg("");
-            LogCheckSequenceMsg("Models hidden by effects on groups");
-
-            // Check for groups that contain models that have appeared before the group at the bottom of the master view
-            wxString models = _sequenceElements.GetViewModels(_sequenceElements.GetViewName(0));
-            wxArrayString modelnames = wxSplit(models, ',');
-
-            std::list<std::string> seenmodels;
-            for (const auto& it : modelnames) {
-                Model* m = AllModels.GetModel(it.ToStdString());
-                if (m == nullptr) {
-                    wxString msg = wxString::Format("    ERR: Model %s in your sequence does not seem to exist in the layout. This will need to be deleted or remapped to another model next time you load this sequence.", it);
-                    LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "modelnotinlayout", errcount, warncount);
-                } else {
-                    if (m->GetDisplayAs() == DisplayAsType::ModelGroup) {
-                        ModelGroup* mg = dynamic_cast<ModelGroup*>(m);
-                        if (mg == nullptr)
-                            spdlog::critical("CheckSequence ModelGroup cast was null. We are about to crash.");
-                        for (auto it2 : mg->Models()) {
-                            if (std::find(seenmodels.begin(), seenmodels.end(), it2->GetName()) != seenmodels.end()) {
-                                wxString msg = wxString::Format("    WARN: Model Group '%s' will hide effects on model '%s'.", mg->GetName(), it2->GetName());
-                                LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "modeleffectshidden", errcount, warncount);
-                            }
-                        }
-                    } else {
-                        seenmodels.push_back(m->GetName());
-                    }
-                }
-            }
-
-            if (errcount + warncount == errcountsave + warncountsave) {
-                LogCheckSequenceMsg("    No problems found");
-            }
-            errcountsave = errcount;
-            warncountsave = warncount;
-        }
-
-        LogCheckSequenceMsg(wxString::Format("\nSection Errors (Sequence): %u. Warnings: %u", (unsigned int)errcount, (unsigned int)warncount).ToStdString());
-        LogCheckSequenceMsg("-----------------------------------------------------------------------------------------------------------------");
-        toterrcount += errcount;
-        totwarncount += warncount;
-        errcount = 0;
-        warncount = 0;
-
-        LogCheckSequenceMsg("");
-        LogCheckSequenceMsg("Sequence effect problems");
-        LogCheckSequenceMsg("");
-
-        prog.Update(70, "Checking effects");
-        wxYield();
-
-        // check all effects
-        bool disabledEffects = false;
-        bool videoCacheWarning = false;
-        std::list<std::pair<std::string, std::string>> faces;
-        std::list<std::pair<std::string, std::string>> states;
-        std::list<std::string> viewPoints;
-        bool usesShader = false;
-        for (size_t i = 0; i < _sequenceElements.GetElementCount(MASTER_VIEW); i++) {
-            Element* e = _sequenceElements.GetElement(i);
-            if (e->GetType() != ElementType::ELEMENT_TYPE_TIMING) {
-                CheckElement(e, f, report, false, errcount, warncount, e->GetFullName(), e->GetName(), videoCacheWarning, disabledEffects, faces, states, viewPoints, usesShader, allfiles);
-
-                if (e->GetType() == ElementType::ELEMENT_TYPE_MODEL) {
-                    ModelElement* me = dynamic_cast<ModelElement*>(e);
-                    Model* model = AllModels[me->GetModelName()];
-
-                    for (int j = 0; j < me->GetStrandCount(); ++j) {
-                        StrandElement* se = me->GetStrand(j);
-                        CheckElement(se, f, report, false, errcount, warncount, se->GetFullName(), e->GetName(), videoCacheWarning, disabledEffects, faces, states, viewPoints, usesShader, allfiles);
-
-                        for (int k = 0; k < se->GetNodeLayerCount(); ++k) {
-                            NodeLayer* nl = se->GetNodeLayer(k);
-                            for (int l = 0; l < nl->GetEffectCount(); l++) {
-                                Effect* ef = nl->GetEffect(l);
-                                CheckEffect(ef, f, report, false, errcount, warncount, wxString::Format("%s Strand %zu/Node %zu", se->GetFullName(), j + 1, l + 1).ToStdString(), e->GetName(), true, videoCacheWarning, disabledEffects, faces, states, viewPoints);
-                                RenderableEffect* eff = effectManager[ef->GetEffectIndex()];
-                                allfiles.splice(end(allfiles), eff->GetFileReferences(model, ef->GetSettings()));
-                            }
-                        }
-                    }
-                    for (int j = 0; j < me->GetSubModelAndStrandCount(); ++j) {
-                        Element* sme = me->GetSubModel(j);
-                        if (sme->GetType() == ElementType::ELEMENT_TYPE_SUBMODEL) {
-                            CheckElement(sme, f, report, false, errcount, warncount, sme->GetFullName(), e->GetName(), videoCacheWarning, disabledEffects, faces, states, viewPoints, usesShader, allfiles);
-                        }
-                    }
-                }
-            }
-        }
-
-#ifndef __WXOSX__
-        if (usesShader) {
-            if (!mainSequencer->PanelEffectGrid->IsCoreProfile()) {
-                wxString msg = wxString::Format("    ERR: Sequence has one or more shader effects but open GL version is lower than version 3. These effects may not render.");
-                LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "sequencegeneral", errcount, warncount);
-            }
-        }
-#endif
-
-        if (videoCacheWarning) {
-            LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, "    WARN: Sequence has one or more video effects where render caching is turned off. This will render slowly.", "sequencegeneral", errcount, warncount);
-        }
-
-        if (disabledEffects) {
-            LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, "    WARN: Sequence has one or more effects which are disabled. They are being ignored.", "sequencegeneral", errcount, warncount);
-        }
-
-        if (errcount + warncount == errcountsave + warncountsave) {
-            LogCheckSequenceMsg("    No problems found");
-        }
-        errcountsave = errcount;
-        warncountsave = warncount;
-
-        LogCheckSequenceMsg(wxString::Format("\nSection Errors (Sequence): %u. Warnings: %u", (unsigned int)errcount, (unsigned int)warncount).ToStdString());
-        LogCheckSequenceMsg("-----------------------------------------------------------------------------------------------------------------");
-        toterrcount += errcount;
-        totwarncount += warncount;
-        errcount = 0;
-        warncount = 0;
-
-        LogCheckSequenceMsg("");
-        LogCheckSequenceMsg("General Notes");
-
-        prog.Update(90, "Dumping used assets");
-        wxYield();
-
-        LogCheckSequenceMsg("");
-        LogCheckSequenceMsg("If you are planning on importing this sequence be aware the sequence relies on the following items that will not be imported.");
-        //LogAndTrackInfo(report, "sequence", "If you are planning on importing this sequence be aware the sequence relies on the following items that will not be imported.", "general");
-        LogCheckSequenceMsg("");
-        LogCheckSequenceMsg("Model Faces used by this sequence:");
-        for (const auto& it : faces) {
-            wxString msg = wxString::Format("        Model: %s, Face: %s.", it.first, it.second);
-            LogAndTrackInfo(report, "sequence", msg.ToStdString(), "usedfaces");
-        }
-        LogCheckSequenceMsg("");
-        LogCheckSequenceMsg("Model States used by this sequence:");
-        for (const auto& it : states) {
-            wxString msg = wxString::Format("        Model: %s, State: %s.", it.first, it.second);
-            LogAndTrackInfo(report, "sequence", msg.ToStdString(), "usedstates");
-        }
-        LogCheckSequenceMsg("");
-        LogCheckSequenceMsg("View Points used by this sequence:");
-        for (const auto& it : viewPoints) {
-            wxString msg = wxString::Format("        Viewpoint: %s.", it);
-            LogAndTrackInfo(report, "sequence", msg.ToStdString(), "usedviewpoints");
-        }
-    } else {
-        LogCheckSequenceMsg("");
-        LogCheckSequenceMsg("No sequence loaded so sequence checks skipped.");
-    }
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("-----------------------------------------------------------------------------------------------------------------");
-
-    LogCheckSequenceMsg("");
     LogCheckSequenceMsg("OS Checks");
 
     prog.Update(95, "Checking performance");
+
+    // Build the list of files referenced by models + effects. SequenceChecker
+    // already builds this internally for RunFileReferenceChecks but doesn't
+    // expose it; rebuilding here is cheap and keeps the BadDriveAccess probe
+    // wx-bound (it lives on xLightsFrame).
+    std::list<std::string> allfiles;
+    for (const auto& it : AllModels) {
+        allfiles.splice(allfiles.end(), it.second->GetFileReferences());
+    }
+    if (CurrentSeqXmlFile != nullptr) {
+        EffectManager& em = _sequenceElements.GetEffectManager();
+        for (size_t i = 0; i < _sequenceElements.GetElementCount(MASTER_VIEW); ++i) {
+            Element* e = _sequenceElements.GetElement(i);
+            if (e == nullptr || e->GetType() == ElementType::ELEMENT_TYPE_TIMING)
+                continue;
+            ModelElement* me = dynamic_cast<ModelElement*>(e);
+            Model* model = me ? AllModels[me->GetModelName()] : nullptr;
+            for (const auto& el : e->GetEffectLayers()) {
+                for (const auto& ef : el->GetEffects()) {
+                    RenderableEffect* eff = em.GetEffect(ef->GetEffectIndex());
+                    if (eff != nullptr && model != nullptr) {
+                        allfiles.splice(allfiles.end(), eff->GetFileReferences(model, ef->GetSettings()));
+                    }
+                }
+            }
+        }
+    }
 
 #define SLOWDRIVE 1000
     std::list<std::pair<std::string, uint64_t>> slowaccess;
@@ -6644,54 +5344,15 @@ std::string xLightsFrame::CheckSequence(bool displayInEditor, bool writeToFile)
         }
     }
 
-    if (errcount + warncount == errcountsave + warncountsave) {
+    int osSectionErrors = report.GetTotalErrors() - sectionStartErrors;
+    int osSectionWarnings = report.GetTotalWarnings() - sectionStartWarnings;
+    if (osSectionErrors == 0 && osSectionWarnings == 0) {
         LogCheckSequenceMsg("    No problems found");
     }
+    toterrcount += osSectionErrors;
+    totwarncount += osSectionWarnings;
 
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    LogCheckSequenceMsg("");
-    LogCheckSequenceMsg("Checking problems with file paths containing repeated use of show folder name.");
-
-    std::vector<char> delimiters = { '\\', '/' };
-    wxString showdir = showDirectory;
-    wxString sd2 = showdir.AfterLast('\\');
-    wxString sd3 = showdir.AfterLast('/');
-    if (sd2.Length() > 0 && sd2.Length() < showdir.Length())
-        showdir = sd2;
-    if (sd3.Length() > 0 && sd3.Length() < showdir.Length())
-        showdir = sd3;
-
-    for (const auto& it : allfiles) {
-        wxString ff = FileUtils::FixFile(showDirectory, it);
-        if (ff.StartsWith(showDirectory)) // only check files in show folder
-        {
-            if (FileExists(ff)) {
-                ff = ff.substr(showDirectory.size());
-                wxArrayString folders = Split(ff, delimiters);
-
-                for (auto it2 : folders) {
-                    if (it2 == showdir) {
-                        wxString msg = wxString::Format("    WARN: path to file %s contains the show folder name '%s' more than once. This will make it hard to move sequence to other computers as it won't be able to fix paths automatically.", (const char*)it.c_str(), (const char*)showdir.c_str());
-                        LogAndTrack(report, "os", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "paths", errcount, warncount);
-                    }
-                }
-            } else {
-                wxString msg = wxString::Format("    WARN: Unable to check file %s because it was not found. If this location is on another computer please run check sequence there to check this condition properly.", (const char*)it.c_str());
-                LogAndTrack(report, "os", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "paths", errcount, warncount);
-            }
-        }
-    }
-
-    if (errcount + warncount == errcountsave + warncountsave) {
-        LogCheckSequenceMsg("    No problems found");
-    }
-
-    errcountsave = errcount;
-    warncountsave = warncount;
-
-    LogCheckSequenceMsg(wxString::Format("\nSection Errors (OS): %u. Warnings: %u", (unsigned int)errcount, (unsigned int)warncount).ToStdString());
+    LogCheckSequenceMsg(wxString::Format("\nSection Errors (OS): %u. Warnings: %u", (unsigned int)osSectionErrors, (unsigned int)osSectionWarnings).ToStdString());
     LogCheckSequenceMsg("=================================================================================================================");
     LogCheckSequenceMsg("");
     LogCheckSequenceMsg("Check sequence completed.");
@@ -6703,7 +5364,14 @@ std::string xLightsFrame::CheckSequence(bool displayInEditor, bool writeToFile)
     prog.Hide();
 
     if (f.IsOpened()) {
-        report.WriteToFile(f);
+        wxString resourcesPath = GetResourcesDirectory();
+        wxString srcCss = resourcesPath + wxFileName::GetPathSeparator() + "html" + wxFileName::GetPathSeparator() + "tailwind.min.css";
+        wxString destCss = wxString(report.GetShowFolder()) + wxString(wxFileName::GetPathSeparator()) + "checksequence_tailwind.min.css";
+        wxCopyFile(srcCss, destCss);
+        TempFileManager::GetTempFileManager().AddTempFile(ToStdString(destCss));
+
+        std::string html = report.GenerateHTML(IsDarkMode());
+        f.Write(html.c_str(), html.length());
         f.Close();
 
         if (displayInEditor) {
@@ -6731,301 +5399,6 @@ void xLightsFrame::ValidateEffectAssets()
 
     if (missing != "" && (_promptBatchRenderIssues || (!_renderMode && !_checkSequenceMode))) {
         wxMessageBox("Sequence references files which cannot be found:\nShow Folder: " + showDirectory + "\n" + missing + "\n Use Tools/Check Sequence for more details.", "Missing assets");
-    }
-}
-
-void xLightsFrame::CheckEffect(Effect* ef, wxFile& f, CheckSequenceReport& report, bool writeToTextFile, size_t& errcount, size_t& warncount, const std::string& name, const std::string& modelName, bool node, bool& videoCacheWarning, bool& disabledEffects, std::list<std::pair<std::string, std::string>>& faces, std::list<std::pair<std::string, std::string>>& states, std::list<std::string>& viewPoints) {
-    EffectManager& em = _sequenceElements.GetEffectManager();
-    SettingsMap& sm = ef->GetSettings();
-
-    if (ef->GetEffectName() == "Video") {
-        if (_enableRenderCache == "Disabled") {
-            videoCacheWarning = true;
-        } else if (!ef->IsLocked() && _enableRenderCache == "Locked Only") {
-            videoCacheWarning = true;
-            wxString msg = wxString::Format("    WARN: Video effect unlocked but only locked video effects are being render cached. Effect: %s, Model: %s, Start %s", ef->GetEffectName(), modelName, FORMATTIME(ef->GetStartTimeMS()));
-            if (writeToTextFile) {
-                LogAndWrite(f, msg.ToStdString());
-                warncount++;
-            }
-            else {
-                LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "videocache", errcount, warncount);
-            }
-        }
-    }
-
-    if (ef->IsRenderDisabled())
-        disabledEffects = true;
-
-    // check we are not doing sub-buffers on Per Model* buffer styles
-    bool isPerModel = false;
-    bool isSubBuffer = false;
-    for (const auto& it : sm) {
-        isPerModel |= (it.first == "B_CHOICE_BufferStyle" && StartsWith(it.second, "Per Model"));
-        isSubBuffer |= (it.first == "B_CUSTOM_SubBuffer" && it.second != "");
-    }
-
-    if (isPerModel && isSubBuffer) {
-        wxString msg = wxString::Format("    ERR: Effect on a model group using a 'Per Model' render buffer is also using a subbuffer. This will not work as you might expect. Effect: %s, Model: %s, Start %s", ef->GetEffectName(), modelName, FORMATTIME(ef->GetStartTimeMS()));
-        if (writeToTextFile) {
-            LogAndWrite(f, msg.ToStdString());
-            errcount++;
-        } else {
-            LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "buffer", errcount, warncount);
-        }
-    }
-
-    // check value curves not updated
-    for (auto it = sm.begin(); it != sm.end(); ++it) {
-        wxString value = it->second;
-        if (value.Contains("|Type=") && !value.Contains("RV=TRUE")) {
-            int start = value.Find("|Id=") + 4;
-            wxString property = value.substr(start);
-            property = property.BeforeFirst('|');
-            wxString msg = wxString::Format("    ERR: Effect contains very old value curve. Click on this effect and then save the sequence to convert it. Effect: %s, Model: %s, Start %s (%s)", ef->GetEffectName(), modelName, FORMATTIME(ef->GetStartTimeMS()), property);
-            if (writeToTextFile) {
-                LogAndWrite(f, msg.ToStdString());
-                errcount++;
-            } else {
-                LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "oldcurves", errcount, warncount);
-            }
-        }
-    }
-
-    // check excessive fadein/fadeout time
-    float fadein = sm.GetFloat("T_TEXTCTRL_Fadein", 0.0);
-    float fadeout = sm.GetFloat("T_TEXTCTRL_Fadeout", 0.0);
-    float efdur = (ef->GetEndTimeMS() - ef->GetStartTimeMS()) / 1000.0;
-
-    if (sm.Get("T_CHECKBOX_Canvas", "0") == "1") {
-        // Warp and off have more complicated logic which is implemented in those effects
-        if ((ef->GetEffectName() != "Off" && ef->GetEffectName() != "Warp" && ef->GetEffectName() != "Kaleidoscope" && ef->GetEffectName() != "Shader")) {
-            wxString msg = wxString::Format("    WARN: Canvas mode enabled on an effect it is not normally used on. This will slow down rendering. Effect: %s, Model: %s, Start %s", ef->GetEffectName(), modelName, FORMATTIME(ef->GetStartTimeMS()));
-            if (writeToTextFile) {
-                LogAndWrite(f, msg.ToStdString());
-                warncount++;
-            } else {
-                LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "canvas", errcount, warncount);
-            }
-        }
-    }
-
-    if (!IsCheckSequenceOptionDisabled("TransTime")) {
-        if (fadein > efdur) {
-            wxString msg = wxString::Format("    WARN: Transition in time %.2f on effect %s at start time %s  on Model '%s' is greater than effect duration %.2f.", fadein, ef->GetEffectName(), FORMATTIME(ef->GetStartTimeMS()), name, efdur);
-            if (writeToTextFile) {
-                LogAndWrite(f, msg.ToStdString());
-                warncount++;
-            } else {
-                LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "transitions", errcount, warncount);
-            }
-        }
-        if (fadeout > efdur) {
-            wxString msg = wxString::Format("    WARN: Transition out time %.2f on effect %s at start time %s  on Model '%s' is greater than effect duration %.2f.", fadeout, ef->GetEffectName(), FORMATTIME(ef->GetStartTimeMS()), name, efdur);
-            if (writeToTextFile) {
-                LogAndWrite(f, msg.ToStdString());
-                warncount++;
-            } else {
-                LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "transitions", errcount, warncount);
-            }
-        }
-        if (fadein <= efdur && fadeout <= efdur && fadein + fadeout > efdur) {
-            wxString msg = wxString::Format("    WARN: Transition in time %.2f + transition out time %.2f = %.2f on effect %s at start time %s  on Model '%s' is greater than effect duration %.2f.", fadein, fadeout, fadein + fadeout, ef->GetEffectName(), FORMATTIME(ef->GetStartTimeMS()), name, efdur);
-            if (writeToTextFile) {
-                LogAndWrite(f, msg.ToStdString());
-                warncount++;
-            } else {
-                LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "transitions", errcount, warncount);
-            }
-        }
-    }
-
-    // effect that runs past end of the sequence
-    if (ef->GetEndTimeMS() > CurrentSeqXmlFile->GetSequenceDurationMS()) {
-        wxString msg = wxString::Format("    WARN: Effect %s ends at %s after the sequence end %s. Model: '%s' Start: %s", ef->GetEffectName(), FORMATTIME(ef->GetEndTimeMS()), FORMATTIME(CurrentSeqXmlFile->GetSequenceDurationMS()), name, FORMATTIME(ef->GetStartTimeMS()));
-        if (writeToTextFile) {
-            LogAndWrite(f, msg.ToStdString());
-            warncount++;
-        } else {
-            LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "timing", errcount, warncount);
-        }
-    }
-
-    if (ef->GetEffectIndex() >= 0) {
-        RenderableEffect* re = em.GetEffect(ef->GetEffectIndex());
-
-        // check effect is appropriate for a node
-        if (node && !re->AppropriateOnNodes()) {
-            wxString msg = wxString::Format("    WARN: Effect %s at start time %s  on Model '%s' really shouldnt be used at the node level.",
-                                            ef->GetEffectName(), FORMATTIME(ef->GetStartTimeMS()), name);
-            if (writeToTextFile) {
-                LogAndWrite(f, msg.ToStdString());
-                warncount++;
-            } else {
-                LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::WARNING, msg.ToStdString(), "nodes", errcount, warncount);
-            }
-        }
-
-        bool renderCache = _enableRenderCache == "Enabled" || (_enableRenderCache == "Locked Only" && ef->IsLocked());
-        Model *m = AllModels.GetModel(name);
-        if (m == nullptr) {
-            m = AllModels.GetModel(modelName);
-        }
-        std::list<std::string> warnings = re->CheckEffectSettings(sm, CurrentSeqXmlFile->GetMedia(), m, ef, renderCache);
-        for (const auto& s : warnings) {
-            auto issueType = (s.find("WARN:") != std::string::npos)
-                                 ? CheckSequenceReport::ReportIssue::WARNING
-                                 : CheckSequenceReport::ReportIssue::CRITICAL;
-            if (writeToTextFile) {
-                LogAndWrite(f, s);
-                if (issueType == CheckSequenceReport::ReportIssue::WARNING) {
-                    warncount++;
-                } else {
-                    errcount++;
-                }
-            } else {
-                LogAndTrack(report, "sequence", issueType, s + "--Effect:" + ef->GetEffectName(), "effectsettings", errcount, warncount);
-            }
-        }
-
-        if (ef->GetEffectName() == "Faces") {
-            for (const auto& it : static_cast<FacesEffect*>(re)->GetFacesUsed(sm)) {
-                bool found = false;
-                for (auto it2 : faces) {
-                    if (it2.first == modelName && it2.second == it) {
-                        found = true;
-                    }
-                }
-                if (!found) {
-                    faces.push_back({ modelName, it });
-                }
-            }
-        } else if (ef->GetEffectName() == "State") {
-            for (const auto& it : static_cast<StateEffect*>(re)->GetStatesUsed(sm)) {
-                bool found = false;
-                for (auto it2 : states) {
-                    if (it2.first == modelName && it2.second == it) {
-                        found = true;
-                    }
-                }
-                if (!found) {
-                    states.push_back({ modelName, it });
-                }
-            }
-        }
-
-        for (const auto& it : sm) {
-            if (it.first == "B_CHOICE_PerPreviewCamera") {
-                bool found = false;
-                for (auto it2 : viewPoints) {
-                    if (it2 == it.second) {
-                        found = true;
-                    }
-                }
-                if (!found) {
-                    viewPoints.push_back(it.second);
-                }
-            }
-        }
-    }
-}
-
-void xLightsFrame::CheckElement(Element* e, wxFile& f, CheckSequenceReport& report, bool writeToTextFile, size_t& errcount, size_t& warncount, const std::string& name, const std::string& modelName,
-                                bool& videoCacheWarning, bool& disabledEffects, std::list<std::pair<std::string, std::string>>& faces,
-                                std::list<std::pair<std::string, std::string>>& states, std::list<std::string>& viewPoints, bool& usesShader,
-                                std::list<std::string>& allfiles)
-{
-    Model* m = AllModels[modelName];
-
-    int layer = 0;
-    for (const auto& el : e->GetEffectLayers()) {
-        layer++;
-        for (const auto& ef : el->GetEffects()) {
-            if (ef->GetEffectName() == "Random") {
-                wxString msg = wxString::Format("    ERR: Effect %s (%s-%s) on Model '%s' layer %d is a random effect. This should never happen and may cause other issues.",
-                                                ef->GetEffectName(), FORMATTIME(ef->GetStartTimeMS()), FORMATTIME(ef->GetEndTimeMS()),
-                                                name, layer);
-                if (writeToTextFile) {
-                    LogAndWrite(f, msg.ToStdString());
-                    errcount++;
-                } else {
-                    LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "unexpected", errcount, warncount);
-                }
-            } else {
-                RenderableEffect* eff = effectManager[ef->GetEffectIndex()];
-                allfiles.splice(end(allfiles), eff->GetFileReferences(m, ef->GetSettings()));
-
-                // Check there are nodes to actually render on
-                if (m != nullptr) {
-                    if (e->GetType() == ElementType::ELEMENT_TYPE_MODEL) {
-                        if (m->GetNodeCount() == 0) {
-                            wxString msg = wxString::Format("    ERR: Effect %s (%s-%s) on Model '%s' layer %d Has no nodes and wont do anything.",
-                                                            ef->GetEffectName(), FORMATTIME(ef->GetStartTimeMS()), FORMATTIME(ef->GetEndTimeMS()),
-                                                            name, layer);
-                            if (writeToTextFile) {
-                                LogAndWrite(f, msg.ToStdString());
-                                errcount++;
-                            } else {
-                                LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "nonodestorender", errcount, warncount);
-                            }
-                        }
-                    } else if (e->GetType() == ElementType::ELEMENT_TYPE_STRAND) {
-                        StrandElement* se = (StrandElement*)e;
-                        if (m->GetStrandLength(se->GetStrand()) == 0) {
-                            wxString msg = wxString::Format("    ERR: Effect %s (%s-%s) on Model '%s' layer %d Has no nodes and wont do anything.",
-                                                            ef->GetEffectName(), FORMATTIME(ef->GetStartTimeMS()), FORMATTIME(ef->GetEndTimeMS()),
-                                                            name, layer);
-                            if (writeToTextFile) {
-                                LogAndWrite(f, msg.ToStdString());
-                                errcount++;
-                            } else {
-                                LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "nonodestorender", errcount, warncount);
-                            }
-                        }
-                    } else if (e->GetType() == ElementType::ELEMENT_TYPE_SUBMODEL) {
-                        Model* se = AllModels[name];
-                        if (se != nullptr) {
-                            if (se->GetNodeCount() == 0) {
-                                wxString msg = wxString::Format("    ERR: Effect %s (%s-%s) on Model '%s' layer %d Has no nodes and wont do anything.",
-                                                                ef->GetEffectName(), FORMATTIME(ef->GetStartTimeMS()), FORMATTIME(ef->GetEndTimeMS()),
-                                                                name, layer);
-                                if (writeToTextFile) {
-                                    LogAndWrite(f, msg.ToStdString());
-                                    errcount++;
-                                } else {
-                                    LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "nonodestorender", errcount, warncount);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                CheckEffect(ef, f, report, writeToTextFile, errcount, warncount, name, modelName, false, videoCacheWarning, disabledEffects, faces, states, viewPoints);
-                if (ef->GetEffectName() == "Shader") {
-                    usesShader = true;
-                }
-            }
-        }
-
-        // This assumes effects are stored in start time order per layer
-        Effect* lastEffect = nullptr;
-        for (const auto& ef : el->GetEffects()) {
-            if (lastEffect != nullptr) {
-                // the start time of an effect should not be before the end of the prior effect
-                if (ef->GetStartTimeMS() < lastEffect->GetEndTimeMS()) {
-                    wxString msg = wxString::Format("    ERR: Effect %s (%s-%s) overlaps with Effect %s (%s-%s) on Model '%s' layer %d. This shouldn't be possible.",
-                                                    ef->GetEffectName(), FORMATTIME(ef->GetStartTimeMS()), FORMATTIME(ef->GetEndTimeMS()), lastEffect->GetEffectName(), FORMATTIME(lastEffect->GetStartTimeMS()), FORMATTIME(lastEffect->GetEndTimeMS()), name, layer);
-                    if (writeToTextFile) {
-                        LogAndWrite(f, msg.ToStdString());
-                        errcount++;
-                    } else {
-                        LogAndTrack(report, "sequence", CheckSequenceReport::ReportIssue::CRITICAL, msg.ToStdString(), "impossibleoverlap", errcount, warncount);
-                    }
-                }
-            }
-
-            lastEffect = ef;
-        }
     }
 }
 

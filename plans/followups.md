@@ -50,11 +50,6 @@ tester loop. Pull into MVP if there's bandwidth before H-5 wraps.
   the spdlog rotate-files + show folder + currently-open `.xsq`
   and present via `UIActivityViewController`. Without it, "weird
   thing happened" reports come back with nothing actionable.
-- **Check Sequence runner** (T-1, P1). Validation report —
-  duplicate universes, non-contiguous channels, missing media,
-  broken model refs, etc. Engine logic already exists in
-  `src-core/sequencer/SequenceCheck` (or similar); just needs an
-  iPad UI sheet to surface it.
 - **Incompatible video warning at sequence load** (A-8, P1).
   Per-effect probe `videoCompatibilityIssueForPath:` already
   exists; sequence-load pass needs to walk every VideoEffect and

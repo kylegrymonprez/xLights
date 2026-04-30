@@ -250,6 +250,11 @@ struct XLSequencerCommands: Commands {
             }
             .disabled(!viewModel.isSequenceLoaded)
 
+            Button("Check Sequence…") {
+                viewModel.showingCheckSequence = true
+            }
+            .disabled(!viewModel.isSequenceLoaded)
+
             Divider()
 
             // Package Logs — bundles xLights logs, MetricKit

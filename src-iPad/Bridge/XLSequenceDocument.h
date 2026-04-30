@@ -6,6 +6,8 @@
 // ObjC bridge for iPadRenderContext — callable from Swift.
 // Manages show folder loading and sequence access.
 
+@class XLCheckSequenceIssue;
+
 @interface XLSequenceDocument : NSObject
 
 // Show folder
@@ -1247,6 +1249,23 @@
 // on desktop. Desktop keeps its in-app convert flow via
 // `VideoTranscoder`; that path is not exposed to iPad.
 - (NSString*)videoCompatibilityIssueForPath:(NSString*)path;
+
+// Walk the loaded sequence and surface authoring issues. Goes
+// through `src-core/diagnostics/SequenceChecker` so the iPad
+// catches every check the desktop `xLightsFrame::CheckSequence`
+// covers, minus the wx-only network / OS / preferences chunks
+// (those don't apply on iPad anyway).
+//
+// `progress` (optional) is invoked from the checker thread —
+// callers that update SwiftUI must hop to MainActor. Percent in
+// [0, 100]; `step` is the human-readable section name. Returns
+// an empty array when no sequence is loaded.
+//
+// Safe to call from a background queue: SequenceChecker only
+// reads in-memory objects and the resulting NSArray is fully
+// detached from any C++ state by the time it returns.
+- (NSArray<XLCheckSequenceIssue*>*)runSequenceCheckWithProgress:
+    (nullable void (^)(int percent, NSString* _Nonnull step))progress;
 
 // Ensure a preview-frame bundle exists for `path` at the requested
 // thumbnail bounds. Loads the entry if not yet loaded and calls

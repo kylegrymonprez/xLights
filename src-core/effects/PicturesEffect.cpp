@@ -99,10 +99,16 @@ std::list<std::string> PicturesEffect::CheckEffectSettings(const SettingsMap& se
     std::string pictureFilename = settings.Get("E_TEXTCTRL_Pictures_Filename", "");
     auto &mm = eff->GetParentEffectLayer()->GetParentElement()->GetSequenceElements()->GetSequenceMedia();
 
-    if (pictureFilename == "" || !mm.HasImage(pictureFilename)) {
+    // Don't gate on `HasImage` — that only reports cache hits. The
+    // image cache is populated lazily by `GetImage`, which (a) does
+    // FixFile resolution against the show + media folders, (b) loads
+    // on demand. Calling `GetImage` directly is the same code path
+    // the renderer uses, so a "missing" result here matches what the
+    // renderer would observe at frame time.
+    auto img = pictureFilename.empty() ? nullptr : mm.GetImage(pictureFilename);
+    if (pictureFilename == "" || !img) {
         res.push_back(fmt::format("    ERR: Picture effect cant find image file '{}'. Model '{}', Start {}", pictureFilename, model->GetFullName(), FORMATTIME(eff->GetStartTimeMS())));
     } else {
-        auto img = mm.GetImage(pictureFilename);
         if (!img->IsOk()) {
             res.push_back(fmt::format("    ERR: Picture effect cant load image '{}'. Model '{}', Start {}", pictureFilename, model->GetFullName(), FORMATTIME(eff->GetStartTimeMS())));
         } else {

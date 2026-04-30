@@ -35,6 +35,7 @@ fi
 CORE_DIRS=(
     "src-core/ai"
     "src-core/common"
+    "src-core/diagnostics"
     "src-core/discovery"
     "src-core/graphics"
     "src-core/import_export"

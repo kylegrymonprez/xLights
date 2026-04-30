@@ -2001,9 +2001,6 @@ private:
     void ValidateEffectAssets();
     bool CleanupRGBEffectsFileLocations();
     bool CleanupSequenceFileLocations();
-    void CheckElement(Element* e, wxFile& f, CheckSequenceReport& report, bool writeToTextFile, size_t& errcount, size_t& warncount, const std::string& name, const std::string& modelName, bool& videoCacheWarning, bool& disabledEffects, std::list<std::pair<std::string, std::string>>& faces, std::list<std::pair<std::string, std::string>>& states, std::list<std::string>& viewPoints, bool& usesShader, std::list<std::string>& allfiles);
-    void CheckEffect(Effect* ef, wxFile& f, CheckSequenceReport& report, bool writeToTextFile, size_t& errcount, size_t& warncount, const std::string& name, const std::string& modelName, bool node, bool& videoCacheWarning, bool& disabledEffects, std::list<std::pair<std::string, std::string>>& faces, std::list<std::pair<std::string, std::string>>& states, std::list<std::string>& viewPoints);
-    bool CheckStart(wxFile& f, CheckSequenceReport& report, bool writeToTextFile, size_t& errcount, size_t& warncount, const std::string& startmodel, std::list<std::string>& seen, std::string& nextmodel);
     void ValidateWindow();
     void DoDonate();
     void AutoShowHouse();

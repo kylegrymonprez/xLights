@@ -247,6 +247,13 @@ struct ContentView: View {
         )) {
             AboutSheet()
         }
+        .sheet(isPresented: Binding(
+            get: { viewModel.showingCheckSequence },
+            set: { viewModel.showingCheckSequence = $0 }
+        )) {
+            CheckSequenceSheet()
+                .environment(viewModel)
+        }
         // Phase A re-prompt UX. When a persisted security-scoped
         // bookmark goes stale (iCloud eviction, iOS aging out the
         // bookmark) `SequencerViewModel` queues an

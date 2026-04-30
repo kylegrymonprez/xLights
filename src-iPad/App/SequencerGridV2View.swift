@@ -1852,7 +1852,6 @@ struct SequencerGridV2View: View {
             metrics: metrics,
             pixelsPerMS: timeline.pixelsPerMS,
             selection: viewModel.selectedEffect,
-            previousSelection: viewModel.previousSelectedEffect,
             selectedEffects: viewModel.selectedEffects,
             activeDrag: viewModel.activeDrag,
             timingMarkTimesMS: collectActiveTimingMarkTimes(),

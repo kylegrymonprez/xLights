@@ -5,8 +5,18 @@
 #include <string>
 #include <vector>
 
-class wxFile;
-
+// Structured report produced by `SequenceChecker` (and previously by
+// the wx-bound `xLightsFrame::CheckSequence`). Both desktop and iPad
+// consume this. Desktop renders to HTML for the in-editor viewer
+// via `GenerateHTML()`; iPad walks the structured `mSections /
+// .issues` tree directly so SwiftUI can offer per-issue jump-to.
+//
+// `ReportIssue` carries optional location data — `modelName`,
+// `effectName`, `startTimeMS`, `layerIndex` — populated when an
+// issue is anchored to a specific row / effect in the sequence.
+// The desktop HTML renderer ignores them today, but a future
+// in-app results panel can use them for navigation. The iPad
+// uses them for the tap-to-jump rows on the Check Sequence sheet.
 class CheckSequenceReport {
 public:
     struct ReportIssue {
@@ -20,8 +30,42 @@ public:
         std::string message;  // The actual error/warning message
         std::string category; // e.g., "video", "singlestrand", "network", etc.
 
+        // Optional location data. Empty / -1 when not applicable.
+        std::string modelName;
+        std::string effectName;
+        int startTimeMS = -1;
+        int layerIndex = -1;
+
         ReportIssue(Type t, const std::string& msg, const std::string& cat = "") :
             type(t), message(msg), category(cat) {
+        }
+
+        // Convenience builder for an effect-anchored issue. `layerIndex`
+        // defaults to -1 since callers without ready access to the
+        // layer can omit it; the iPad UI renders the tap-to-jump even
+        // when only `startTimeMS` is set.
+        static ReportIssue ForEffect(Type type,
+                                      const std::string& message,
+                                      const std::string& category,
+                                      const std::string& modelName,
+                                      const std::string& effectName,
+                                      int startTimeMS,
+                                      int layerIndex = -1) {
+            ReportIssue r(type, message, category);
+            r.modelName = modelName;
+            r.effectName = effectName;
+            r.startTimeMS = startTimeMS;
+            r.layerIndex = layerIndex;
+            return r;
+        }
+
+        static ReportIssue ForModel(Type type,
+                                     const std::string& message,
+                                     const std::string& category,
+                                     const std::string& modelName) {
+            ReportIssue r(type, message, category);
+            r.modelName = modelName;
+            return r;
         }
     };
 
@@ -65,9 +109,19 @@ public:
         return mTotalWarnings;
     }
 
-    // Generate and write report
-    std::string GenerateHTML() const;
-    bool WriteToFile(wxFile& f) const; // Uses wxFile like original code
+    // Section accessors for structured consumers (iPad).
+    const std::vector<ReportSection>& GetSections() const { return mSections; }
+    const std::string& GetShowFolder() const { return mShowFolder; }
+    const std::string& GetSequencePath() const { return mSequencePath; }
+    const std::string& GetGeneratedTime() const { return mGeneratedTime; }
+
+    // Generate the HTML report. `darkMode` tints the body background +
+    // text for callers that want to match the host app's appearance.
+    // The CSS file (`checksequence_tailwind.min.css`) is referenced
+    // by the returned HTML; the caller is responsible for placing it
+    // alongside the written HTML file (desktop does this via
+    // `xLightsFrame::CheckSequence`).
+    std::string GenerateHTML(bool darkMode = false) const;
 
 private:
     // Report data

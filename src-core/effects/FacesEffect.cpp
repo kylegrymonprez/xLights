@@ -169,15 +169,25 @@ std::list<std::string> FacesEffect::CheckEffectSettings(const SettingsMap& setti
                 std::string picture = it2.second;
 
                 if (picture != "") {
-                    if (!FileExists(picture)) {
+                    // Face image paths are stored as user-picked at config
+                    // time on desktop — often absolute. Run FixFile so a
+                    // sequence moved between machines still resolves
+                    // through the show / media folders the way the
+                    // renderer does (PicturesEffect::Render goes through
+                    // SequenceMedia which FixFile-resolves). Without this
+                    // a Face effect that renders cleanly would still
+                    // false-positive "image file not found" because the
+                    // raw stored path doesn't exist on this machine.
+                    std::string resolved = FileUtils::FixFile(std::string(), picture);
+                    if (resolved.empty() || !FileExists(resolved)) {
                         res.push_back(fmt::format("    ERR: Face effect image file not found '{}'. Model '{}', Definition '{}', Start {}", picture, model->GetFullName(), definition, FORMATTIME(eff->GetStartTimeMS())));
                     } else if (!FileUtils::IsFileInShowDir(std::string(), picture)) {
                         res.push_back(fmt::format("    WARN: Faces effect image file '{}' not under show directory. Model '{}', Definition '{}', Start {}", picture, model->GetFullName(), definition, FORMATTIME(eff->GetStartTimeMS())));
                     }
 
-                    if (FileExists(picture)) {
+                    if (!resolved.empty() && FileExists(resolved)) {
                         xlImage i;
-                        i.LoadFromFile(picture);
+                        i.LoadFromFile(resolved);
                         if (i.IsOk()) {
                             int ih = i.GetHeight();
                             int iw = i.GetWidth();

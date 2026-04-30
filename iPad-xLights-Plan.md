@@ -157,9 +157,28 @@ quality" section unless noted otherwise.
   Videos, Release Notes, Forum, Facebook, Issue Tracker,
   xLights.org), each routed through `XLOpenURL` to the system
   browser to match desktop's `wxLaunchDefaultBrowser` behaviour.
-- **Check Sequence runner** (P1, M). Validation report (duplicate
-  universes, broken refs, missing media). Engine logic exists; just
-  needs an iPad sheet.
+- ✓ **Check Sequence runner** — Tools → Check Sequence runs the
+  full desktop check suite via the shared
+  `src-core/diagnostics/SequenceChecker` (~1175 lines, wx-free
+  port of the bulk of `xLightsFrame::CheckSequence`). Covers
+  controllers (inactive, IP collisions, ZCPP/managed checks,
+  duplicate universes, model controller-connection validation),
+  models (start-channel chain loops, overlaps, missing matrix
+  faces, single-line orientation, model-group consistency,
+  submodel sanity), and the per-effect / per-element walk
+  (transitions, Per-Model + sub-buffer combos, old value curves,
+  canvas mode, video codec, render-disabled summaries, faces /
+  states / viewpoints summaries). `CheckSequenceReport` was
+  also lifted to core with a structured `ReportIssue` carrying
+  optional `(modelName, effectName, startTimeMS, layerIndex)` so
+  both clients can offer tap-to-jump — iPad's sheet uses it now;
+  desktop's HTML report ignores it (the data is there for a
+  future in-app results panel). Desktop's
+  `xLightsFrame::CheckSequence` collapsed from ~2k lines to a
+  ~180-line wrapper that keeps only the wx-only chunks (network
+  socket probe, OS / preferences, HTML output, OpenGL core-
+  profile shader guard, BadDriveAccess) and delegates the rest
+  through `DesktopCheckCallbacks`.
 - **Incompatible-video warning at sequence load** (P1, S).
   Per-effect probe already exists; needs a load-time sweep so
   testers don't get silent black frames mid-playback.

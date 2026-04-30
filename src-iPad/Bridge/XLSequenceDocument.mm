@@ -53,6 +53,10 @@
 #include "utils/xlImage.h"
 #include "xLightsVersion.h"
 #include "globals.h"
+#include "diagnostics/CheckSequenceReport.h"
+#include "diagnostics/SequenceChecker.h"
+
+#import "XLCheckSequenceIssue.h"
 
 #include <nlohmann/json.hpp>
 #include <spdlog/spdlog.h>
@@ -4814,6 +4818,124 @@ const char* canonicalSubdirForType(MediaType t) {
     std::string reason = MediaCompatibility::CheckVideoFile(resolved);
     if (reason.empty()) return nil;
     return [NSString stringWithUTF8String:reason.c_str()];
+}
+
+namespace {
+
+// iPad-side callbacks for SequenceChecker. The base class defaults
+// (no per-check disable, render-cache "Enabled") match the iPad's
+// lack of equivalent settings UI; the AVFoundation video probe and
+// optional progress block are the only real overrides.
+class iPadSequenceCheckerCallbacks final : public SequenceCheckerCallbacks {
+public:
+    using ProgressBlock = void (^)(int, NSString*);
+
+    explicit iPadSequenceCheckerCallbacks(ProgressBlock progress)
+        : _progress(progress ? [progress copy] : nil) {}
+
+    std::string CheckVideoCompatibility(const std::string& path) override {
+        if (path.empty()) return "";
+        std::string resolved = FileUtils::FixFile("", path);
+        if (resolved.empty()) resolved = path;
+        ObtainAccessToURL(resolved, false);
+        return MediaCompatibility::CheckVideoFile(resolved);
+    }
+
+    void OnProgress(int percent, const std::string& step) override {
+        if (!_progress) return;
+        _progress(percent,
+                   [NSString stringWithUTF8String:step.c_str()]);
+    }
+
+private:
+    ProgressBlock _progress;
+};
+
+XLCheckSequenceSeverity SeverityFor(CheckSequenceReport::ReportIssue::Type t) {
+    switch (t) {
+        case CheckSequenceReport::ReportIssue::CRITICAL:
+            return XLCheckSequenceSeverityCritical;
+        case CheckSequenceReport::ReportIssue::WARNING:
+            return XLCheckSequenceSeverityWarning;
+        case CheckSequenceReport::ReportIssue::INFO:
+        default:
+            return XLCheckSequenceSeverityInfo;
+    }
+}
+
+NSString* TrimWhitespacePrefix(const std::string& s) {
+    // Desktop's check messages historically lead with `    ERR: ` /
+    // `    WARN: ` / `    INFO: ` indents inherited from the wxFile
+    // text-mode output. The HTML rendering strips these via
+    // `CleanMessage`; mirror that here so the iPad sheet shows
+    // tidy strings without re-implementing the cleaner.
+    size_t i = 0;
+    while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) ++i;
+    static constexpr const char* prefixes[] = {"INFO: ", "WARN: ", "ERR: "};
+    for (const char* p : prefixes) {
+        size_t plen = std::strlen(p);
+        if (s.compare(i, plen, p) == 0) { i += plen; break; }
+    }
+    return [NSString stringWithUTF8String:s.c_str() + i];
+}
+
+NSString* OptionalString(const std::string& s) {
+    return s.empty() ? nil : [NSString stringWithUTF8String:s.c_str()];
+}
+
+}  // namespace
+
+- (NSArray<XLCheckSequenceIssue*>*)runSequenceCheckWithProgress:
+    (void (^)(int, NSString*))progress {
+    NSMutableArray<XLCheckSequenceIssue*>* issues = [NSMutableArray array];
+    if (!_context || !_context->IsSequenceLoaded()) return issues;
+
+    iPadSequenceCheckerCallbacks callbacks(progress);
+    SequenceChecker checker(_context->GetSequenceElements(),
+                             _context->GetModelManager(),
+                             _context->GetOutputManager(),
+                             _context->GetSequenceFile(),
+                             _context->GetShowDirectory(),
+                             &callbacks);
+
+    CheckSequenceReport report;
+    for (const auto& section : CheckSequenceReport::REPORT_SECTIONS) {
+        report.AddSection(section);
+    }
+    report.SetShowFolder(_context->GetShowDirectory());
+    if (auto* sf = _context->GetSequenceFile()) {
+        report.SetSequencePath(sf->GetFullPath());
+    }
+    checker.RunFullCheck(report);
+
+    // Flatten the structured report into the iPad value class. Both
+    // sides preserve location data so SwiftUI can offer tap-to-jump
+    // when (modelName, effectName, startTimeMS) is populated.
+    for (const auto& section : report.GetSections()) {
+        NSString* sectionID =
+            [NSString stringWithUTF8String:section.id.c_str()];
+        NSString* sectionTitle =
+            [NSString stringWithUTF8String:section.title.c_str()];
+        for (const auto& iss : section.issues) {
+            // Skip the per-section "checkdisabled" placeholders that
+            // desktop renders as muted footer text — iPad has no
+            // equivalent settings UI so they'd be confusing.
+            if (iss.category == "checkdisabled") continue;
+            XLCheckSequenceIssue* out =
+                [[XLCheckSequenceIssue alloc]
+                    initWithSeverity:SeverityFor(iss.type)
+                            sectionID:sectionID
+                         sectionTitle:sectionTitle
+                             category:[NSString stringWithUTF8String:iss.category.c_str()]
+                              message:TrimWhitespacePrefix(iss.message)
+                            modelName:OptionalString(iss.modelName)
+                           effectName:OptionalString(iss.effectName)
+                          startTimeMS:iss.startTimeMS
+                           layerIndex:iss.layerIndex];
+            [issues addObject:out];
+        }
+    }
+    return issues;
 }
 
 - (int)removeUnusedMedia {

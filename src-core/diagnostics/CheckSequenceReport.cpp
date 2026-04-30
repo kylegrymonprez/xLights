@@ -3,12 +3,11 @@
 #endif
 
 #include "diagnostics/CheckSequenceReport.h"
-#include "TempFileManager.h"
-#include <wx/datetime.h>
-#include <wx/file.h>
-#include <wx/filename.h>
-#include <UtilFunctions.h>
-#include "shared/utils/wxUtilities.h"
+#include "utils/UtilFunctions.h"
+
+#include <chrono>
+#include <ctime>
+#include <cstring>
 
 const std::vector<CheckSequenceReport::ReportSection> CheckSequenceReport::REPORT_SECTIONS = {
     { "network", "&#127760;", "Network Configuration", "Network connectivity and configuration issues" },
@@ -20,9 +19,16 @@ const std::vector<CheckSequenceReport::ReportSection> CheckSequenceReport::REPOR
 };
 
 CheckSequenceReport::CheckSequenceReport() {
-    // Get current timestamp for the report
-    wxDateTime now = wxDateTime::Now();
-    mGeneratedTime = now.FormatISODate().ToStdString() + " " + now.FormatISOTime().ToStdString();
+    auto t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    std::tm tm{};
+#ifdef _WIN32
+    localtime_s(&tm, &t);
+#else
+    localtime_r(&t, &tm);
+#endif
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &tm);
+    mGeneratedTime = buf;
 }
 
 void CheckSequenceReport::AddSection(const ReportSection& section) {
@@ -53,8 +59,8 @@ void CheckSequenceReport::UpdateCounts() {
     }
 }
 
-std::string CheckSequenceReport::GenerateHTML() const {
-    std::string darkMode = IsDarkMode() ? "true" : "false";
+std::string CheckSequenceReport::GenerateHTML(bool darkMode) const {
+    std::string darkModeStr = darkMode ? "true" : "false";
     std::string html = R"(
 <!DOCTYPE html>
 <html lang="en">
@@ -452,7 +458,7 @@ std::string CheckSequenceReport::GenerateHTML() const {
 
             if (!savedTheme) {  // First visit
                 const prefersDark = )" +
-            darkMode + R"(;
+            darkModeStr + R"(;
                 if (prefersDark) {
                     document.documentElement.setAttribute('data-theme', 'dark');
                     sunIcon.classList.add('hidden');
@@ -484,17 +490,6 @@ std::string CheckSequenceReport::GenerateHTML() const {
 )";
 
     return html;
-}
-
-bool CheckSequenceReport::WriteToFile(wxFile& f) const {
-    wxString resourcesPath = GetResourcesDirectory();
-    wxString srcCss = resourcesPath + wxFileName::GetPathSeparator() + "html" + wxFileName::GetPathSeparator() + "tailwind.min.css";
-    wxString destCss = mShowFolder + wxString(wxFileName::GetPathSeparator()) + "checksequence_tailwind.min.css";
-    wxCopyFile(srcCss, destCss);
-    TempFileManager::GetTempFileManager().AddTempFile(ToStdString(destCss));
-
-    std::string html = GenerateHTML();
-    return f.Write(html.c_str(), html.length()) == html.length();
 }
 
 std::string CheckSequenceReport::GenerateHeader() const {

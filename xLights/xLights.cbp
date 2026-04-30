@@ -243,8 +243,10 @@
 		<Unit filename="../src-ui-wx/model/ChannelLayoutDialog.h" />
 		<Unit filename="../src-ui-wx/effects/CharMapDialog.cpp" />
 		<Unit filename="../src-ui-wx/effects/CharMapDialog.h" />
-		<Unit filename="../src-ui-wx/diagnostics/CheckSequenceReport.cpp" />
-		<Unit filename="../src-ui-wx/diagnostics/CheckSequenceReport.h" />
+		<Unit filename="../src-core/diagnostics/CheckSequenceReport.cpp" />
+		<Unit filename="../src-core/diagnostics/CheckSequenceReport.h" />
+		<Unit filename="../src-core/diagnostics/SequenceChecker.cpp" />
+		<Unit filename="../src-core/diagnostics/SequenceChecker.h" />
 		<Unit filename="../src-ui-wx/shared/dialogs/CheckboxSelectDialog.cpp" />
 		<Unit filename="../src-ui-wx/shared/dialogs/CheckboxSelectDialog.h" />
 		<Unit filename="../src-core/utils/Color.cpp" />

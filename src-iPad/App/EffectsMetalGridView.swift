@@ -17,10 +17,6 @@ struct EffectsMetalGridView: UIViewRepresentable {
     let metrics: GridMetrics
     let pixelsPerMS: CGFloat
     let selection: SequencerViewModel.EffectSelection?
-    /// B28 — prior-selection snapshot. When set, the grid paints a
-    /// subtle dimmed outline on that effect so users can compare
-    /// against what they were just editing.
-    var previousSelection: SequencerViewModel.EffectSelection? = nil
     /// Full selection set (B1 marquee multi-select). Every member is
     /// drawn with the selection bracket colour. When `count == 1` the
     /// single member coincides with `selection` and shows edge + fade
@@ -86,7 +82,6 @@ struct EffectsMetalGridView: UIViewRepresentable {
         ctx.metrics = metrics
         ctx.pixelsPerMS = pixelsPerMS
         ctx.selection = selection
-        ctx.previousSelection = previousSelection
         ctx.selectedEffects = selectedEffects
         ctx.activeDrag = activeDrag
         ctx.timingMarkTimesMS = timingMarkTimesMS
@@ -134,7 +129,6 @@ struct EffectsMetalGridView: UIViewRepresentable {
         var metrics = GridMetrics.standard
         var pixelsPerMS: CGFloat = 0.1
         var selection: SequencerViewModel.EffectSelection?
-        var previousSelection: SequencerViewModel.EffectSelection?   // B28
         /// B96: active momentum-scroll display link, if one is
         /// coasting. Invalidated when a new pan begins or the
         /// view tears down.
@@ -782,37 +776,6 @@ final class EffectsMetalGridMTKView: MTKView, MTKViewDelegate, UIPencilInteracti
             if e.x2 - e.x1 > 10 {
                 bridge.drawText("🔒", atX: e.x2 - 12, y: e.top,
                                  fontSize: 9, r: 1, g: 1, b: 1, a: 1)
-            }
-        }
-
-        // B28: dotted outline on the previously-selected effect
-        // (desktop's "reference effect" indicator). Skip if it
-        // coincides with the current selection — no point dimming
-        // a bracket that's already solid.
-        if let prev = c.previousSelection,
-           !(prev.rowIndex == c.selection?.rowIndex
-             && prev.effectIndex == c.selection?.effectIndex) {
-            for e in vis where prev.rowIndex == e.rowId
-                               && prev.effectIndex == e.effectIndex {
-                // Single inset outline in a muted warm tone so it
-                // reads distinct from the blue selection bracket.
-                let inset: CGFloat = 1
-                bridge.beginLineBatch()
-                let (r, g, b): (CGFloat, CGFloat, CGFloat) = (0.95, 0.75, 0.25)
-                let a: CGFloat = 0.65
-                bridge.appendLineX1(e.x1 + inset, y1: e.top + inset,
-                                     x2: e.x2 - inset, y2: e.top + inset,
-                                     r: r, g: g, b: b, a: a)
-                bridge.appendLineX1(e.x1 + inset, y1: e.bottom - inset,
-                                     x2: e.x2 - inset, y2: e.bottom - inset,
-                                     r: r, g: g, b: b, a: a)
-                bridge.appendLineX1(e.x1 + inset, y1: e.top + inset,
-                                     x2: e.x1 + inset, y2: e.bottom - inset,
-                                     r: r, g: g, b: b, a: a)
-                bridge.appendLineX1(e.x2 - inset, y1: e.top + inset,
-                                     x2: e.x2 - inset, y2: e.bottom - inset,
-                                     r: r, g: g, b: b, a: a)
-                bridge.flushLineBatch()
             }
         }
 
