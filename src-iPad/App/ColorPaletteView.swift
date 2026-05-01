@@ -17,6 +17,7 @@ struct ColorPaletteView: View {
     @State private var showingLoadSheet = false
     @State private var showingImportSheet = false
     @State private var showingSaveAsSheet = false
+    @State private var showingAISheet = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -71,6 +72,10 @@ struct ColorPaletteView: View {
                     currentPaletteString(), asName: name)
             }
         }
+        .sheet(isPresented: $showingAISheet) {
+            AIPaletteGenerationSheet()
+                .environment(viewModel)
+        }
     }
 
     // MARK: - Palette menu (save / load / import / export)
@@ -94,6 +99,13 @@ struct ColorPaletteView: View {
             Label("Load Saved Palette…", systemImage: "folder")
         }
         Divider()
+        if XLAIServices.shared().hasEnabledService(forCapability: XLAICapabilityColorPalettes) {
+            Button {
+                showingAISheet = true
+            } label: {
+                Label("AI Generate Palette…", systemImage: "wand.and.stars")
+            }
+        }
         Button {
             showingImportSheet = true
         } label: {

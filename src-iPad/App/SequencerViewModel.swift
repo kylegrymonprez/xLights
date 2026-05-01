@@ -335,6 +335,9 @@ class SequencerViewModel {
     // level (gated on `isSequenceLoaded` because it walks the
     // currently-loaded SequenceElements via the bridge).
     var showingCheckSequence = false
+    // Tools → AI Services. Sheet at ContentView level so the user
+    // can configure API keys / models even before opening a sequence.
+    var showingAIServices = false
 
     /// Run Check Sequence on a background queue and report progress
     /// while it walks. The bridge's `SequenceChecker` calls back from

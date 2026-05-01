@@ -521,6 +521,27 @@ static std::optional<HEADER_INFO_TYPES> headerTypeFromString(NSString* key) {
     return [NSString stringWithUTF8String:v.c_str()];
 }
 
+- (NSString*)audioTitle {
+    if (!_context) return @"";
+    AudioManager* am = _context->GetCurrentMediaManager();
+    if (!am) return @"";
+    return [NSString stringWithUTF8String:am->Title().c_str()];
+}
+
+- (NSString*)audioArtist {
+    if (!_context) return @"";
+    AudioManager* am = _context->GetCurrentMediaManager();
+    if (!am) return @"";
+    return [NSString stringWithUTF8String:am->Artist().c_str()];
+}
+
+- (NSString*)audioAlbum {
+    if (!_context) return @"";
+    AudioManager* am = _context->GetCurrentMediaManager();
+    if (!am) return @"";
+    return [NSString stringWithUTF8String:am->Album().c_str()];
+}
+
 - (BOOL)setMediaFilePath:(NSString*)path {
     if (!_context || !_context->IsSequenceLoaded()) return NO;
     auto* sf = _context->GetSequenceFile();

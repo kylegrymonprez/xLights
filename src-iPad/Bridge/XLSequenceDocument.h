@@ -176,6 +176,13 @@
 - (NSString*)currentMediaFilePath;
 - (BOOL)setMediaFilePath:(NSString*)path;
 
+// ID3-style tags from the loaded audio track. Empty strings when
+// no media is loaded or the file has no metadata. Used to
+// pre-populate the AI palette generator's "Song" mode.
+- (NSString*)audioTitle;
+- (NSString*)audioArtist;
+- (NSString*)audioAlbum;
+
 // Sequence type (see `newSequenceAtPath:…`): "Media" /
 // "Animation" / "Effect". Writes flow through
 // `SequenceFile::SetSequenceType` which clears media file +
