@@ -118,29 +118,39 @@ struct MediaRelocationPromptModifier: ViewModifier {
     }
 
     private func commitToShow(_ url: URL) {
-        if let copied = viewModel.document.moveFile(
+        // Stage the file into place, then dismiss the dialog before
+        // running the consumer's onCommit. The deferred onCommit
+        // sidesteps a SwiftUI crash on iPadOS 26.2 where the
+        // confirmationDialog's button action mutating parent state
+        // mid-dismissal can tear down this modifier's @State —
+        // observed via TestFlight as
+        // `StoredLocationBase.updateValue.getter` crash when the
+        // user picks media from outside the show folder and clicks
+        // Show / Media to copy.
+        let copied = viewModel.document.moveFile(
             toShowFolder: url.path,
             subdirectory: subdirectory)
-        {
-            let stored = viewModel.document.makeRelativePath(copied)
-            onCommit(stored)
-        }
+        let stored = copied.flatMap { viewModel.document.makeRelativePath($0) }
         url.stopAccessingSecurityScopedResource()
         pendingPick = nil
+        if let stored = stored {
+            DispatchQueue.main.async { onCommit(stored) }
+        }
     }
 
     private func commitToMedia(_ url: URL, folder: String) {
-        if let copied = viewModel.document.copyFile(
+        // See commitToShow for the deferred-onCommit rationale.
+        let copied = viewModel.document.copyFile(
             toMediaFolder: url.path,
             mediaFolderPath: folder,
             subdirectory: subdirectory)
-        {
-            // Media-folder destinations stay absolute — stored path
-            // is the full copy location inside the media folder.
-            onCommit(copied)
-        }
         url.stopAccessingSecurityScopedResource()
         pendingPick = nil
+        if let copied = copied {
+            // Media-folder destinations stay absolute — stored path
+            // is the full copy location inside the media folder.
+            DispatchQueue.main.async { onCommit(copied) }
+        }
     }
 
     private func cancel(_ url: URL) {
