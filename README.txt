@@ -11,6 +11,8 @@ Issue Tracker is found here: www.github.com/xLightsSequencer/xLights/issues
 XLIGHTS/NUTCRACKER RELEASE NOTES
 ---------------------------------
 2026.08  May ??, 2026
+    -enh (dkulp)                macoS: Hook up Apple "Speech Recognizer" to Apple Intelligence to create timing tracks.
+                                Really only usable for very clean voice tracks and "Announcement" kind of things.
     -enh (dkulp)                macOS: MetricKit collector subscribes at launch (macOS 12+) and writes hang / CPU /
                                 disk-write / crash diagnostics + daily metrics as JSON into a Diagnostics/ folder
                                 next to xLights_spdlog.log. Whatever has accumulated since the last submission is

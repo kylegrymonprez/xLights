@@ -73,7 +73,17 @@ struct AIServicesSettingsSheet: View {
             // it's obvious why a service might not test successfully.
             statusBanner(for: service)
 
-            ForEach(service.properties, id: \.propertyId) { prop in
+            // Category-kind properties have an empty `propertyId`
+            // (they're just section dividers in desktop's
+            // wxPropertyGrid). Filtering them out before ForEach
+            // does two things: skips a row that would render as
+            // EmptyView anyway, and avoids ID collisions in
+            // SwiftUI's diff (multiple items with id="" caused
+            // toggles to leak state between rows + between
+            // services). The Section header above already provides
+            // the visual category break.
+            ForEach(service.properties.filter { $0.kind != .category },
+                    id: \.propertyId) { prop in
                 row(for: prop)
             }
         } header: {
@@ -299,16 +309,32 @@ struct AIServicesSettingsSheet: View {
         guard !testServiceName.isEmpty else { return }
         testStatus = .running
         XLAIServices.shared().testService(testServiceName) { ok, message in
-            if ok {
-                // Use the response itself if short; otherwise just
-                // confirm the call completed without surfacing the
-                // raw text (which can be long for "Hello" prompts).
-                let text = message.count <= 200 ? message : "service responded"
-                testStatus = .ok(text)
-            } else {
-                testStatus = .error(message)
+            // The bridge marshals this completion to main, but
+            // Swift sees the ObjC block as non-isolated @Sendable.
+            // Hop to MainActor so the @State mutation is safe.
+            Task { @MainActor in
+                if ok {
+                    // Use the response itself if short; otherwise just
+                    // confirm the call completed without surfacing the
+                    // raw text (which can be long for "Hello" prompts).
+                    let text = message.count <= 200 ? message : "service responded"
+                    testStatus = .ok(text)
+                } else {
+                    testStatus = .error(message)
+                }
             }
         }
     }
 }
+
+// The ObjC bridge types XLAIServices hands back are value snapshots:
+// every property is `readonly copy`, the backing storage is set once
+// in the initializer and never mutated. That makes them safe to send
+// across actor boundaries — but Swift can't infer Sendable for
+// imported ObjC classes, so we declare it explicitly here. Lets the
+// XLAIServices completion handlers hop from the bridge's @Sendable
+// callback into a `Task { @MainActor }` without strict-mode warnings.
+extension XLAIServiceInfo: @unchecked @retroactive Sendable {}
+extension XLAIServiceProperty: @unchecked @retroactive Sendable {}
+extension XLAIPaletteColor: @unchecked @retroactive Sendable {}
 

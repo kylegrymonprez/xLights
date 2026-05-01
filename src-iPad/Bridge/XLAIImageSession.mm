@@ -21,9 +21,11 @@
 
 @implementation XLAIImageSession {
     // Owned by the session — created by aiBase::createAIImageGenerator()
-    // (raw pointer, caller-owned per the aiBase contract). Deleted in
-    // -dealloc.
-    aiBase::AIImageGenerator* _generator;
+    // (raw pointer, caller-owned per the aiBase contract). Wrapped in
+    // unique_ptr so ARC's auto-generated dealloc handles cleanup via
+    // the C++ destructor — avoids the static analyzer's
+    // "missing [super dealloc]" false positive on a manual -dealloc.
+    std::unique_ptr<aiBase::AIImageGenerator> _generator;
 }
 
 + (nullable instancetype)sessionForService:(NSString*)serviceName {
@@ -47,23 +49,16 @@
                        serviceName:(NSString*)serviceName {
     self = [super init];
     if (self) {
-        _generator = generator;
+        _generator.reset(generator);
         _serviceName = [serviceName copy];
     }
     return self;
 }
 
-- (void)dealloc {
-    if (_generator) {
-        delete _generator;
-        _generator = nullptr;
-    }
-}
-
 - (void)generate:(NSString*)prompt
       completion:(void (^)(NSData* _Nullable, NSString* _Nullable))completion {
     if (completion == nil) return;
-    if (_generator == nullptr || prompt.length == 0) {
+    if (!_generator || prompt.length == 0) {
         dispatch_async(dispatch_get_main_queue(), ^{
             completion(nil, prompt.length == 0
                 ? @"Prompt cannot be empty"

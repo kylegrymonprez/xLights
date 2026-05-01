@@ -202,8 +202,8 @@ struct AIPaletteGenerationSheet: View {
         case .song:
             // Match desktop's pre-fill: "<title>" or "<title> by <artist>"
             let doc = viewModel.document
-            let title = doc.audioTitle() ?? ""
-            let artist = doc.audioArtist() ?? ""
+            let title = doc.audioTitle()
+            let artist = doc.audioArtist()
             if title.isEmpty && artist.isEmpty {
                 // No metadata — leave whatever the user already typed.
                 if promptText.isEmpty {
@@ -255,20 +255,25 @@ struct AIPaletteGenerationSheet: View {
         XLAIServices.shared().generateColorPalette(
             prompt: prompt,
             forService: selectedService) { colors, err in
-            if let err = err {
-                status = .error(err)
-                return
+            // The bridge marshals this completion to main, but
+            // Swift sees the ObjC block as non-isolated @Sendable.
+            // Hop to MainActor so the @State mutations are safe.
+            Task { @MainActor in
+                if let err = err {
+                    status = .error(err)
+                    return
+                }
+                guard let colors = colors, !colors.isEmpty else {
+                    status = .error("AI returned no colors")
+                    return
+                }
+                resultColors = Array(colors.prefix(8))
+                // The core's AIColorPalette has a separate description;
+                // we don't get it back through the bridge today (only
+                // colors). Leave description blank — the per-color
+                // descriptionText carries the useful detail.
+                status = .ready
             }
-            guard let colors = colors, !colors.isEmpty else {
-                status = .error("AI returned no colors")
-                return
-            }
-            resultColors = Array(colors.prefix(8))
-            // The core's AIColorPalette has a separate description;
-            // we don't get it back through the bridge today (only
-            // colors). Leave description blank — the per-color
-            // descriptionText carries the useful detail.
-            status = .ready
         }
     }
 

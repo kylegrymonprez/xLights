@@ -564,6 +564,15 @@ bool iPadRenderContext::OpenSequence(const std::string& path) {
 
     _sequenceElements.PopulateRowInformation();
 
+    // Mark the SequenceFile as loaded so subsequent timing-track
+    // additions go through the live in-memory path (creating
+    // elements + marks immediately) instead of the
+    // mPendingTimings queue, which only applies on a future
+    // ApplyPendingTimings call. Desktop does this from
+    // SeqFileUtilities.cpp after every load; the iPad's
+    // sequence-open path is here, so it lands here.
+    _sequenceFile->SetSequenceLoaded(true);
+
     // ValueCurve needs sequence elements for VC expressions referencing timing tracks
     ValueCurve::SetSequenceElements(&_sequenceElements);
 

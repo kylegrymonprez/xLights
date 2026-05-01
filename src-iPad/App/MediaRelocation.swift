@@ -87,7 +87,7 @@ struct MediaRelocationPromptModifier: ViewModifier {
     }
 
     private var mediaFolders: [String] {
-        viewModel.document.mediaFolderPaths() ?? []
+        viewModel.document.mediaFolderPaths()
     }
 
     private func displayName(for path: String) -> String {
@@ -103,10 +103,10 @@ struct MediaRelocationPromptModifier: ViewModifier {
             // Already inside an enforced root — store as-is. Show-folder
             // paths become relative (portable); media-folder paths
             // stay absolute (preserves the original location).
-            let showDir = viewModel.document.showFolderPath() ?? ""
+            let showDir = viewModel.document.showFolderPath()
             let isInShow = !showDir.isEmpty && url.path.hasPrefix(showDir)
             let stored = isInShow
-                ? (viewModel.document.makeRelativePath(url.path) ?? url.path)
+                ? (viewModel.document.makeRelativePath(url.path))
                 : url.path
             onCommit(stored)
             url.stopAccessingSecurityScopedResource()
@@ -122,7 +122,7 @@ struct MediaRelocationPromptModifier: ViewModifier {
             toShowFolder: url.path,
             subdirectory: subdirectory)
         {
-            let stored = viewModel.document.makeRelativePath(copied) ?? copied
+            let stored = viewModel.document.makeRelativePath(copied)
             onCommit(stored)
         }
         url.stopAccessingSecurityScopedResource()

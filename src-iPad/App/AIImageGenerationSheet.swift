@@ -171,17 +171,22 @@ struct AIImageGenerationSheet: View {
         pngData = nil
         preview = nil
         session.generate(p) { png, err in
-            if let err = err {
-                status = .error(err)
-                return
+            // The bridge marshals this completion to main, but
+            // Swift sees the ObjC block as non-isolated @Sendable.
+            // Hop to MainActor so the @State mutations are safe.
+            Task { @MainActor in
+                if let err = err {
+                    status = .error(err)
+                    return
+                }
+                guard let png = png, let img = UIImage(data: png) else {
+                    status = .error("Couldn't decode generated image")
+                    return
+                }
+                pngData = png
+                preview = img
+                status = .ready
             }
-            guard let png = png, let img = UIImage(data: png) else {
-                status = .error("Couldn't decode generated image")
-                return
-            }
-            pngData = png
-            preview = img
-            status = .ready
         }
     }
 
@@ -197,7 +202,7 @@ struct AIImageGenerationSheet: View {
         guard let png = pngData else { return }
 
         let doc = viewModel.document
-        let showDir = doc.showFolderPath() ?? ""
+        let showDir = doc.showFolderPath()
         guard !showDir.isEmpty else {
             status = .error("Open a show folder before saving generated images.")
             return
@@ -226,7 +231,7 @@ struct AIImageGenerationSheet: View {
         }
         try? FileManager.default.removeItem(at: tmpURL)
 
-        let stored = doc.makeRelativePath(copied) ?? copied
+        let stored = doc.makeRelativePath(copied)
         onCommitPath(stored)
         dismiss()
     }

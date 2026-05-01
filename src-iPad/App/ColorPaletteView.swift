@@ -122,7 +122,7 @@ struct ColorPaletteView: View {
         guard let sel = viewModel.selectedEffect else { return "" }
         return viewModel.document.currentPaletteString(
             forRow: Int32(sel.rowIndex),
-            at: Int32(sel.effectIndex)) ?? ""
+            at: Int32(sel.effectIndex))
     }
 
     private func applyPalette(_ paletteString: String) {
@@ -145,7 +145,7 @@ struct ColorPaletteView: View {
         guard let sel = viewModel.selectedEffect else { return (true, true) }
         let dict = viewModel.document.colorCurveModeSupport(
             forRow: Int32(sel.rowIndex),
-            at: Int32(sel.effectIndex)) ?? [:]
+            at: Int32(sel.effectIndex))
         let linear = dict["linear"]?.boolValue ?? true
         let radial = dict["radial"]?.boolValue ?? true
         return (linear, radial)

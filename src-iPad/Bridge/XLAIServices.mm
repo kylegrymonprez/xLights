@@ -201,23 +201,19 @@ std::pair<std::string, bool> serviceNameFromPropertyId(NSString* propertyId) {
 - (NSArray<NSString*>*)capabilities  { return _capabilities ?: @[]; }
 - (NSArray<XLAIServiceProperty*>*)properties { return _properties ?: @[]; }
 
-// Value equality so SwiftUI's `.onChange(of: services)` can compare
-// snapshots properly (NSObject's default isEqual: is pointer equality,
-// which would treat every reload() as a change). Compare on the
-// externally-observable state — name + flags. Property edits don't
-// flip these, so they don't churn the Picker selection.
-- (BOOL)isEqual:(id)object {
-    if (object == self) return YES;
-    if (![object isKindOfClass:[XLAIServiceInfo class]]) return NO;
-    XLAIServiceInfo* other = (XLAIServiceInfo*)object;
-    return [self.name isEqualToString:other.name]
-        && self.available == other.available
-        && self.enabled   == other.enabled;
-}
-
-- (NSUInteger)hash {
-    return self.name.hash ^ (self.available ? 1u : 0u) ^ (self.enabled ? 2u : 0u);
-}
+// We deliberately do NOT override -isEqual: / -hash. NSObject's
+// pointer equality is what we want: every -allServices call returns
+// freshly-allocated snapshots, so SwiftUI sees the array as
+// "changed" on every reload and re-renders accordingly. A previous
+// attempt here defined value-equality on name + available + enabled
+// — but that suppressed re-renders when the user toggled an
+// individual capability bool, since name / available / enabled
+// didn't flip (toggling Color Palette off still leaves Images +
+// Speech2Text enabled, so `enabled` stays true). Toggles appeared
+// to "not work" until a final bool flipped the aggregate, at which
+// point every row updated at once. Pointer equality avoids that
+// whole class of bug; the .onChange(of: services) handler in the
+// sheet is idempotent so firing every reload is harmless.
 
 @end
 
@@ -243,6 +239,9 @@ std::pair<std::string, bool> serviceNameFromPropertyId(NSString* propertyId) {
         _store = std::make_unique<XLiPadServiceSettingsStore>();
         // pluginDir = "" — App Store policy forbids dynamic loading,
         // so we ship only the built-in services compiled into core.
+        // ServiceManager itself registers AppleIntelligence (Apple
+        // Silicon only), so iPad and desktop see the same set without
+        // duplicating the platform check here.
         _manager = std::make_unique<ServiceManager>(_store.get(), std::string());
 
         if (auto services = _manager->getServices(); !services.empty()) {
@@ -357,6 +356,66 @@ std::pair<std::string, bool> serviceNameFromPropertyId(NSString* propertyId) {
         BOOL nsOk = ok ? YES : NO;
         dispatch_async(dispatch_get_main_queue(), ^{
             completion(nsOk, nsMsg.length > 0 ? nsMsg : @"No response");
+        });
+    });
+}
+
+- (void)generateLyricTrack:(NSString*)audioPath
+                forService:(NSString*)serviceName
+                completion:(void (^)(NSArray<NSString*>* _Nullable,
+                                     NSArray<NSNumber*>* _Nullable,
+                                     NSArray<NSNumber*>* _Nullable,
+                                     NSString* _Nullable))completion {
+    if (completion == nil) return;
+    if (!_manager || serviceName.length == 0 || audioPath.length == 0) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(nil, nil, nil, audioPath.length == 0
+                ? @"Audio path is empty"
+                : @"AI services not initialized");
+        });
+        return;
+    }
+
+    aiBase* service = _manager->getService(stdFromNS(serviceName));
+    if (!service) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(nil, nil, nil,
+                [NSString stringWithFormat:@"Service '%@' not found", serviceName]);
+        });
+        return;
+    }
+    if (!service->IsEnabledForType(aiType::SPEECH2TEXT)) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(nil, nil, nil,
+                [NSString stringWithFormat:
+                    @"%@ is not configured for speech-to-text.", serviceName]);
+        });
+        return;
+    }
+
+    std::string p = stdFromNS(audioPath);
+
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        aiBase::AILyricTrack track = service->GenerateLyricTrack(p);
+
+        if (!track.error.empty()) {
+            NSString* err = nsFromStd(track.error);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                completion(nil, nil, nil, err);
+            });
+            return;
+        }
+
+        NSMutableArray<NSString*>* words = [NSMutableArray arrayWithCapacity:track.lyrics.size()];
+        NSMutableArray<NSNumber*>* starts = [NSMutableArray arrayWithCapacity:track.lyrics.size()];
+        NSMutableArray<NSNumber*>* ends   = [NSMutableArray arrayWithCapacity:track.lyrics.size()];
+        for (auto const& l : track.lyrics) {
+            [words addObject:nsFromStd(l.word)];
+            [starts addObject:@(l.startMS)];
+            [ends addObject:@(l.endMS)];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            completion(words, starts, ends, nil);
         });
     });
 }

@@ -152,6 +152,23 @@ extern NSString* const XLAICapabilitySpeech2Text;
                                        NSString* _Nullable error))completion
     NS_SWIFT_NAME(generateColorPalette(prompt:forService:completion:));
 
+// Run aiBase::GenerateLyricTrack on the named SPEECH2TEXT-capable
+// service, against the audio file at `audioPath`. The recognition
+// itself can run for many seconds (chunked SFSpeech), so the call
+// dispatches to a utility queue and the completion fires on main.
+//
+// On success: parallel arrays of (word, startMS, endMS) and `error`
+// is nil. On failure: arrays are nil and `error` carries the
+// message. Pick the service name from `allServices()`'s entries
+// whose `capabilities` contains `XLAICapabilitySpeech2Text`.
+- (void)generateLyricTrack:(NSString*)audioPath
+                forService:(NSString*)serviceName
+                completion:(void (^)(NSArray<NSString*>* _Nullable words,
+                                     NSArray<NSNumber*>* _Nullable startMS,
+                                     NSArray<NSNumber*>* _Nullable endMS,
+                                     NSString* _Nullable error))completion
+    NS_SWIFT_NAME(generateLyricTrack(audioPath:forService:completion:));
+
 #ifdef __cplusplus
 // Internal C++ accessor — callable only from .mm/.cpp files. Returns
 // the underlying ServiceManager so effect/import code can call
