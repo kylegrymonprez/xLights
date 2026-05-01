@@ -11,6 +11,9 @@ Issue Tracker is found here: www.github.com/xLightsSequencer/xLights/issues
 XLIGHTS/NUTCRACKER RELEASE NOTES
 ---------------------------------
 2026.08  May ??, 2026
+    -enh (charlie)              Right-click a timing track → "Search for Lyrics Online..." searches LRCLIB by song
+                                title/artist (auto-filled from sequence header) and imports the chosen result's
+                                synced .lrc lyrics as a phrase-per-line timing track.
     -bug (dkulp)                macOS: process the unselect-effect / choicebook-page-change events
                                 synchronously before starting an effect-button drag, instead of posting them
                                 async. Posted events were firing inside DoDragDrop's nested event loop,
