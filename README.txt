@@ -11,6 +11,11 @@ Issue Tracker is found here: www.github.com/xLightsSequencer/xLights/issues
 XLIGHTS/NUTCRACKER RELEASE NOTES
 ---------------------------------
 2026.08  May ??, 2026
+    -bug (dkulp)                macOS: process the unselect-effect / choicebook-page-change events
+                                synchronously before starting an effect-button drag, instead of posting them
+                                async. Posted events were firing inside DoDragDrop's nested event loop,
+                                racing with AppKit's NSCoreDragManager and producing a null deref inside
+                                NSCoreDragProcessSourceDrag. Suspected cause of the AppKit drag crash.
     -bug (dkulp)                Fix EXC_BAD_ACCESS in MetalRenderBufferComputeData::bufferResized when a model
                                 has nodes with zero coordinates. Empty-coord nodes now use the same -1 sentinel
                                 as out-of-bounds single-coord nodes instead of dereferencing past end of vector.
