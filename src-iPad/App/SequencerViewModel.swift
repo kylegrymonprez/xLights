@@ -1991,7 +1991,7 @@ class SequencerViewModel {
         }
         isOutputting = document.startOutput()
         if !isOutputting {
-            return "Couldn't reach any of the configured controllers. Check that the iPad is on the same network as the controllers. sACN multicast isn't supported on iPad yet — try ArtNet, DDP, or sACN unicast."
+            return "Couldn't reach any of the configured controllers. Check that the iPad is on the same network as the controllers."
         }
         return nil
     }

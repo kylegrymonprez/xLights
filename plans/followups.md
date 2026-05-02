@@ -23,15 +23,6 @@ phase home; catalogued here so they don't fall off.
   `ShaderConfig::GetDynamicPropertiesJson()` so grouping carries
   across. Deferred until a real shader pack trips the issue. P2.
 
-## Phase H — App Store
-
-- **sACN multicast entitlement.** `com.apple.developer.networking.multicast`
-  request submitted to Apple 2026-04-28. Once approved, add the key
-  to `macOS/Assets/xLights-iPad/xLights-iPad.entitlements` so iPad
-  testers can join `239.255.x.x` for sACN multicast output. Until
-  then the toggle's "couldn't reach" alert text steers users to
-  ArtNet, DDP, or sACN unicast.
-
 ## TestFlight quality (pre-submission)
 
 These are not engineering blockers but are the "any TestFlight

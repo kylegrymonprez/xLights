@@ -111,9 +111,8 @@ Possible Source Effects, B56 Convert-to-Effect) are explicitly
 parked — substantial new work, not blocking submission.
 
 The follow-ups in [`followups.md`](plans/followups.md) (Data Layers
-tab, MH waypoint authoring, shader uniform grouping, video compat
-badge, sACN multicast entitlement) are quality-of-life and unblock
-independently.
+tab, MH waypoint authoring, shader uniform grouping) are
+quality-of-life and unblock independently.
 
 ## Could pull into MVP during testing
 
@@ -258,11 +257,12 @@ testers must configure controllers in desktop xLights and copy the
 show folder over) or "couldn't reach configured controllers"
 (network / multicast issue).
 
-**sACN multicast caveat.** iOS gates `239.255.x.x` joins behind
-`com.apple.developer.networking.multicast`, which Apple approves
-manually. Entitlement request submitted 2026-04-28; tracked in
-[`followups.md`](plans/followups.md). Until approved, ArtNet, DDP,
-and sACN unicast all work today.
+**sACN multicast.** Apple-issued
+`com.apple.developer.networking.multicast` entitlement assigned
+to the team account 2026-05-01; key added to
+`macOS/Assets/xLights-iPad/xLights-iPad.entitlements`. iPads on
+the same network as the controllers can now join `239.255.x.x`
+for sACN multicast output alongside ArtNet, DDP, and sACN unicast.
 
 ## Deferred / explicitly out of MVP
 
