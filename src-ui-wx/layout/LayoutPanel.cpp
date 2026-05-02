@@ -6695,6 +6695,10 @@ Model* LayoutPanel::GetModelFromTreeItem(wxTreeListItem treeItem) {
 
 // Select a Model in the tree, currently only selects top level model if found
 void LayoutPanel::SelectModelInTree(Model* modelToSelect) {
+	if (modelToSelect != nullptr && !_filterString.IsEmpty() && !ModelMatchesFilter(modelToSelect)) 
+        wxCommandEvent dummy;
+        OnModelFilterCancelBtn(dummy);
+    }
     for ( wxTreeListItem item = TreeListViewModels->GetFirstItem();
           item.IsOk();
           item = TreeListViewModels->GetNextSibling(item) )
