@@ -22,17 +22,3 @@ phase home; catalogued here so they don't fall off.
   `GLSL_GROUP:` comment conventions in
   `ShaderConfig::GetDynamicPropertiesJson()` so grouping carries
   across. Deferred until a real shader pack trips the issue. P2.
-
-## TestFlight quality (pre-submission)
-
-These are not engineering blockers but are the "any TestFlight
-report will need this" items the gap analysis (2026-04-23) flagged.
-Each is a near-trivial addition that materially improves the
-tester loop. Pull into MVP if there's bandwidth before H-5 wraps.
-
-- **Recent Show Folders list** (L-1b). Recent Sequences is
-  scoped per show folder (2026-04-30 refactor — flipping shows
-  swaps the picker's recent list cleanly), but the folder-config
-  sheet itself only remembers the *current* show folder. Add a
-  "Recent Show Folders" section so users can flip between shows
-  without re-picking from Files every time.
