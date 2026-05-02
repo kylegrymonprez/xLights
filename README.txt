@@ -11,6 +11,7 @@ Issue Tracker is found here: www.github.com/xLightsSequencer/xLights/issues
 XLIGHTS/NUTCRACKER RELEASE NOTES
 ---------------------------------
 2026.08  May ??, 2026
+    -bug (dkulp)                Fix scrambled rendering of interlaced animated GIFs (Pictures effect, etc.).
     -enh (charlie)              Right-click a timing track → "Search for Lyrics Online..." searches LRCLIB by song
                                 title/artist (auto-filled from sequence header) and imports the chosen result's
                                 synced .lrc lyrics as a phrase-per-line timing track.
