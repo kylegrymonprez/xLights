@@ -16,8 +16,14 @@ Lyrics) shipped via `XLAIServices.generateLyricTrack` + the unified
 Add Timing Track sheet. What remains is a short tail of P2 polish
 plus one named open item (B77 MIDI import).
 
-**Current counts:** 0 × P0, 0 × P1, **2 × P2 named**, **3 × Deferred**,
+**Current counts:** 0 × P0, 0 × P1, **1 × P2 named**, **3 × Deferred**,
 1 × Removed.
+
+B91 LRCLIB synced-lyrics import shipped 2026-05-02 (parser hoisted
+to `src-core/lyrics/LRCParser.{h,cpp}`; iPad bridge in
+`src-iPad/Bridge/XLLyricsImport.{h,mm}`; SwiftUI tab in
+`AddTimingTrackSheet`). Both clients now go through the same
+`lrc::ParseLRC` + `lrc::SanitizePhraseText`.
 
 ---
 
@@ -28,7 +34,6 @@ plus one named open item (B77 MIDI import).
 | # | Gap | What's needed |
 |---|---|---|
 | **B77** | Import Notes (MIDI) | New iOS-side MIDI parser (or AVFoundation `MIDIFile`) + `XLSequenceDocument` bridge that converts note-on events into timing marks on a chosen track. Acceptance: pick a `.mid` from `.fileImporter`, choose target timing track, marks appear at note-on times with note-name labels. |
-| **B91** | LRCLIB synced-lyrics import | Desktop landed 2026-05-01 (`src-ui-wx/LRCLIBSearchDialog.{h,cpp}` + RowHeading entry "Search for Lyrics Online…"). Searches LRCLIB by song / artist (auto-filled from sequence header), imports the chosen result's `.lrc` as a phrase-per-line timing track; falls back to plain lyrics evenly distributed when no synced version exists. iPad side: hoist the LRCLIB HTTP client to `src-core/` (currently inline in the wx dialog), add a tab to `AddTimingTrackSheet` ("Search Lyrics Online") next to the existing AI Lyrics tab, wire results through `addLyricTimingTrack(named:words:startMS:endMS:)` (already exists for B79). |
 
 ### Deferred — substantial new work, not parity gaps in practice
 

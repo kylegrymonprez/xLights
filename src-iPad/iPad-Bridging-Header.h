@@ -7,6 +7,7 @@
 #import "Bridge/XLColorCurve.h"
 #import "Bridge/XLImportSession.h"
 #import "Bridge/XLSuperStarImport.h"
+#import "Bridge/XLLyricsImport.h"
 #import "Bridge/XLLogPackager.h"
 #import "Bridge/XLDiagnosticSession.h"
 #import "Bridge/XLAIServices.h"

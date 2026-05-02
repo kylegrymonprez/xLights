@@ -12,7 +12,7 @@ for the details.
 |---|---|---|
 | [phase-h-app-store.md](phase-h-app-store.md) | H — App Store readiness | H-5: screenshots, App Store Connect metadata, submission |
 | [phase-i-import-effects.md](phase-i-import-effects.md) | I — Import Effects | I-3 vendor-sequence regression + Auto Map UX polish, I-5 (`.lms`/`.las`) |
-| [phase-b-grid-parity.md](phase-b-grid-parity.md) | B — Effects grid parity | 1 P2 named (B77 MIDI) + 3 deferred |
+| [phase-b-grid-parity.md](phase-b-grid-parity.md) | B — Effects grid parity | 1 P2 named (B77 MIDI) + 3 deferred (B91 LRCLIB landed 2026-05-02) |
 | [followups.md](followups.md) | Cross-phase | Small items left over from C / E (Data Layers tab, MH waypoint authoring, shader uniform grouping) |
 
 ## Residual sub-plans (phase complete)

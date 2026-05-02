@@ -444,6 +444,8 @@
 		<Unit filename="../src-ui-wx/model/PathGenerationDialog.h" />
 		<Unit filename="../src-ui-wx/sequencer/PerspectivesPanel.cpp" />
 		<Unit filename="../src-ui-wx/sequencer/PerspectivesPanel.h" />
+		<Unit filename="../src-core/lyrics/LRCParser.cpp" />
+		<Unit filename="../src-core/lyrics/LRCParser.h" />
 		<Unit filename="../src-core/lyrics/PhonemeDictionary.cpp" />
 		<Unit filename="../src-core/lyrics/PhonemeDictionary.h" />
 		<Unit filename="../src-core/render/IRenderJobStatus.h" />
