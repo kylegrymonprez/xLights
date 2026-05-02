@@ -60,6 +60,17 @@ priority.
   doesn't cover user-installed VAMP plugins.
 - **A-13** VAMPPluginDialog. Same blocker.
 
+## Tracking — desktop work in flight
+
+- **A-14 Stem separation via ONNX Runtime / OpenVINO**
+  (desktop, started 2026-04-26, `0ccb37b25`). Desktop is
+  experimenting with ONNX-runtime-based stem separation as a
+  replacement for the existing HTDemucs path. iOS has both
+  CoreML and ONNX Runtime available. Wait until the desktop
+  side stabilises before committing to an iPad bridge — the
+  model-format choice (ONNX vs CoreML conversion) drives the
+  iPad work materially.
+
 ## When to come back
 
 - Only if the iOS audio analysis story changes — e.g. a CoreML-

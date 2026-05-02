@@ -14,8 +14,9 @@ The iPad app builds, ships through Xcode Cloud, runs on TestFlight
 external testers, and exercises the full desktop rendering / effect /
 sequence pipeline through the same `src-core/` it shares with the
 Mac. Phases A, B-Metal, C, D, E, F, G are complete. Phase B P0+P1
-parity work is done (only 1 named P2 — B77 MIDI import — plus 3
-deferred remain; B79 AI Speech 2 Lyrics shipped via
+parity work is done (2 named P2 — B77 MIDI import + B91 LRCLIB
+synced-lyrics import, the latter newly landed on desktop 2026-05-01
+— plus 3 deferred remain; B79 AI Speech 2 Lyrics shipped via
 `XLAIServices.generateLyricTrack`). Phase H is one organizational
 push (H-5) from submission. Phase I shipped
 `.xsq`/`.xsqz` 2026-04-29 and SuperStar `.sup` 2026-05-02; the
@@ -74,7 +75,7 @@ variants in `libdbg-ios/`.
 | Phase | Title | Status | Sub-plan |
 |---|---|---|---|
 | A | Core-path hardening | ✓ complete | — |
-| B | Effects grid parity | ✓ P0 + P1 closed; 1 P2 (B77 MIDI) + 3 deferred remain | [`phase-b-grid-parity.md`](plans/phase-b-grid-parity.md) |
+| B | Effects grid parity | ✓ P0 + P1 closed; 2 P2 (B77 MIDI, B91 LRCLIB lyrics) + 3 deferred remain | [`phase-b-grid-parity.md`](plans/phase-b-grid-parity.md) |
 | B-Metal | Grid render pipeline (CG → Metal) | ✓ complete | — |
 | C | Effect settings inspector | ✓ complete | 3 small follow-ups in [`followups.md`](plans/followups.md) |
 | D | Model Preview + preview polish | ✓ complete | [`phase-d-preview.md`](plans/phase-d-preview.md) (residual) |
@@ -104,10 +105,13 @@ In priority order:
    (scroll-to-first-unmapped, "X of Y mapped" counter). Bug-fix
    anything the regression turns up.
 
-3. **Phase B P2 — B77 (MIDI Import Notes).** Needs a new bridge
-   surface (AVFoundation `MIDIFile` parser → timing marks). P2
-   feature — desktop has it, iPad doesn't, but it's not on the
-   critical authoring path.
+3. **Phase B P2 — B77 (MIDI Import Notes) + B91 (LRCLIB synced
+   lyrics import).** B77 needs a new bridge surface (AVFoundation
+   `MIDIFile` parser → timing marks). B91 lifts the LRCLIB HTTP
+   client out of `src-ui-wx/LRCLIBSearchDialog.cpp` to core +
+   adds a Search-Lyrics-Online tab to `AddTimingTrackSheet` (pairs
+   with the existing AI Lyrics tab). Both are P2 — desktop has
+   them, iPad doesn't, but neither is on the critical authoring path.
 
 The 3 deferred Phase B items (B16 drag-from-palette ghost, B24 Find
 Possible Source Effects, B56 Convert-to-Effect) are explicitly
