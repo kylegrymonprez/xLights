@@ -79,7 +79,7 @@ variants in `libdbg-ios/`.
 | F | Window system + Display Elements | ✓ complete 2026-04-21 | [`phase-f-window-system.md`](plans/phase-f-window-system.md) (residual) |
 | G | Document / iCloud polish | ✓ complete 2026-04-22 | [`phase-g-document.md`](plans/phase-g-document.md) (residual) |
 | H | App Store readiness | H-0..H-4 ✓; **H-5 metadata + screenshots remaining** | [`phase-h-app-store.md`](plans/phase-h-app-store.md) |
-| I | Import Effects | I-1 + I-2 (`.xsq`/`.xsqz`) ✓ 2026-04-29; **I-3 vendor regression, I-4 `.sup`, I-5 `.lms`/`.las` remaining** | [`phase-i-import-effects.md`](plans/phase-i-import-effects.md) |
+| I | Import Effects | I-1 + I-2 (`.xsq`/`.xsqz`) ✓ 2026-04-29; I-4 (`.sup`) ✓ 2026-05-02; **I-3 vendor regression, I-5 `.lms`/`.las` remaining** | [`phase-i-import-effects.md`](plans/phase-i-import-effects.md) |
 
 ---
 
@@ -198,10 +198,15 @@ quality" section unless noted otherwise.
 
 **P2 — feature additions worth a tester sprint**:
 
-- **I-4 SuperStar `.sup` import.** Same UI as I-2; just hoist the
-  parser from `SuperStarImportDialog.cpp` to
-  `src-core/import_export/SuperStarImporter.{h,cpp}`. Vendor
-  relevance ≈ `.xsq` for a meaningful slice of users.
+- ~~**I-4 SuperStar `.sup` import.**~~ Landed 2026-05-02. The UI
+  is **not** the same as I-2 (SuperStar has no source/dest tree;
+  it's a single-target-model + global-knobs flow). Parser hoisted
+  to `src-core/import_export/SuperStarImporter.{h,cpp}`; bridge
+  in `src-iPad/Bridge/XLSuperStarImport.{h,mm}`; SwiftUI sheet
+  in `src-iPad/App/SuperStarImportView.swift`. `ImportEffectsView`
+  branches on file extension after the picker. Covers every
+  SuperStar element type the desktop covered (morphs, images,
+  flowys, scenes, textActions, imageActions).
 - **B77 MIDI import.** Concrete user request; iOS-native via
   AVFoundation `MIDIFile`.
 - **Audio onset → timing track** (A-1, P1, M). Replaces 5–10 minutes
