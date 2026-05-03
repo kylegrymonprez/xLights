@@ -284,9 +284,17 @@ struct AddTimingTrackSheet: View {
                                 }
                             }
                             Spacer()
-                            Text(result.hasSynced ? "Synced" : "Plain")
-                                .font(.caption2)
-                                .foregroundStyle(result.hasSynced ? .green : .orange)
+                            VStack(alignment: .trailing, spacing: 2) {
+                                if let dur = formattedDuration(result.duration) {
+                                    Text(dur)
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                        .monospacedDigit()
+                                }
+                                Text(result.hasSynced ? "Synced" : "Plain")
+                                    .font(.caption2)
+                                    .foregroundStyle(result.hasSynced ? .green : .orange)
+                            }
                         }
                     }
                     .buttonStyle(.plain)
@@ -599,6 +607,12 @@ struct AddTimingTrackSheet: View {
         if let p = result.plainLyrics, !p.isEmpty { return p }
         if result.instrumental == true { return "(Instrumental)" }
         return ""
+    }
+
+    private func formattedDuration(_ duration: Double?) -> String? {
+        guard let d = duration, d > 0 else { return nil }
+        let total = Int(d)
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 
     private func runLRCLIBSearch() {
