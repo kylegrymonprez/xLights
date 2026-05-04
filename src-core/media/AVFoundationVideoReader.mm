@@ -559,6 +559,43 @@ int AVFoundationVideoReader::GetPos() { return _impl->curPos; }
 std::string AVFoundationVideoReader::GetFilename() const { return _impl->filename; }
 int AVFoundationVideoReader::GetPixelChannels() const { return _impl->wantAlpha ? 4 : 3; }
 
+bool AVFoundationVideoReader::Resize(int width, int height)
+{
+    if (!_impl || !_impl->valid) return false;
+    if (width <= 0 || height <= 0) return false;
+    if (_impl->width == width && _impl->height == height) return true;
+
+    int channels = _impl->wantAlpha ? 4 : 3;
+    int newSize = width * height * channels;
+
+    if (_impl->frameBuffer1) { free(_impl->frameBuffer1); _impl->frameBuffer1 = nullptr; }
+    if (_impl->frameBuffer2) { free(_impl->frameBuffer2); _impl->frameBuffer2 = nullptr; }
+    _impl->frameBuffer1 = (uint8_t*)calloc(1, newSize);
+    _impl->frameBuffer2 = (uint8_t*)calloc(1, newSize);
+    if (!_impl->frameBuffer1 || !_impl->frameBuffer2) return false;
+
+    _impl->frameBufferSize = newSize;
+    _impl->width = width;
+    _impl->height = height;
+
+    int stride = width * channels;
+    _impl->videoFrame1 = { _impl->frameBuffer1, nullptr, stride, width, height, _impl->outputFormat };
+    _impl->videoFrame2 = { _impl->frameBuffer2, nullptr, stride, width, height, _impl->outputFormat };
+
+    // The cached scaled pixel buffer is sized to the old dimensions; ensureScaledPixelBuffer()
+    // will lazily reallocate to match the new width/height on the next decode.
+    if (_impl->scaledPixelBuffer) {
+        CVPixelBufferRelease(_impl->scaledPixelBuffer);
+        _impl->scaledPixelBuffer = nullptr;
+    }
+
+    // Force the next GetNextFrame() to actually decode rather than returning the
+    // current/prev frame, whose backing storage is the freshly-allocated (zeroed) buffers.
+    _impl->curPos = -1000;
+
+    return true;
+}
+
 void AVFoundationVideoReader::Seek(int timestampMS, bool readFrame)
 {
     if (!_impl->valid) return;
