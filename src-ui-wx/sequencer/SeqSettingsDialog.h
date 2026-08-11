@@ -159,6 +159,12 @@ class SeqSettingsDialog: public wxDialog
         wxButton* Button_AudioChangeFile = nullptr;
         wxButton* Button_AudioEditShortname = nullptr;
 
+        // Controller -> alt track mapping, for FPP Connect's "Alt" media mode
+        wxListCtrl* ListCtrl_ControllerMediaMap = nullptr;
+        wxButton* Button_AddControllerMedia = nullptr;
+        wxButton* Button_SetControllerMedia = nullptr;
+        wxButton* Button_RemoveControllerMedia = nullptr;
+
 	protected:
 
 		//(*Identifiers(SeqSettingsDialog)
@@ -257,6 +263,10 @@ class SeqSettingsDialog: public wxDialog
         static const long ID_BUTTON_AudioRemove;
         static const long ID_BUTTON_AudioChangeFile;
         static const long ID_BUTTON_AudioEditShortname;
+        static const long ID_LISTCTRL_ControllerMediaMap;
+        static const long ID_BUTTON_AddControllerMedia;
+        static const long ID_BUTTON_SetControllerMedia;
+        static const long ID_BUTTON_RemoveControllerMedia;
 
 	private:
 
@@ -377,6 +387,11 @@ class SeqSettingsDialog: public wxDialog
         void OnButton_AudioChangeFileClick(wxCommandEvent& event);
         void OnButton_AudioEditShortnameClick(wxCommandEvent& event);
         void OnListCtrl_AudioTracksActivated(wxListEvent& event);
+        void PopulateControllerMediaList();
+        void OnButton_AddControllerMediaClick(wxCommandEvent& event);
+        void OnButton_SetControllerMediaClick(wxCommandEvent& event);
+        void OnButton_RemoveControllerMediaClick(wxCommandEvent& event);
+        void OnListCtrl_ControllerMediaMapActivated(wxListEvent& event);
         void SetTimingDisplay(const wxString& timing);
         void OnDefaultSavedTimer(wxTimerEvent& event);
         void RemoveWizard();

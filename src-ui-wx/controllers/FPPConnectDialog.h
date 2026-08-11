@@ -3,6 +3,7 @@
 
 #include <wx/progdlg.h>
 #include <list>
+#include <map>
 #include <set>
 
 //(*Headers(FPPConnectDialog)
@@ -108,7 +109,9 @@ class FPPConnectDialog: public wxDialog
 
         void LoadSequencesFromFolder(wxString const& dir) const;
         void LoadSequencesFromFolder(wxString const& dir, std::set<wxString>& knownPaths) const;
-        void AddSequenceListItem(const wxString& fseqPath, const std::string& media, std::set<wxString>& knownPaths) const;
+        void AddSequenceListItem(const wxString& fseqPath, const std::string& media, std::set<wxString>& knownPaths,
+                                  const std::map<std::string, std::string>& altTrackPaths = {},
+                                  const std::map<std::string, std::string>& controllerMediaMap = {}) const;
         void LoadSequences();
         void PopulateFPPInstanceList(wxProgressDialog *prgs = nullptr);
         void AddInstanceRow(const FPP &inst);
@@ -122,9 +125,13 @@ class FPPConnectDialog: public wxDialog
         bool GetCheckValue(const std::string &col);
         std::string GetChoiceValue(const std::string &col);
         int GetChoiceValueIndex(const std::string &col);
-    
+
         void SetChoiceValueIndex(const std::string &col, int i);
         void SetCheckValue(const std::string &col, bool b);
+
+        // Media column tri-state ("None"/"Main"/"Alt"), stored as a wxChoice selection index.
+        std::string GetMediaMode(const std::string &rowStr);
+        void SetMediaMode(const std::string &rowStr, const std::string& mode);
 
 		wxString SequenceDisplayName(const wxString& filePath) const;
 		void DisplayDateModified(const wxString& filePath, wxTreeListItem &index) const;

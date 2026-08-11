@@ -252,6 +252,14 @@ void SequenceFile::RemoveAltTrack(int idx)
     for (int i = 0; i < (int)alt_tracks.size(); i++) {
         ValueCurve::SetAltAudio(GetAltTrackDisplayName(i), alt_tracks[i].audio);
     }
+    // Any controller mapped to the removed track falls back to Main.
+    for (auto it = controller_media_map.begin(); it != controller_media_map.end();) {
+        if (it->second == displayName) {
+            it = controller_media_map.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
 void SequenceFile::SetAltTrackPath(const std::string& ShowDir, int idx, const std::string& path)
@@ -290,11 +298,20 @@ void SequenceFile::SetAltTrackShortname(int idx, const std::string& name)
             }
         }
     }
+    std::string oldDisplayName = GetAltTrackDisplayName(idx);
     alt_tracks[idx].shortname = candidate;
     // Rebuild alt audio map since display name may have changed
     ValueCurve::ClearAltAudio();
     for (int i = 0; i < (int)alt_tracks.size(); i++) {
         ValueCurve::SetAltAudio(GetAltTrackDisplayName(i), alt_tracks[i].audio);
+    }
+    // Keep any controller mappings pointing at this track's old name in sync.
+    if (oldDisplayName != candidate) {
+        for (auto& [controllerName, trackName] : controller_media_map) {
+            if (trackName == oldDisplayName) {
+                trackName = candidate;
+            }
+        }
     }
 }
 
@@ -303,6 +320,33 @@ std::string SequenceFile::GetAltTrackDisplayName(int idx) const
     if (idx < 0 || idx >= (int)alt_tracks.size()) return "";
     if (!alt_tracks[idx].shortname.empty()) return alt_tracks[idx].shortname;
     return "Track" + std::to_string(idx + 1);
+}
+
+std::string SequenceFile::GetControllerMediaTrack(const std::string& controllerName) const
+{
+    auto it = controller_media_map.find(controllerName);
+    return it == controller_media_map.end() ? "" : it->second;
+}
+
+void SequenceFile::SetControllerMediaTrack(const std::string& controllerName, const std::string& altTrackShortname)
+{
+    if (altTrackShortname.empty()) {
+        controller_media_map.erase(controllerName);
+    } else {
+        controller_media_map[controllerName] = altTrackShortname;
+    }
+}
+
+std::string SequenceFile::ResolveControllerMediaPath(const std::string& controllerName) const
+{
+    std::string trackName = GetControllerMediaTrack(controllerName);
+    if (trackName.empty()) return "";
+    for (int i = 0; i < (int)alt_tracks.size(); i++) {
+        if (GetAltTrackDisplayName(i) == trackName) {
+            return alt_tracks[i].path;
+        }
+    }
+    return "";
 }
 
 void SequenceFile::SetRenderMode(const std::string& mode)
@@ -497,6 +541,14 @@ std::optional<pugi::xml_document> SequenceFile::LoadSequence(const std::string& 
                                 t.audio = new AudioManager(t.path, GetFrameMS());
                             }
                             alt_tracks.push_back(std::move(t));
+                        }
+                    }
+                } else if (name == "controllerMediaMap") {
+                    for (auto entry : element.children("entry")) {
+                        std::string controllerName = entry.attribute("controller").as_string("");
+                        std::string trackName = entry.text().as_string("");
+                        if (!controllerName.empty() && !trackName.empty()) {
+                            controller_media_map[controllerName] = trackName;
                         }
                     }
                 } else if (name == "sequenceDuration") {
@@ -1363,6 +1415,14 @@ bool SequenceFile::BuildDocument(pugi::xml_document& doc, SequenceElements& seq_
             auto trackNode = altNode.append_child("track");
             trackNode.append_attribute("shortname") = t.shortname.c_str();
             trackNode.text().set(t.path.c_str());
+        }
+    }
+    if (!controller_media_map.empty()) {
+        auto mapNode = head.append_child("controllerMediaMap");
+        for (const auto& [controllerName, trackName] : controller_media_map) {
+            auto entryNode = mapNode.append_child("entry");
+            entryNode.append_attribute("controller") = controllerName.c_str();
+            entryNode.text().set(trackName.c_str());
         }
     }
     head.append_child("sequenceDuration").text().set(GetSequenceDurationString());

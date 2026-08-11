@@ -15,6 +15,7 @@
 #include "pugixml.hpp"
 
 #include <array>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -138,6 +139,16 @@ public:
         return alt_tracks[idx].audio;
     }
 
+    // Per-controller media mapping for FPP Connect uploads: which alt track (by
+    // shortname) a given controller should receive instead of the main media,
+    // when the controller's FPP Connect Media mode is "Alt". Absent/empty means
+    // "use Main". Keyed by controller name (Controller::GetName()), matching
+    // how every other cross-reference to a controller is stored (by name).
+    std::string GetControllerMediaTrack(const std::string& controllerName) const;
+    void SetControllerMediaTrack(const std::string& controllerName, const std::string& altTrackShortname);
+    std::string ResolveControllerMediaPath(const std::string& controllerName) const;
+    const std::map<std::string, std::string>& GetControllerMediaMap() const { return controller_media_map; }
+
     const std::string& GetHeaderInfo(HEADER_INFO_TYPES node_type) const;
     void SetHeaderInfo(HEADER_INFO_TYPES node_type, const std::string& node_value);
 
@@ -227,6 +238,7 @@ private:
     DataLayerSet mDataLayers;
     AudioManager* audio = nullptr;
     std::vector<AlternateAudioTrack> alt_tracks;
+    std::map<std::string, std::string> controller_media_map; // controller name -> alt track shortname
     JukeboxButtonMap _jukeboxButtons;
 
     void CreateNew();

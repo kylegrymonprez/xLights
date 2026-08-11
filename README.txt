@@ -69,6 +69,10 @@ XLIGHTS/NUTCRACKER RELEASE NOTES
                                  tooltip to account for brightness inherited from earlier models chained on the
                                  same port, matching the port-level total
     -bug (derwin12)              Fix rotation not applying to all selected polyline models in a group
+    -enh (kylegrymonprez)        FPP Connect's Media column is now a None/Main/Alt selector. "Alt" uploads
+                                 an alternate audio track mapped to that controller in Sequence Settings'
+                                 Audio Tracks tab (new Controller Media Mapping list), falling back to Main
+                                 if no mapping is set
     -enh (derwin12)              Custom models have a Background Image Transparency % setting, so props
                                  positioned behind the background image show through it
     -enh (derwin12)              SubModels and States dialogs: editing node ranges while the Play preview

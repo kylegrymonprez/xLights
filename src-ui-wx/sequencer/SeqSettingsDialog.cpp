@@ -24,31 +24,33 @@
 #include <wx/dir.h>
 #include <wx/listctrl.h>
 #include <wx/textdlg.h>
+#include <wx/choicdlg.h>
 
 #include <list>
 #include <sstream>
 
-#include "SeqSettingsDialog.h"
-#include "sequencer/NewTimingDialog.h"
-#include "render/SequenceFile.h"
-#include "render/DataLayer.h"
+#include "import_export/ConvertDialog.h"
+#include "import_export/ConvertLogDialog.h"
 #include "import_export/FileConverter.h"
 #include "import_export/LorConvertDialog.h"
-#include "import_export/ConvertLogDialog.h"
-#include "sequencer/VAMPPluginDialog.h"
-#include "sequencer/CustomTimingDialog.h"
 #include "import_export/VendorMusicDialog.h"
-#include "xLightsMain.h"
+#include "media/ManageMediaPanel.h"
+#include "outputs/Controller.h"
+#include "outputs/ControllerEthernet.h"
+#include "render/DataLayer.h"
+#include "render/SequenceElements.h"
+#include "render/SequenceFile.h"
+#include "render/SequencePackage.h"
+#include "SeqSettingsDialog.h"
+#include "sequencer/CustomTimingDialog.h"
 #include "sequencer/MetronomeLabelDialog.h"
+#include "sequencer/NewTimingDialog.h"
+#include "sequencer/SequenceFacesPanel.h"
+#include "sequencer/VAMPPluginDialog.h"
+#include "shared/utils/wxUtilities.h"
 #include "UtilFunctions.h"
 #include "utils/ExternalHooks.h"
-#include "import_export/ConvertDialog.h"
-#include "media/ManageMediaPanel.h"
-#include "sequencer/SequenceFacesPanel.h"
-#include "render/SequenceElements.h"
-#include "render/SequencePackage.h"
-#include "shared/utils/wxUtilities.h"
-
+#include "xLightsMain.h"
 
 //(*IdInit(SeqSettingsDialog)
 const wxWindowID SeqSettingsDialog::ID_STATICTEXT_File = wxNewId();
@@ -147,6 +149,10 @@ const long SeqSettingsDialog::ID_BUTTON_AudioAdd = wxNewId();
 const long SeqSettingsDialog::ID_BUTTON_AudioRemove = wxNewId();
 const long SeqSettingsDialog::ID_BUTTON_AudioChangeFile = wxNewId();
 const long SeqSettingsDialog::ID_BUTTON_AudioEditShortname = wxNewId();
+const long SeqSettingsDialog::ID_LISTCTRL_ControllerMediaMap = wxNewId();
+const long SeqSettingsDialog::ID_BUTTON_AddControllerMedia = wxNewId();
+const long SeqSettingsDialog::ID_BUTTON_SetControllerMedia = wxNewId();
+const long SeqSettingsDialog::ID_BUTTON_RemoveControllerMedia = wxNewId();
 
 
 wxDEFINE_EVENT(EVT_GRID_ROW_CLICKED, wxCommandEvent);
@@ -540,6 +546,29 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, SequenceFile* file_to_han
         audioBtnSizer->Add(Button_AudioEditShortname, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
         audioSizer->Add(audioBtnSizer, 0, wxALL | wxALIGN_CENTER_HORIZONTAL, 5);
 
+        // Controller -> alt track mapping, for FPP Connect's "Alt" media mode.
+        // Only mapped controllers are listed (not every controller) - mappings are
+        // added explicitly via "Add Map", not pre-populated.
+        audioSizer->Add(new wxStaticText(PanelAudio, wxID_ANY, _("Controller Media Mappings (used by FPP Connect's \"Alt\" Media mode)")),
+                         0, wxALL, 5);
+        ListCtrl_ControllerMediaMap = new wxListCtrl(PanelAudio, ID_LISTCTRL_ControllerMediaMap,
+                                                      wxDefaultPosition, wxDLG_UNIT(PanelAudio, wxSize(400, 100)),
+                                                      wxLC_REPORT | wxLC_SINGLE_SEL | wxBORDER_SIMPLE);
+        ListCtrl_ControllerMediaMap->AppendColumn(_("Controller"), wxLIST_FORMAT_LEFT, wxDLG_UNIT(PanelAudio, wxSize(180, -1)).GetWidth());
+        ListCtrl_ControllerMediaMap->AppendColumn(_("Media"), wxLIST_FORMAT_LEFT, wxDLG_UNIT(PanelAudio, wxSize(180, -1)).GetWidth());
+        audioSizer->Add(ListCtrl_ControllerMediaMap, 1, wxALL | wxEXPAND, 5);
+
+        wxFlexGridSizer* controllerMediaBtnSizer = new wxFlexGridSizer(0, 3, 0, 0);
+        Button_AddControllerMedia = new wxButton(PanelAudio, ID_BUTTON_AddControllerMedia, _("Add Map"));
+        Button_SetControllerMedia = new wxButton(PanelAudio, ID_BUTTON_SetControllerMedia, _("Edit Map"));
+        Button_SetControllerMedia->Disable();
+        Button_RemoveControllerMedia = new wxButton(PanelAudio, ID_BUTTON_RemoveControllerMedia, _("Remove Map"));
+        Button_RemoveControllerMedia->Disable();
+        controllerMediaBtnSizer->Add(Button_AddControllerMedia, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+        controllerMediaBtnSizer->Add(Button_RemoveControllerMedia, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+        controllerMediaBtnSizer->Add(Button_SetControllerMedia, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+        audioSizer->Add(controllerMediaBtnSizer, 0, wxALL | wxALIGN_CENTER_HORIZONTAL, 5);
+
         PanelAudio->SetSizer(audioSizer);
         Notebook_Seq_Settings->AddPage(PanelAudio, _("Audio Tracks"), false);
 
@@ -561,6 +590,21 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, SequenceFile* file_to_han
             Button_AudioRemove->Disable();
             Button_AudioChangeFile->Disable();
             Button_AudioEditShortname->Disable();
+            evt.Skip();
+        });
+
+        Button_AddControllerMedia->Bind(wxEVT_BUTTON, &SeqSettingsDialog::OnButton_AddControllerMediaClick, this);
+        Button_SetControllerMedia->Bind(wxEVT_BUTTON, &SeqSettingsDialog::OnButton_SetControllerMediaClick, this);
+        Button_RemoveControllerMedia->Bind(wxEVT_BUTTON, &SeqSettingsDialog::OnButton_RemoveControllerMediaClick, this);
+        ListCtrl_ControllerMediaMap->Bind(wxEVT_LIST_ITEM_ACTIVATED, &SeqSettingsDialog::OnListCtrl_ControllerMediaMapActivated, this);
+        ListCtrl_ControllerMediaMap->Bind(wxEVT_LIST_ITEM_SELECTED, [this](wxListEvent& evt) {
+            Button_SetControllerMedia->Enable();
+            Button_RemoveControllerMedia->Enable();
+            evt.Skip();
+        });
+        ListCtrl_ControllerMediaMap->Bind(wxEVT_LIST_ITEM_DESELECTED, [this](wxListEvent& evt) {
+            Button_SetControllerMedia->Disable();
+            Button_RemoveControllerMedia->Disable();
             evt.Skip();
         });
     }
@@ -649,6 +693,7 @@ SeqSettingsDialog::SeqSettingsDialog(wxWindow* parent, SequenceFile* file_to_han
 
     RenderModeChoice->SetStringSelection(xml_file->GetRenderMode());
     PopulateAudioTrackList();
+    PopulateControllerMediaList();
 
     if (!defaultView.IsEmpty()) {
         if (xLightsParent->GetViewsManager()->GetViewIndex(defaultView) != -1) {
@@ -1847,6 +1892,7 @@ void SeqSettingsDialog::MediaChooser()
                     xml_file->AddAltTrack(showDir, path, shortname);
                 }
                 PopulateAudioTrackList();
+                PopulateControllerMediaList();
             }
         } else {
             ObtainAccessToURL(std::string(fDir.utf8_string()));
@@ -2432,6 +2478,7 @@ void SeqSettingsDialog::OnButton_AudioRemoveClick(wxCommandEvent& /*event*/)
     int idx = (int)sel - 1;
     xml_file->RemoveAltTrack(idx);
     PopulateAudioTrackList();
+    PopulateControllerMediaList();
 }
 
 void SeqSettingsDialog::OnButton_AudioChangeFileClick(wxCommandEvent& /*event*/)
@@ -2475,6 +2522,7 @@ void SeqSettingsDialog::OnButton_AudioEditShortnameClick(wxCommandEvent& /*event
 
     xml_file->SetAltTrackShortname(idx, dlg.GetValue().ToStdString());
     PopulateAudioTrackList();
+    PopulateControllerMediaList();
 }
 
 void SeqSettingsDialog::OnButton_SetDefaultDurationClick(wxCommandEvent& /*event*/)
@@ -2521,4 +2569,118 @@ void SeqSettingsDialog::OnListCtrl_AudioTracksActivated(wxListEvent& event)
         return;
     }
     OnButton_AudioEditShortnameClick(dummy);
+}
+
+void SeqSettingsDialog::PopulateControllerMediaList()
+{
+    if (ListCtrl_ControllerMediaMap == nullptr) return;
+
+    ListCtrl_ControllerMediaMap->DeleteAllItems();
+
+    // Only list controllers that already have a mapping - the list isn't
+    // pre-populated with every controller, mappings are added explicitly.
+    long row = 0;
+    for (const auto& [controllerName, trackName] : xml_file->GetControllerMediaMap()) {
+        ListCtrl_ControllerMediaMap->InsertItem(row, controllerName);
+        ListCtrl_ControllerMediaMap->SetItem(row, 1, trackName);
+        ListCtrl_ControllerMediaMap->SetItemData(row, row);
+        row++;
+    }
+
+    Button_SetControllerMedia->Disable();
+    Button_RemoveControllerMedia->Disable();
+}
+
+// Actual FPP boards only (vendor "FPP", resources/controllers/fpp.xcontroller) -
+// not just any Ethernet controller that happens to be reachable via FPP Connect's
+// protocol (Falcon, HinksPix, ESPixelStick, etc. are separate vendors).
+static std::vector<Controller*> GetFPPCapableControllers(OutputManager* outputManager)
+{
+    std::vector<Controller*> result;
+    for (auto* controller : outputManager->GetControllers()) {
+        if (dynamic_cast<ControllerEthernet*>(controller) != nullptr && controller->GetVendor() == "FPP") {
+            result.push_back(controller);
+        }
+    }
+    return result;
+}
+
+void SeqSettingsDialog::OnButton_AddControllerMediaClick(wxCommandEvent& /*event*/)
+{
+    if (xml_file->GetAltTrackCount() == 0) {
+        wxMessageBox(_("Add an audio track first (using the \"Add\" button above), then map it to a controller."),
+                     _("Add Media Mapping"), wxOK | wxICON_INFORMATION, this);
+        return;
+    }
+    if (xLightsParent == nullptr) return;
+
+    auto controllers = GetFPPCapableControllers(xLightsParent->GetOutputManager());
+    if (controllers.empty()) {
+        wxMessageBox(_("No FPP controllers are configured."),
+                     _("Add Media Mapping"), wxOK | wxICON_INFORMATION, this);
+        return;
+    }
+
+    wxArrayString controllerChoices;
+    for (auto* controller : controllers) {
+        controllerChoices.Add(controller->GetName());
+    }
+    wxSingleChoiceDialog controllerDlg(this, _("Choose the controller to map:"),
+                                        _("Add Media Mapping"), controllerChoices);
+    if (controllerDlg.ShowModal() != wxID_OK) return;
+    std::string controllerName = controllerDlg.GetStringSelection().ToStdString();
+
+    wxArrayString trackChoices;
+    for (int i = 0; i < xml_file->GetAltTrackCount(); i++) {
+        trackChoices.Add(xml_file->GetAltTrackDisplayName(i));
+    }
+    wxSingleChoiceDialog trackDlg(this, wxString::Format(_("Choose the audio track to upload to \"%s\":"), controllerName),
+                                  _("Add Media Mapping"), trackChoices);
+    if (trackDlg.ShowModal() != wxID_OK) return;
+
+    xml_file->SetControllerMediaTrack(controllerName, trackDlg.GetStringSelection().ToStdString());
+    PopulateControllerMediaList();
+}
+
+void SeqSettingsDialog::OnButton_SetControllerMediaClick(wxCommandEvent& /*event*/)
+{
+    long sel = ListCtrl_ControllerMediaMap->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
+    if (sel < 0) return;
+
+    std::string controllerName = ListCtrl_ControllerMediaMap->GetItemText(sel, 0).ToStdString();
+    std::string currentTrack = xml_file->GetControllerMediaTrack(controllerName);
+
+    wxArrayString choices;
+    int preselect = 0;
+    for (int i = 0; i < xml_file->GetAltTrackCount(); i++) {
+        wxString displayName = xml_file->GetAltTrackDisplayName(i);
+        choices.Add(displayName);
+        if (displayName == currentTrack) {
+            preselect = (int)choices.size() - 1;
+        }
+    }
+
+    wxSingleChoiceDialog dlg(this, wxString::Format(_("Choose the audio track to upload to \"%s\":"), controllerName),
+                             _("Edit Media Mapping"), choices);
+    dlg.SetSelection(preselect);
+    if (dlg.ShowModal() != wxID_OK) return;
+
+    xml_file->SetControllerMediaTrack(controllerName, dlg.GetStringSelection().ToStdString());
+    PopulateControllerMediaList();
+}
+
+void SeqSettingsDialog::OnButton_RemoveControllerMediaClick(wxCommandEvent& /*event*/)
+{
+    long sel = ListCtrl_ControllerMediaMap->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
+    if (sel < 0) return;
+
+    std::string controllerName = ListCtrl_ControllerMediaMap->GetItemText(sel, 0).ToStdString();
+    xml_file->SetControllerMediaTrack(controllerName, "");
+    PopulateControllerMediaList();
+}
+
+void SeqSettingsDialog::OnListCtrl_ControllerMediaMapActivated(wxListEvent& event)
+{
+    wxCommandEvent dummy;
+    OnButton_SetControllerMediaClick(dummy);
 }

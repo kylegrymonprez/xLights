@@ -41,6 +41,7 @@
 #include "controllers/Experience.h"
 #include "controllers/PowerDMX.h"
 #include <algorithm>
+#include <array>
 #include <memory>
 
 //(*IdInit(FPPConnectDialog)
@@ -94,6 +95,18 @@ class SequencePathData : public wxClientData {
 public:
     wxString fseq;
     wxString media;
+    std::map<std::string, std::string> altTrackPaths;      // alt track shortname -> path
+    std::map<std::string, std::string> controllerMediaMap; // controller name -> alt track shortname
+
+    // "" if controllerName has no mapping, or maps to a shortname we don't have a path
+    // for - callers fall back to the Main media in either case.
+    std::string ResolveMediaForController(const std::string& controllerName) const {
+        auto mapIt = controllerMediaMap.find(controllerName);
+        if (mapIt == controllerMediaMap.end()) return "";
+        auto trackIt = altTrackPaths.find(mapIt->second);
+        if (trackIt == altTrackPaths.end()) return "";
+        return trackIt->second;
+    }
 };
 
 static wxString GetSequencePath(wxTreeListCtrl* ctrl, const wxTreeListItem& item) {
@@ -104,6 +117,12 @@ static wxString GetSequencePath(wxTreeListCtrl* ctrl, const wxTreeListItem& item
 static wxString GetMediaPath(wxTreeListCtrl* ctrl, const wxTreeListItem& item) {
     auto* d = dynamic_cast<SequencePathData*>(ctrl->GetItemData(item));
     return d != nullptr ? d->media : ctrl->GetItemText(item, 2);
+}
+
+// "" if this sequence row has no Alt mapping for controllerName - caller falls back to Main.
+static std::string GetAltMediaPath(wxTreeListCtrl* ctrl, const wxTreeListItem& item, const std::string& controllerName) {
+    auto* d = dynamic_cast<SequencePathData*>(ctrl->GetItemData(item));
+    return d != nullptr ? d->ResolveMediaForController(controllerName) : "";
 }
 
 static wxColour InstanceRowShade(wxWindow* win) {
@@ -260,7 +279,7 @@ FPPConnectDialog::FPPConnectDialog(wxWindow* parent, OutputManager* outputManage
     wxPanel *p2 = AddInstanceHeader("HostName/IP Address", "FPP's hostname and current IP Address.");
     p2->Connect(wxEVT_CONTEXT_MENU, (wxObjectEventFunction)& FPPConnectDialog::HostSortMenu, nullptr, this);
     AddInstanceHeader("Mode", "FPP Mode.");
-    wxPanel* p4 = AddInstanceHeader("Media", "Enable to upload MP3, MP4 or WAV files to play your show music.*\n \nSuggested to only enable on the FPP device that plays your audio.\n \n* - Special use cases for sending video files to a Virtual Matrix.");
+    wxPanel* p4 = AddInstanceHeader("Media", "Which audio/video file to upload to play your show music.*\n \n'None' - do not upload media.\n'Main' - upload the sequence's main media file.\n'Alt' - upload the alternate audio track mapped to this controller in Sequence Settings (falls back to Main if no mapping exists for a given sequence).\n \nSuggested to only enable on the FPP device that plays your audio.\n \n* - Special use cases for sending video files to a Virtual Matrix.");
     p4->Connect(wxEVT_CONTEXT_MENU, (wxObjectEventFunction)&FPPConnectDialog::MediaPopupMenu, nullptr, this);
     AddInstanceHeader("UDP Out", "'None'- Device is not going to send Pixel data across the network.\n \n'All' This will send pixel data over your Show Network from FPP instance to all controllers marked as 'ACTIVE'.\n \n'Proxied' will send pixel data to only controllers that are set as proxies on this FPP device.");
     AddInstanceHeader("Add Proxies", "Automatically adds proxy settings to this FPP device");
@@ -544,7 +563,7 @@ void FPPConnectDialog::OnMediaPopupClick(wxCommandEvent& event) {
             if (inst->supportedForFPPConnect()) {
                 std::string rowStr = std::to_string(row);
                 if (event.GetId() == ID_POPUP_MNU_DESELECT_ALL) {
-                    SetCheckValue(MEDIA_COL + rowStr, false);
+                    SetMediaMode(rowStr, "None");
                 }
             }
         }
@@ -689,8 +708,15 @@ void FPPConnectDialog::PopulateFPPInstanceList(wxProgressDialog *prgs) {
         wxWindow* playlistWidget = nullptr;
         bool playlistExpands = false;
         if (inst->fppType == FPP_TYPE::FPP && inst->supportedForFPPConnect()) {
-            wxCheckBox *CheckBox1 = new wxCheckBox(FPPInstanceList, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, MEDIA_COL + rowStr);
-            mediaWidget = CheckBox1;
+            wxChoice* MediaChoice1 = new wxChoice(FPPInstanceList, wxID_ANY, wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, MEDIA_COL + rowStr);
+            wxFont mediaFont = MediaChoice1->GetFont();
+            mediaFont.SetPointSize(mediaFont.GetPointSize() - 2);
+            MediaChoice1->SetFont(mediaFont);
+            MediaChoice1->Append(_("None"));
+            MediaChoice1->Append(_("Main"));
+            MediaChoice1->Append(_("Alt"));
+            MediaChoice1->SetSelection(1);
+            mediaWidget = MediaChoice1;
             wxChoice* Choice1 = new wxChoice(FPPInstanceList, wxID_ANY, wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, MODELS_COL + rowStr);
             wxFont font = Choice1->GetFont();
             font.SetPointSize(font.GetPointSize() - 2);
@@ -739,9 +765,15 @@ void FPPConnectDialog::PopulateFPPInstanceList(wxProgressDialog *prgs) {
 
         } else if (inst->fppType == FPP_TYPE::FALCONV4V5) {
             // this probably needs to be moved as this is not really a zlib thing but only the falcons end up here today so I am going to put it here for now
-            wxCheckBox *CheckBox1 = new wxCheckBox(FPPInstanceList, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0, wxDefaultValidator, MEDIA_COL + rowStr);
-            CheckBox1->SetValue(inst->mode != "remote");
-            mediaWidget = CheckBox1;
+            wxChoice* MediaChoice1 = new wxChoice(FPPInstanceList, wxID_ANY, wxDefaultPosition, wxDefaultSize, 0, 0, 0, wxDefaultValidator, MEDIA_COL + rowStr);
+            wxFont mediaFont = MediaChoice1->GetFont();
+            mediaFont.SetPointSize(mediaFont.GetPointSize() - 2);
+            MediaChoice1->SetFont(mediaFont);
+            MediaChoice1->Append(_("None"));
+            MediaChoice1->Append(_("Main"));
+            MediaChoice1->Append(_("Alt"));
+            MediaChoice1->SetSelection(inst->mode != "remote" ? 1 : 0);
+            mediaWidget = MediaChoice1;
         }
 
         auto c = _outputManager->GetControllers(inst->ipAddress);
@@ -979,12 +1011,16 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString const& dir) const
     LoadSequencesFromFolder(dir, knownPaths);
 }
 
-void FPPConnectDialog::AddSequenceListItem(const wxString& fseqPath, const std::string& media, std::set<wxString>& knownPaths) const
+void FPPConnectDialog::AddSequenceListItem(const wxString& fseqPath, const std::string& media, std::set<wxString>& knownPaths,
+                                            const std::map<std::string, std::string>& altTrackPaths,
+                                            const std::map<std::string, std::string>& controllerMediaMap) const
 {
     wxTreeListItem item = CheckListBox_Sequences->AppendItem(CheckListBox_Sequences->GetRootItem(),
                                                              "  " + SequenceDisplayName(fseqPath) + "  ");
     auto* pathData = new SequencePathData();
     pathData->fseq = fseqPath;
+    pathData->altTrackPaths = altTrackPaths;
+    pathData->controllerMediaMap = controllerMediaMap;
     CheckListBox_Sequences->SetItemData(item, pathData);
 
     DisplayDateModified(fseqPath, item);
@@ -1090,7 +1126,7 @@ void FPPConnectDialog::LoadSequencesFromFolder(wxString const& dir, std::set<wxS
                 // we dont already have the fseq file in the list
 
                 if (knownPaths.find(fseqName) == knownPaths.end()) {
-                    AddSequenceListItem(fseqName, mediaName, knownPaths);
+                    AddSequenceListItem(fseqName, mediaName, knownPaths, info.altTrackPaths, info.controllerMediaMap);
                 }
             }
         }
@@ -1375,8 +1411,25 @@ void FPPConnectDialog::doUpload(FPPUploadProgressDialog *prgs, std::vector<bool>
                     std::string rowStr = std::to_string(row);
                     if (!cancelled && doUpload[row]) {
                         std::string m2 = media;
-                        if (!GetCheckValue(MEDIA_COL + rowStr)) {
+                        std::string mediaUploadAsName;
+                        std::string mediaMode = GetMediaMode(rowStr);
+                        if (mediaMode == "None") {
                             m2 = "";
+                        } else if (mediaMode == "Alt") {
+                            auto instController = _outputManager->GetControllers(inst->ipAddress);
+                            if (instController.size() == 1) {
+                                std::string alt = GetAltMediaPath(CheckListBox_Sequences, item, instController.front()->GetName());
+                                if (!alt.empty()) {
+                                    m2 = alt;
+                                    // FPP matches media to a sequence by the "mf" (media filename)
+                                    // header baked into the fseq itself, not the fseq's own filename -
+                                    // rename the alt track to that name on upload, keeping its own extension.
+                                    std::string mf = seq->getMediaFilename();
+                                    wxFileName mfFn(ToWXString(mf.empty() ? fseq : mf));
+                                    wxFileName altFn(ToWXString(alt));
+                                    mediaUploadAsName = ToStdString(mfFn.GetName() + "." + altFn.GetExt());
+                                }
+                            }
                         }
 
                         int fseqType = 0;
@@ -1392,7 +1445,7 @@ void FPPConnectDialog::doUpload(FPPUploadProgressDialog *prgs, std::vector<bool>
                         }
                         cancelled |= inst->PrepareUploadSequence(seq,
                                                                 fseq, m2,
-                                                                fseqType);
+                                                                fseqType, mediaUploadAsName);
                     }
                     row++;
                 }
@@ -1485,11 +1538,15 @@ void FPPConnectDialog::doUpload(FPPUploadProgressDialog *prgs, std::vector<bool>
                                 if (falcon.IsConnected()) {
                                     std::string m2 = media;
                                     std::string rowStr = std::to_string(row);
-                                    if (!GetCheckValue(MEDIA_COL + rowStr)) {
+                                    std::string mediaMode = GetMediaMode(rowStr);
+                                    if (mediaMode == "None") {
                                         if (m2 != "") {
-                                            spdlog::debug("Media file {} not uploaded because media checkbox not selected.", (const char*)m2.c_str());
+                                            spdlog::debug("Media file {} not uploaded because media mode is None.", (const char*)m2.c_str());
                                         }
                                         m2 = "";
+                                    } else if (mediaMode == "Alt" && c.size() == 1) {
+                                        std::string alt = GetAltMediaPath(CheckListBox_Sequences, item, c.front()->GetName());
+                                        if (!alt.empty()) m2 = alt;
                                     }
                                     std::function<bool(int, std::string)> updateProg = [&prgs, inst](int val, std::string msg)
                                     {
@@ -1680,6 +1737,20 @@ void FPPConnectDialog::SetCheckValue(const std::string &col, bool b) {
 
 }
 
+static const std::array<std::string, 3> MEDIA_MODE_NAMES = { "None", "Main", "Alt" };
+
+std::string FPPConnectDialog::GetMediaMode(const std::string &rowStr) {
+    int idx = GetChoiceValueIndex(MEDIA_COL + rowStr);
+    if (idx < 0 || idx >= (int)MEDIA_MODE_NAMES.size()) return "Main";
+    return MEDIA_MODE_NAMES[idx];
+}
+
+void FPPConnectDialog::SetMediaMode(const std::string &rowStr, const std::string& mode) {
+    auto it = std::find(MEDIA_MODE_NAMES.begin(), MEDIA_MODE_NAMES.end(), mode);
+    int idx = (it == MEDIA_MODE_NAMES.end()) ? 1 : (int)std::distance(MEDIA_MODE_NAMES.begin(), it);
+    SetChoiceValueIndex(MEDIA_COL + rowStr, idx);
+}
+
 void FPPConnectDialog::SaveSettings(bool onlyInsts)
 {
     auto* config = GetXLightsConfig();
@@ -1714,8 +1785,13 @@ void FPPConnectDialog::SaveSettings(bool onlyInsts)
         if (GetCheckValue(CHECK_COL + rowStr) != false || config->Read("FPPConnectUpload_" + Fixitup(inst->uuid), &bval)) {
             config->Write("FPPConnectUpload_" + keyPostfx, GetCheckValue(CHECK_COL + rowStr));
         }
-        if (GetCheckValue(MEDIA_COL + rowStr) != false || config->Read("FPPConnectUploadMedia_" + Fixitup(inst->uuid), &bval)) {
-            config->Write("FPPConnectUploadMedia_" + keyPostfx, GetCheckValue(MEDIA_COL + rowStr));
+        {
+            std::string mode = GetMediaMode(rowStr);
+            wxString sval;
+            if (mode != "Main" || config->Read("FPPConnectUploadMediaMode_" + Fixitup(inst->uuid), &sval)
+                || config->Read("FPPConnectUploadMedia_" + Fixitup(inst->uuid), &bval)) {
+                config->Write("FPPConnectUploadMediaMode_" + keyPostfx, ToWXString(mode));
+            }
         }
         if (inst->fppType == FPP_TYPE::FPP && inst->supportedForFPPConnect()) {
             if (GetChoiceValueIndex(FSEQ_COL + rowStr) != 2 || config->Read("FPPConnectUploadFSEQType_" + Fixitup(inst->uuid), &lval)) {
@@ -1773,10 +1849,15 @@ void FPPConnectDialog::ApplySavedHostSettings()
             } else if (config->Read("FPPConnectUploadFSEQType_" + Fixitup(inst->ipAddress), &lval)) {
                 SetCheckValue(FSEQ_COL + rowStr, lval);
             }
-            if (config->Read("FPPConnectUploadMedia_" + Fixitup(inst->uuid), &bval)) {
-                SetCheckValue(MEDIA_COL + rowStr, bval);
+            wxString sval;
+            if (config->Read("FPPConnectUploadMediaMode_" + Fixitup(inst->uuid), &sval)) {
+                SetMediaMode(rowStr, ToStdString(sval));
+            } else if (config->Read("FPPConnectUploadMediaMode_" + Fixitup(inst->ipAddress), &sval)) {
+                SetMediaMode(rowStr, ToStdString(sval));
+            } else if (config->Read("FPPConnectUploadMedia_" + Fixitup(inst->uuid), &bval)) {
+                SetMediaMode(rowStr, bval ? "Main" : "None");
             } else if (config->Read("FPPConnectUploadMedia_" + Fixitup(inst->ipAddress), &bval)) {
-                SetCheckValue(MEDIA_COL + rowStr, bval);
+                SetMediaMode(rowStr, bval ? "Main" : "None");
             }
             if (config->Read("FPPConnectUploadModels_" + Fixitup(inst->uuid), &lval)) {
                 SetChoiceValueIndex(MODELS_COL + rowStr, lval);

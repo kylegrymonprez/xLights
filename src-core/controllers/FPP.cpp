@@ -1077,13 +1077,16 @@ static void FindHostSpecificMedia(const std::string &hostName, std::string &medi
         }
     }
 }
-bool FPP::CheckUploadMedia(const std::string &media, std::string &mediaBaseName) {
+bool FPP::CheckUploadMedia(const std::string &media, std::string &mediaBaseName, const std::string &uploadAsBaseName) {
     bool cancelled = false;
     std::filesystem::path mfn(media);
     std::string mediaFile = media;
-    mediaBaseName = mfn.filename().string();
+    mediaBaseName = uploadAsBaseName.empty() ? mfn.filename().string() : uploadAsBaseName;
 
-    if (majorVersion >= 6) {
+    // Host-specific media (e.g. "Song-hostname.mp3") is a different, disk-based
+    // override of the *main* media - skip it when the caller already gave an
+    // explicit target name (an alt track being renamed to the sequence's name).
+    if (uploadAsBaseName.empty() && majorVersion >= 6) {
         FindHostSpecificMedia(hostName, mediaBaseName, mediaFile, mfn);
     }
     
@@ -1140,7 +1143,8 @@ bool FPP::CheckUploadMedia(const std::string &media, std::string &mediaBaseName)
 bool FPP::PrepareUploadSequence(FSEQFile *file,
                                 const std::string &seq,
                                 const std::string &media,
-                                int type) {
+                                int type,
+                                const std::string &uploadAsBaseName) {
     if (outputFile && !outputFileIsOriginal) {
         delete outputFile;
     }
@@ -1156,7 +1160,7 @@ bool FPP::PrepareUploadSequence(FSEQFile *file,
     std::string mediaBaseName = "";
     bool cancelled = false;
     if (media != "" && fppType == FPP_TYPE::FPP) {
-        cancelled = CheckUploadMedia(media, mediaBaseName);
+        cancelled = CheckUploadMedia(media, mediaBaseName, uploadAsBaseName);
         if (cancelled) {
             return true;
         }

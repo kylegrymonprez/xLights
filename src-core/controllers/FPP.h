@@ -109,8 +109,13 @@ class FPP : public BaseController
     bool PrepareUploadSequence(FSEQFile *file,
                                const std::string &seq,
                                const std::string &media,
-                               int type);
-    bool CheckUploadMedia(const std::string &media, std::string &mediaBaseName);
+                               int type,
+                               const std::string &uploadAsBaseName = "");
+    // uploadAsBaseName, when non-empty, is the filename to give the media on the
+    // controller instead of its own - FPP auto-plays a sequence's media only when
+    // the media's filename matches the sequence's, so an alt track needs renaming
+    // on upload to the sequence's name.
+    bool CheckUploadMedia(const std::string &media, std::string &mediaBaseName, const std::string &uploadAsBaseName = "");
     bool WillUploadSequence() const;
     bool NeedCustomSequence() const;
     bool AddFrameToUpload(uint32_t frame, uint8_t *data);

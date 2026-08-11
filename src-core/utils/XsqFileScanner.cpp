@@ -32,6 +32,58 @@ static std::string DecodeXmlEntities(const std::string& s) {
     return out;
 }
 
+// Extracts attrName="..." from a tag-open fragment (e.g. `<track shortname="Drums"`).
+// Returns "" if the attribute isn't present.
+static std::string ExtractAttribute(const std::string& tagOpen, const std::string& attrName) {
+    std::string needle = attrName + "=\"";
+    auto pos = tagOpen.find(needle);
+    if (pos == std::string::npos) return "";
+    pos += needle.size();
+    auto end = tagOpen.find('"', pos);
+    if (end == std::string::npos) return "";
+    return DecodeXmlEntities(tagOpen.substr(pos, end - pos));
+}
+
+// Scans `buf` for repeated `<childTag attrName="...">text</childTag>` entries
+// inside a `<containerTag>...</containerTag>` block, calling `cb(attrValue, text)`
+// for each. No-op if the container tag isn't present.
+template <typename Callback>
+static void ScanTaggedEntries(const std::string& buf, const std::string& containerTag,
+                               const std::string& childTag, const std::string& attrName, Callback cb) {
+    auto containerStart = buf.find("<" + containerTag);
+    if (containerStart == std::string::npos) return;
+    auto containerEnd = buf.find("</" + containerTag + ">", containerStart);
+    if (containerEnd == std::string::npos) containerEnd = buf.size();
+
+    const std::string openPrefix = "<" + childTag;
+    const std::string closeTag = "</" + childTag + ">";
+    size_t pos = containerStart;
+    while (true) {
+        auto tagStart = buf.find(openPrefix, pos);
+        if (tagStart == std::string::npos || tagStart >= containerEnd) break;
+        auto tagOpenEnd = buf.find('>', tagStart);
+        if (tagOpenEnd == std::string::npos || tagOpenEnd >= containerEnd) break;
+        std::string attrValue = ExtractAttribute(buf.substr(tagStart, tagOpenEnd - tagStart), attrName);
+
+        auto textStart = tagOpenEnd + 1;
+        auto textEnd = buf.find(closeTag, textStart);
+        if (textEnd == std::string::npos || textEnd > containerEnd) break;
+
+        if (!attrValue.empty()) {
+            cb(attrValue, DecodeXmlEntities(buf.substr(textStart, textEnd - textStart)));
+        }
+        pos = textEnd + closeTag.size();
+    }
+}
+
+std::string XsqFileInfo::ResolveMediaForController(const std::string& controllerName) const {
+    auto mapIt = controllerMediaMap.find(controllerName);
+    if (mapIt == controllerMediaMap.end()) return "";
+    auto trackIt = altTrackPaths.find(mapIt->second);
+    if (trackIt == altTrackPaths.end()) return "";
+    return trackIt->second;
+}
+
 XsqFileInfo ScanXsqFile(const std::string& filename) {
     XsqFileInfo info;
 
@@ -64,6 +116,15 @@ XsqFileInfo ScanXsqFile(const std::string& filename) {
             info.mediaFile = DecodeXmlEntities(buf.substr(start, end - start));
         }
     }
+
+    ScanTaggedEntries(buf, "altAudioTracks", "track", "shortname",
+                      [&](const std::string& shortname, const std::string& path) {
+                          info.altTrackPaths[shortname] = path;
+                      });
+    ScanTaggedEntries(buf, "controllerMediaMap", "entry", "controller",
+                      [&](const std::string& controllerName, const std::string& shortname) {
+                          info.controllerMediaMap[controllerName] = shortname;
+                      });
 
     return info;
 }
