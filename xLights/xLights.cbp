@@ -1380,6 +1380,8 @@
 		<Unit filename="../src-core/outputs/ChannelTracker.h" />
 		<Unit filename="../src-core/outputs/TestPatternEngine.cpp" />
 		<Unit filename="../src-core/outputs/TestPatternEngine.h" />
+		<Unit filename="../src-core/outputs/MovingHeadTestEngine.cpp" />
+		<Unit filename="../src-core/outputs/MovingHeadTestEngine.h" />
 		<Unit filename="../src-core/outputs/TestPreset.cpp" />
 		<Unit filename="../src-core/outputs/TestPreset.h" />
 		<Unit filename="../src-core/outputs/TwinklyOutput.cpp" />

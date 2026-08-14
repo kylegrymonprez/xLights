@@ -42,6 +42,9 @@ XLIGHTS/NUTCRACKER RELEASE NOTES
                                  Jukebox panel; buttons saved in the sequence work on both platforms
     -bug (dkulp)                 Fix a crash drawing the 3D layout preview, and re-enable a family of NaN/infinity
                                  guards that optimized builds had been silently discarding
+    -enh (kylegrymonprez)        Tools > Test now has a Moving Head tab for testing a single DMX moving-head
+                                 fixture live: pan/tilt, colour (including colour wheels), dimmer, shutter and,
+                                 for advanced fixtures, their custom features/gobos
     -bug (dkulp)                 Fix a crash starting playback when the audio engine had been stopped, such as
                                  after a pause or an audio device change
     -bug (dkulp)                 Fix a crash choosing an OBJ mesh whose backup copy cannot be written, and leave

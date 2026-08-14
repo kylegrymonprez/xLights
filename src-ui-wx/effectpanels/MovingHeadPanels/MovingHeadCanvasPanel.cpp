@@ -99,8 +99,17 @@ void MovingHeadCanvasPanel::OnMovingHeadPaint(wxPaintEvent& /*event*/)
 
 void MovingHeadCanvasPanel::SetPosition(wxPoint2DDouble pos)
 {
+    ClampToBounds(pos);
     m_mousePos = pos;
     Refresh();
+}
+
+void MovingHeadCanvasPanel::ClampToBounds(wxPoint2DDouble& pos) const
+{
+    if (pos.m_x < 0.0) pos.m_x = 0.0;
+    else if (pos.m_x > 1.0) pos.m_x = 1.0;
+    if (pos.m_y < 0.0) pos.m_y = 0.0;
+    else if (pos.m_y > 1.0) pos.m_y = 1.0;
 }
 
 void MovingHeadCanvasPanel::SnapToLines(wxPoint2DDouble& pos)
@@ -120,6 +129,7 @@ void MovingHeadCanvasPanel::OnMovingHeadLeftDown(wxMouseEvent& event)
     wxAffineMatrix2D m;
     wxPoint2DDouble ptUI(m.TransformPoint(event.GetPosition()));
     m_mousePos = UItoNormalized(ptUI);
+    ClampToBounds(m_mousePos);
     SnapToLines(m_mousePos);
     m_movingHeadCanvasParent->NotifyPositionUpdated();
     Refresh();
@@ -137,6 +147,7 @@ void MovingHeadCanvasPanel::OnMovingHeadMouseMove(wxMouseEvent& event)
     wxPoint2DDouble ptUI(m.TransformPoint(event.GetPosition()));
     if( m_mouseDown ) {
         m_mousePos = UItoNormalized(ptUI);
+        ClampToBounds(m_mousePos);
         SnapToLines(m_mousePos);
         m_movingHeadCanvasParent->NotifyPositionUpdated();
         Refresh();

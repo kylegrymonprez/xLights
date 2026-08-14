@@ -50,6 +50,11 @@ private:
     wxPoint2DDouble NormalizedToUI(const wxPoint2DDouble& pt) const;
     wxPoint NormalizedToUI2(const wxPoint2DDouble& pt) const;
     void SnapToLines(wxPoint2DDouble& pos);
+    // Neither UI-space mouse coordinates nor SetPosition() were ever bounds-
+    // checked, so a drag that goes past the pad's edge (or a caller passing
+    // an out-of-range value) left the drawn marker outside the visible
+    // square. Clamps to [0,1] on both axes.
+    void ClampToBounds(wxPoint2DDouble& pos) const;
 
     IMovingHeadCanvasParent* const m_movingHeadCanvasParent = nullptr;
     wxPoint2DDouble m_mousePos;

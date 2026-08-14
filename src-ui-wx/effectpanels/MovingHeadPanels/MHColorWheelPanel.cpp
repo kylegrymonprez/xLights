@@ -37,9 +37,10 @@ BEGIN_EVENT_TABLE(MHColorWheelPanel, wxPanel)
 END_EVENT_TABLE()
 
 
-MHColorWheelPanel::MHColorWheelPanel(IMHColorWheelPanelParent* colorWheelParent, wxWindow* parent, wxWindowID id /*=wxID_ANY*/, const wxPoint& pos /*= wxDefaultPosition*/, const wxSize& size /*=wxDefaultSize*/) :
+MHColorWheelPanel::MHColorWheelPanel(IMHColorWheelPanelParent* colorWheelParent, wxWindow* parent, wxWindowID id /*=wxID_ANY*/, const wxPoint& pos /*= wxDefaultPosition*/, const wxSize& size /*=wxDefaultSize*/, bool singleSelection /*=false*/) :
     MHColorPanel(parent, id, pos, size),
-    m_colorWheelParent(colorWheelParent)
+    m_colorWheelParent(colorWheelParent),
+    m_singleSelection(singleSelection)
 {
     SetBackgroundStyle(wxBG_STYLE_PAINT);
     CreateHsvBitmap(wxSize(256, 256));
@@ -133,6 +134,19 @@ void MHColorWheelPanel::OnLeftDown(wxMouseEvent& event)
     m_mousePos = UItoNormalized(ptUI);
     m_mouseDown = true;
     HSVValue hsv;
+
+    if (m_singleSelection) {
+        if (insideColors(ptUI.m_x, ptUI.m_y, hsv)) {
+            m_handles.clear();
+            m_handles.push_back(HandlePoint(m_mousePos, hsv));
+            selected_point = 0;
+            active_handle = 0;
+            m_colorWheelParent->NotifyColorUpdated();
+            Refresh();
+        }
+        return;
+    }
+
     if (m_handles.size() == 0) {
         if (insideColors(ptUI.m_x, ptUI.m_y, hsv)) {
             m_handles.push_back(HandlePoint(m_mousePos, hsv));

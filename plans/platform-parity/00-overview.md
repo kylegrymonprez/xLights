@@ -30,8 +30,8 @@ fine-grained — a menu entry, a dialog field, a gesture):
 | 10 Presets, views, jukebox | 57 | 13 | 14 | 5 | 3 | Preset formats don't interchange; jukebox ported 2026-08-10; no workspace layouts |
 | 11 Preferences & shortcuts | 33 | 19 | 51 | 0 | 2 | No unified settings surface — 33 parity settings scattered across six unrelated places (redo approved 2026-08-01; see Decisions) |
 | 12 AI, automation, scripting | 41 | 6 | 3 | 103 | 4 | AI at near-parity; automation/scripting at zero (no HTTP listener, no interpreter on iOS — App Intents is the sanctioned path) |
-| 13 Tools, diagnostics, help | 59 | 12 | 11 | 4 | 6 | Light test & Check Sequence share core engines; gaps are targeting trees, report export, crash-time capture |
-| **Total (01–13)** | **1015** | **279** | **333** | **158** | **88** | |
+| 13 Tools, diagnostics, help | 59 | 12 | 12 | 4 | 6 | Light test & Check Sequence share core engines; gaps are targeting trees, report export, crash-time capture, and (added 2026-08-12) the new desktop Moving Head test tab |
+| **Total (01–13)** | **1015** | **279** | **334** | **158** | **88** | |
 
 Theme 11 additionally has 8 ➖ rows. Theme 14 (reverse parity) now has **48** 🔵 rows with a
 14-rank desktop-adoption shortlist. Theme 15 has 143 desktop cross-OS rows with no iPad status.

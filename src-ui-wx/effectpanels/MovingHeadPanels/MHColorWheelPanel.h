@@ -31,8 +31,14 @@ public:
 class MHColorWheelPanel : public MHColorPanel
 {
 public:
+    // singleSelection: when true, every click replaces whatever's selected
+    // with the single clicked color (a live "current color" picker)
+    // instead of the default multi-handle behavior (click empty slot to
+    // add another handle up to one per color, click a handle to remove it)
+    // the Moving Head effect panel's animated color sequence needs.
     MHColorWheelPanel(IMHColorWheelPanelParent* colorWheelParent, wxWindow* parent, wxWindowID id = wxID_ANY,
-                      const wxPoint& pos = wxDefaultPosition, const wxSize& size = wxDefaultSize);
+                      const wxPoint& pos = wxDefaultPosition, const wxSize& size = wxDefaultSize,
+                      bool singleSelection = false);
     virtual ~MHColorWheelPanel();
 
     virtual std::string GetColour() override;
@@ -82,6 +88,7 @@ private:
     wxPoint NormalizedToUI2(const wxPoint2DDouble& pt) const;
 
     IMHColorWheelPanelParent* const m_colorWheelParent {nullptr};
+    const bool m_singleSelection {false};
     wxPoint2DDouble m_mousePos;
     bool m_mouseDown {false};
     bool m_mouseDClick {false};

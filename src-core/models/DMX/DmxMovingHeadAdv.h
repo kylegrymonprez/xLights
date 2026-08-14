@@ -66,6 +66,8 @@ class DmxMovingHeadAdv : public DmxMovingHeadComm
         const std::vector<PositionZone>& GetPositionZones() const { return position_zones; }
         void SetPositionZones(const std::vector<PositionZone>& zones) { position_zones = zones; }
 
+        [[nodiscard]] const std::vector<std::unique_ptr<MhFeature>>& GetFeatures() const { return features; }
+
     protected:
         virtual void InitModel() override;
 

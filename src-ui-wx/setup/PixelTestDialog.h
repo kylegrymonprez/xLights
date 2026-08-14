@@ -15,6 +15,8 @@
 #include <wx/treectrl.h>
 #include <wx/filename.h>
 #include <wx/srchctrl.h>
+#include <wx/scrolwin.h>
+#include <wx/textctrl.h>
 
 //(*Headers(PixelTestDialog)
 #include <wx/button.h>
@@ -43,6 +45,9 @@
 #include "outputs/ChannelTracker.h"
 #include "outputs/OutputManager.h"
 #include "outputs/TestPatternEngine.h"
+#include "outputs/MovingHeadTestEngine.h"
+#include "effectpanels/MovingHeadPanels/MHColorWheelPanel.h"
+#include "effectpanels/MovingHeadPanels/MovingHeadCanvasPanel.h"
 
 class ModelGroup;
 class xLightsFrame;
@@ -50,8 +55,9 @@ class xLightsFrame;
 class ModelTestItem;
 class ModelGroupTestItem;
 class ModelPreview;
+class DmxMovingHeadComm;
 
-class PixelTestDialog: public wxDialog
+class PixelTestDialog: public wxDialog, public IMHColorWheelPanelParent, public IMovingHeadCanvasParent
 {
 	public:
 
@@ -85,6 +91,62 @@ class PixelTestDialog: public wxDialog
 
         // Pattern maths lives in core so the iPad test surface shares it.
         xltest::TestPatternEngine _testEngine;
+
+        // Moving Head: the fixture is whatever's currently selected on the
+        // "Model" tab (Choice_VisualModel/SelectVisualModel) - no separate
+        // picker. The controls on the right (Notebook2's Moving Head page)
+        // track it via UpdateMHPrimaryFixture(), called from SelectVisualModel
+        // whenever that selection changes; when the selected model isn't a
+        // moving head, _mhPrimaryFixture is null and the panel reverts to
+        // MovingHeadTestEngine::HomeState(nullptr)'s defaults.
+        xltest::MovingHeadTestEngine _mhTestEngine;
+        DmxMovingHeadComm* _mhPrimaryFixture = nullptr;
+        // Color picked on the wheel widget (when shown), cached from
+        // NotifyColorUpdated() since MHColorWheelPanel has no plain
+        // GetValue()-style accessor.
+        xlColor _mhWheelColor = xlWHITE;
+
+        struct MHFeatureControl {
+            size_t featureIdx = 0;
+            size_t channelIdx = 0;
+            bool isChoice = false;
+            wxSlider* slider = nullptr;
+            wxChoice* choice = nullptr;
+            std::vector<int> choiceValues; // parallel to choice's items
+        };
+        std::vector<MHFeatureControl> _mhFeatureControls;
+
+        // Moving Head controls (Notebook2 page).
+        wxPanel* PanelMovingHead = nullptr;
+        wxScrolledWindow* MHScroller = nullptr;
+        MovingHeadCanvasPanel* MHCanvas_Position = nullptr;
+        wxTextCtrl* TextCtrl_MH_Pan = nullptr;
+        wxTextCtrl* TextCtrl_MH_Tilt = nullptr;
+        // Actual DMX byte (0-255) sent on the motor's coarse channel - not
+        // the internal 0-65535 command value degrees maps to. The fine/
+        // sub-256 byte a 16-bit motor also sends isn't exposed here, only
+        // in real output (Frame() still sends it) - more precision than
+        // this panel needs.
+        wxTextCtrl* TextCtrl_MH_PanCoarse = nullptr;
+        wxTextCtrl* TextCtrl_MH_TiltCoarse = nullptr;
+        MHColorWheelPanel* MHPanel_ColorWheel = nullptr;
+        wxStaticBoxSizer* StaticBoxSizer_MHColor = nullptr;
+        wxSlider* Slider_MH_R = nullptr;
+        wxSlider* Slider_MH_G = nullptr;
+        wxSlider* Slider_MH_B = nullptr;
+        // Shown instead of R/G/B when the fixture's color ability has no
+        // real mixing channels (only a white/static channel) - dragging R/G/B
+        // to unequal values on such a fixture wouldn't do anything, since
+        // DmxColorAbility::SetColorPixels only ever writes the white channel
+        // (and only when R=G=B).
+        wxSlider* Slider_MH_White = nullptr;
+        wxSlider* Slider_MH_Dimmer = nullptr;
+        wxButton* Button_MH_ShutterOn = nullptr;
+        wxButton* Button_MH_ShutterOff = nullptr;
+        wxSlider* Slider_MH_Shutter = nullptr;
+        wxPanel* Panel_MH_Features = nullptr;
+        wxFlexGridSizer* FlexGridSizer_MH_Features = nullptr;
+
         int _twinkleRatio = 0;
 		int _chaseGrouping = 0;
 		bool _chaseWholeSelection = false;
@@ -358,6 +420,22 @@ class PixelTestDialog: public wxDialog
         xltest::TestFunction GetTestFunction(int notebookSelection);
         void SetCheckBoxItemFromTracker(wxTreeListCtrl* tree, wxTreeListItem item, wxCheckBoxState parentState);
         void SetSuspend(bool suspend);
+
+        // Moving Head tab. Built manually outside wxSmith's guarded regions -
+        // same convention already used in this file for the search-filter
+        // boxes - since its content (fixture abilities, dynamic feature
+        // controls) can't be laid out statically.
+        void UpdateMHPrimaryFixture(Model* m);
+
+        void BuildMovingHeadTab();
+        void RebuildMHColorGroup();
+        void RebuildMHFeatureControls();
+        xltest::MHTestState BuildMHTestState();
+        void NotifyColorUpdated() override;
+        void NotifyPositionUpdated() override;
+        void UpdateMHPositionText();
+        void CommitMHPositionText();
+        void CommitMHPositionDMX();
 
 		DECLARE_EVENT_TABLE()
 };

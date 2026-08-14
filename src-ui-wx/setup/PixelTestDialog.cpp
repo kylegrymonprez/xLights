@@ -17,6 +17,10 @@
 #include <wx/dataview.h>
 #include <wx/confbase.h>
 #include <wx/numdlg.h>
+#include <wx/tokenzr.h>
+#include <wx/scrolwin.h>
+
+#include <algorithm>
 
 //(*InternalHeaders(PixelTestDialog)
 #include <wx/intl.h>
@@ -26,6 +30,15 @@
 #include "models/Model.h"
 #include "models/ModelGroup.h"
 #include "models/SubModel.h"
+#include "models/DMX/DmxMovingHeadComm.h"
+#include "models/DMX/DmxMovingHeadAdv.h"
+#include "models/DMX/DmxColorAbility.h"
+#include "models/DMX/DmxShutterAbility.h"
+#include "models/DMX/DmxColorAbilityWheel.h"
+#include "models/DMX/DmxColorAbilityRGB.h"
+#include "models/DMX/DmxColorAbilityCMY.h"
+#include "models/DMX/MovingHeads/MhFeature.h"
+#include "models/DMX/MovingHeads/MhChannel.h"
 #include <log.h>
 #include "render/SequenceFile.h"
 #include "outputs/TestPreset.h"
@@ -1423,6 +1436,13 @@ PixelTestDialog::PixelTestDialog(xLightsFrame* parent, OutputManager* outputMana
         });
     }
 
+    // Moving Head controls (Notebook2): manually built for the same reason
+    // as the filter boxes above - their content is fixture-ability-dependent,
+    // not something wxSmith's static designer can lay out. The fixture
+    // itself is whatever's selected on the "Model" tab (see
+    // UpdateMHPrimaryFixture, called from SelectVisualModel).
+    BuildMovingHeadTab();
+
     // add checkbox events
     Connect(ID_TREELISTCTRL_Outputs, wxEVT_COMMAND_CHECKLISTBOX_TOGGLED, (wxObjectEventFunction)&PixelTestDialog::OnTreeListCtrlCheckboxtoggled);
     Connect(ID_TREELISTCTRL_Outputs, wxEVT_COMMAND_TREELIST_ITEM_CHECKED, (wxObjectEventFunction)&PixelTestDialog::OnTreeListCtrlCheckboxtoggled);
@@ -1849,6 +1869,8 @@ void PixelTestDialog::SelectVisualModel(const std::string& model)
 
     UpdateVisualModelFromTracker();
     RenderModel();
+
+    UpdateMHPrimaryFixture(m);
 }
 
 void PixelTestDialog::UpdateVisualModelFromTracker()
@@ -1875,6 +1897,453 @@ void PixelTestDialog::UpdateVisualModelFromTracker()
         }
     }
 }
+
+#pragma region MovingHeadTab
+
+// Called from SelectVisualModel() whenever the "Model" tab's selection
+// changes. `m` is whatever's currently selected there, of any model type -
+// this is the sole place that decides whether the Moving Head controls
+// panel has a fixture to drive. When it doesn't (m is null or isn't a
+// moving head), MovingHeadTestEngine::HomeState(nullptr) below yields the
+// panel's at-rest defaults (centred, white, full dimmer, open shutter), so
+// "no fixture" and "revert to defaults" are the same code path.
+void PixelTestDialog::UpdateMHPrimaryFixture(Model* m)
+{
+    DmxMovingHeadComm* newPrimary = dynamic_cast<DmxMovingHeadComm*>(m);
+    if (newPrimary == _mhPrimaryFixture) {
+        return;
+    }
+    _mhPrimaryFixture = newPrimary;
+
+    if (PanelMovingHead != nullptr) {
+        PanelMovingHead->Enable(_mhPrimaryFixture != nullptr);
+        if (_mhPrimaryFixture == nullptr) {
+            // The Moving Head tab is only selectable while a moving head is
+            // selected on "Model" (see the wxEVT_NOTEBOOK_PAGE_CHANGING veto
+            // in BuildMovingHeadTab) - if the selection there just changed
+            // out from under an already-open Moving Head tab, back out of it.
+            int mhPage = Notebook2->FindPage(PanelMovingHead);
+            if (mhPage != wxNOT_FOUND && Notebook2->GetSelection() == mhPage) {
+                Notebook2->SetSelection(0);
+            }
+        }
+    }
+
+    // The fixture's abilities decide which color/feature widgets are shown.
+    RebuildMHColorGroup();
+    RebuildMHFeatureControls();
+
+    xltest::MHTestState home = xltest::MovingHeadTestEngine::HomeState(_mhPrimaryFixture);
+    MHCanvas_Position->SetPosition(wxPoint2DDouble((home.panDegrees + 180.0) / 360.0, (180.0 - home.tiltDegrees) / 360.0));
+    UpdateMHPositionText();
+    _mhWheelColor = home.rgbColor;
+    if (Slider_MH_R != nullptr) {
+        Slider_MH_R->SetValue(home.rgbColor.red);
+        Slider_MH_G->SetValue(home.rgbColor.green);
+        Slider_MH_B->SetValue(home.rgbColor.blue);
+    } else if (Slider_MH_White != nullptr) {
+        Slider_MH_White->SetValue(home.rgbColor.red); // home color is always r=g=b
+    }
+    Slider_MH_Dimmer->SetValue(home.dimmer);
+    Slider_MH_Shutter->SetValue(std::clamp(home.shutterValue, 0, 255));
+}
+
+void PixelTestDialog::BuildMovingHeadTab()
+{
+    PanelMovingHead = new wxPanel(Notebook2, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL);
+
+    MHScroller = new wxScrolledWindow(PanelMovingHead, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxVSCROLL);
+    wxScrolledWindow* scroller = MHScroller;
+    scroller->SetScrollRate(0, 10);
+
+    wxBoxSizer* panelSizer = new wxBoxSizer(wxVERTICAL);
+    panelSizer->Add(scroller, 1, wxEXPAND);
+    PanelMovingHead->SetSizer(panelSizer);
+
+    wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
+
+    wxStaticBoxSizer* posBox = new wxStaticBoxSizer(wxHORIZONTAL, scroller, _("Position (drag to pan/tilt, or type degrees)"));
+    wxWindow* posParent = posBox->GetStaticBox();
+    MHCanvas_Position = new MovingHeadCanvasPanel(this, posParent, wxID_ANY, wxDefaultPosition, wxSize(250, 250));
+    // Pin the size so the now-6-row entry grid to its right (which makes
+    // this row taller than 250) can't stretch the pad away from square -
+    // MovingHeadCanvasPanel::OnSize tries to self-correct back to square on
+    // its own, but only after the sizer has already handed it a mismatched
+    // size, so it isn't a substitute for capping it here.
+    MHCanvas_Position->SetMinSize(wxSize(250, 250));
+    MHCanvas_Position->SetMaxSize(wxSize(250, 250));
+    posBox->Add(MHCanvas_Position, 0, wxALL | wxALIGN_TOP, 5);
+
+    // Numeric readout/entry, to the right of the pad. Degrees and the actual
+    // DMX byte (0-255 - the fixture's fine/sub-256 channel, when it has one,
+    // isn't exposed here; that's more precision than this panel needs) are
+    // two views of the same position - typing into either one moves the
+    // pad's handle to match (CommitMHPositionText/DMX), and dragging the pad
+    // updates both (NotifyPositionUpdated -> UpdateMHPositionText).
+    const wxSize posEntrySize(70, -1); // wide enough for "-180.0" / "255"
+    wxFlexGridSizer* posEntryGrid = new wxFlexGridSizer(0, 2, 0, 0);
+    posEntryGrid->Add(new wxStaticText(posParent, wxID_ANY, _("Pan (deg):")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+    TextCtrl_MH_Pan = new wxTextCtrl(posParent, wxID_ANY, "0.0", wxDefaultPosition, posEntrySize, wxTE_PROCESS_ENTER);
+    posEntryGrid->Add(TextCtrl_MH_Pan, 0, wxALL, 5);
+    posEntryGrid->Add(new wxStaticText(posParent, wxID_ANY, _("Pan (DMX):")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+    TextCtrl_MH_PanCoarse = new wxTextCtrl(posParent, wxID_ANY, "0", wxDefaultPosition, posEntrySize, wxTE_PROCESS_ENTER);
+    posEntryGrid->Add(TextCtrl_MH_PanCoarse, 0, wxALL, 5);
+    posEntryGrid->Add(new wxStaticText(posParent, wxID_ANY, _("Tilt (deg):")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+    TextCtrl_MH_Tilt = new wxTextCtrl(posParent, wxID_ANY, "0.0", wxDefaultPosition, posEntrySize, wxTE_PROCESS_ENTER);
+    posEntryGrid->Add(TextCtrl_MH_Tilt, 0, wxALL, 5);
+    posEntryGrid->Add(new wxStaticText(posParent, wxID_ANY, _("Tilt (DMX):")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+    TextCtrl_MH_TiltCoarse = new wxTextCtrl(posParent, wxID_ANY, "0", wxDefaultPosition, posEntrySize, wxTE_PROCESS_ENTER);
+    posEntryGrid->Add(TextCtrl_MH_TiltCoarse, 0, wxALL, 5);
+    posBox->Add(posEntryGrid, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+
+    auto commitMHPositionText = [this](auto& event) {
+        CommitMHPositionText();
+        event.Skip();
+    };
+    TextCtrl_MH_Pan->Bind(wxEVT_TEXT_ENTER, commitMHPositionText);
+    TextCtrl_MH_Pan->Bind(wxEVT_KILL_FOCUS, commitMHPositionText);
+    TextCtrl_MH_Tilt->Bind(wxEVT_TEXT_ENTER, commitMHPositionText);
+    TextCtrl_MH_Tilt->Bind(wxEVT_KILL_FOCUS, commitMHPositionText);
+
+    auto commitMHPositionDMX = [this](auto& event) {
+        CommitMHPositionDMX();
+        event.Skip();
+    };
+    TextCtrl_MH_PanCoarse->Bind(wxEVT_TEXT_ENTER, commitMHPositionDMX);
+    TextCtrl_MH_PanCoarse->Bind(wxEVT_KILL_FOCUS, commitMHPositionDMX);
+    TextCtrl_MH_TiltCoarse->Bind(wxEVT_TEXT_ENTER, commitMHPositionDMX);
+    TextCtrl_MH_TiltCoarse->Bind(wxEVT_KILL_FOCUS, commitMHPositionDMX);
+
+    mainSizer->Add(posBox, 0, wxALL, 5);
+
+    // Rebuilt per-fixture by RebuildMHColorGroup() - a color wheel, plain
+    // RGB(W)/CMY(W) sliders, or a "no color ability" note, depending on the
+    // selected fixture's DmxColorAbility.
+    StaticBoxSizer_MHColor = new wxStaticBoxSizer(wxVERTICAL, scroller, _("Color"));
+    mainSizer->Add(StaticBoxSizer_MHColor, 0, wxALL | wxEXPAND, 5);
+
+    wxStaticBoxSizer* dimmerBox = new wxStaticBoxSizer(wxHORIZONTAL, scroller, _("Dimmer"));
+    Slider_MH_Dimmer = new wxSlider(dimmerBox->GetStaticBox(), wxID_ANY, 255, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL | wxSL_LABELS);
+    dimmerBox->Add(Slider_MH_Dimmer, 1, wxALL | wxEXPAND, 5);
+    mainSizer->Add(dimmerBox, 0, wxALL | wxEXPAND, 5);
+
+    // On/Off are shortcuts (jump the slider to the ability's configured open
+    // value, or 0) - the slider itself is the real control, since some
+    // fixtures pack strobe rate or other functions onto the same channel
+    // beyond simple open/closed.
+    wxStaticBoxSizer* shutterBox = new wxStaticBoxSizer(wxHORIZONTAL, scroller, _("Shutter"));
+    wxWindow* shutterParent = shutterBox->GetStaticBox();
+    Button_MH_ShutterOn = new wxButton(shutterParent, wxID_ANY, _("On"));
+    shutterBox->Add(Button_MH_ShutterOn, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+    Button_MH_ShutterOff = new wxButton(shutterParent, wxID_ANY, _("Off"));
+    shutterBox->Add(Button_MH_ShutterOff, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+    Slider_MH_Shutter = new wxSlider(shutterParent, wxID_ANY, 255, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL | wxSL_LABELS);
+    shutterBox->Add(Slider_MH_Shutter, 1, wxALL | wxEXPAND, 5);
+    mainSizer->Add(shutterBox, 0, wxALL | wxEXPAND, 5);
+
+    Button_MH_ShutterOn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        int value = (_mhPrimaryFixture != nullptr && _mhPrimaryFixture->HasShutterAbility())
+            ? _mhPrimaryFixture->GetShutterAbility()->GetShutterOnValue()
+            : 255;
+        Slider_MH_Shutter->SetValue(value);
+    });
+    Button_MH_ShutterOff->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+        Slider_MH_Shutter->SetValue(0);
+    });
+
+    // Rebuilt per-fixture by RebuildMHFeatureControls() - one labeled slider
+    // or dropdown per MhFeature/MhChannel on an advanced fixture; hidden for
+    // simple Moving Head fixtures, which have no MhFeature list.
+    Panel_MH_Features = new wxPanel(scroller, wxID_ANY);
+    FlexGridSizer_MH_Features = new wxFlexGridSizer(0, 2, 0, 0);
+    FlexGridSizer_MH_Features->AddGrowableCol(1);
+    Panel_MH_Features->SetSizer(FlexGridSizer_MH_Features);
+    mainSizer->Add(Panel_MH_Features, 0, wxALL | wxEXPAND, 5);
+
+    scroller->SetSizer(mainSizer);
+    scroller->FitInside();
+
+    Notebook2->AddPage(PanelMovingHead, _("Moving Head"), false);
+
+    // wxNotebook has no cross-platform "disable this one tab" API, so
+    // "greyed out and not selectable" is done by vetoing the switch and
+    // disabling the page's own content (below, in UpdateMHPrimaryFixture) -
+    // clicking the tab while nothing moving-head-shaped is selected on the
+    // "Model" tab just does nothing, rather than showing an unusable page.
+    Notebook2->Bind(wxEVT_NOTEBOOK_PAGE_CHANGING, [this](wxNotebookEvent& event) {
+        if (Notebook2->GetPage(event.GetSelection()) == PanelMovingHead && _mhPrimaryFixture == nullptr) {
+            event.Veto();
+        }
+    });
+
+    // Show the at-rest defaults immediately, even before the "Model" tab has
+    // ever selected anything (e.g. a show with zero models).
+    UpdateMHPrimaryFixture(nullptr);
+}
+
+void PixelTestDialog::RebuildMHColorGroup()
+{
+    StaticBoxSizer_MHColor->Clear(true);
+    MHPanel_ColorWheel = nullptr;
+    Slider_MH_R = nullptr;
+    Slider_MH_G = nullptr;
+    Slider_MH_B = nullptr;
+    Slider_MH_White = nullptr;
+
+    wxWindow* colorParent = StaticBoxSizer_MHColor->GetStaticBox();
+
+    if (_mhPrimaryFixture == nullptr) {
+        StaticBoxSizer_MHColor->Add(new wxStaticText(colorParent, wxID_ANY, _("Check a fixture on the left to show its controls.")), 0, wxALL, 5);
+    } else if (!_mhPrimaryFixture->HasColorAbility()) {
+        StaticBoxSizer_MHColor->Add(new wxStaticText(colorParent, wxID_ANY, _("This fixture has no color channel.")), 0, wxALL, 5);
+    } else {
+        DmxColorAbility* ability = _mhPrimaryFixture->GetColorAbility();
+        auto colorType = ability->GetColorType();
+
+        if (colorType == DmxColorAbility::DMX_COLOR_TYPE::DMX_COLOR_WHEEL) {
+            auto* wheel = dynamic_cast<DmxColorAbilityWheel*>(ability);
+            xlColorVector colors = wheel != nullptr ? wheel->GetColors() : xlColorVector();
+            // singleSelection=true: click any color to set it as the
+            // fixture's one active color, rather than building up a
+            // multi-handle sequence.
+            MHPanel_ColorWheel = new MHColorWheelPanel(this, colorParent, wxID_ANY, wxDefaultPosition, wxSize(250, 250), true);
+            MHPanel_ColorWheel->DefineColours(colors);
+            StaticBoxSizer_MHColor->Add(MHPanel_ColorWheel, 0, wxALL | wxALIGN_CENTER_HORIZONTAL, 5);
+        } else {
+            // Some fixtures configure this ability with no real mixing
+            // channels - only a white/static channel (e.g. a plain white LED
+            // moving head with no color changer). R/G/B(/C/M/Y) sliders
+            // would do nothing there, since SetColorPixels only ever writes
+            // the white channel, and only when all three are equal - so
+            // check what's actually configured and show the control that
+            // matches, rather than assuming every non-wheel fixture mixes.
+            bool hasMixing = false;
+            if (colorType == DmxColorAbility::DMX_COLOR_TYPE::DMX_COLOR_RGBW) {
+                auto* rgb = dynamic_cast<DmxColorAbilityRGB*>(ability);
+                hasMixing = rgb != nullptr && (rgb->GetRedChannel() > 0 || rgb->GetGreenChannel() > 0 || rgb->GetBlueChannel() > 0);
+            } else if (colorType == DmxColorAbility::DMX_COLOR_TYPE::DMX_COLOR_CMYW) {
+                auto* cmy = dynamic_cast<DmxColorAbilityCMY*>(ability);
+                hasMixing = cmy != nullptr && (cmy->GetCyanChannel() > 0 || cmy->GetMagentaChannel() > 0 || cmy->GetYellowChannel() > 0);
+            }
+
+            wxFlexGridSizer* grid = new wxFlexGridSizer(0, 2, 0, 0);
+            grid->AddGrowableCol(1);
+            if (hasMixing) {
+                Slider_MH_R = new wxSlider(colorParent, wxID_ANY, 255, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL | wxSL_LABELS);
+                grid->Add(new wxStaticText(colorParent, wxID_ANY, _("Red")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+                grid->Add(Slider_MH_R, 1, wxALL | wxEXPAND, 5);
+                Slider_MH_G = new wxSlider(colorParent, wxID_ANY, 255, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL | wxSL_LABELS);
+                grid->Add(new wxStaticText(colorParent, wxID_ANY, _("Green")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+                grid->Add(Slider_MH_G, 1, wxALL | wxEXPAND, 5);
+                Slider_MH_B = new wxSlider(colorParent, wxID_ANY, 255, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL | wxSL_LABELS);
+                grid->Add(new wxStaticText(colorParent, wxID_ANY, _("Blue")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+                grid->Add(Slider_MH_B, 1, wxALL | wxEXPAND, 5);
+            } else {
+                Slider_MH_White = new wxSlider(colorParent, wxID_ANY, 255, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL | wxSL_LABELS);
+                grid->Add(new wxStaticText(colorParent, wxID_ANY, _("White")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+                grid->Add(Slider_MH_White, 1, wxALL | wxEXPAND, 5);
+            }
+            StaticBoxSizer_MHColor->Add(grid, 1, wxALL | wxEXPAND, 5);
+        }
+    }
+
+    StaticBoxSizer_MHColor->Layout();
+    PanelMovingHead->Layout();
+    MHScroller->FitInside();
+}
+
+void PixelTestDialog::RebuildMHFeatureControls()
+{
+    _mhFeatureControls.clear();
+    FlexGridSizer_MH_Features->Clear(true);
+
+    auto* adv = dynamic_cast<DmxMovingHeadAdv*>(_mhPrimaryFixture);
+    bool any = false;
+
+    if (adv != nullptr) {
+        auto const& features = adv->GetFeatures();
+        for (size_t fi = 0; fi < features.size(); ++fi) {
+            auto const& channels = features[fi]->GetChannels();
+            for (size_t ci = 0; ci < channels.size(); ++ci) {
+                MhChannel* ch = channels[ci].get();
+                std::string label = features[fi]->GetName();
+                if (channels.size() > 1) {
+                    label += " - " + ch->GetName();
+                }
+                FlexGridSizer_MH_Features->Add(new wxStaticText(Panel_MH_Features, wxID_ANY, label), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+
+                MHFeatureControl ctrl;
+                ctrl.featureIdx = fi;
+                ctrl.channelIdx = ci;
+
+                auto const& ranges = ch->GetRanges();
+                if (!ranges.empty()) {
+                    wxChoice* choice = new wxChoice(Panel_MH_Features, wxID_ANY);
+                    for (auto const& r : ranges) {
+                        choice->AppendString(r->GetName());
+                        ctrl.choiceValues.push_back((r->GetMin() + r->GetMax()) / 2);
+                    }
+                    choice->SetSelection(0);
+                    FlexGridSizer_MH_Features->Add(choice, 1, wxALL | wxEXPAND, 5);
+                    ctrl.isChoice = true;
+                    ctrl.choice = choice;
+                } else {
+                    wxSlider* slider = new wxSlider(Panel_MH_Features, wxID_ANY, 0, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL | wxSL_LABELS);
+                    FlexGridSizer_MH_Features->Add(slider, 1, wxALL | wxEXPAND, 5);
+                    ctrl.isChoice = false;
+                    ctrl.slider = slider;
+                }
+                _mhFeatureControls.push_back(ctrl);
+                any = true;
+            }
+        }
+    }
+
+    Panel_MH_Features->Show(any);
+    Panel_MH_Features->Layout();
+    PanelMovingHead->Layout();
+    MHScroller->FitInside();
+}
+
+xltest::MHTestState PixelTestDialog::BuildMHTestState()
+{
+    xltest::MHTestState state;
+
+    wxPoint2DDouble pos = MHCanvas_Position->GetPosition();
+    state.panDegrees = (float)(pos.m_x * 360.0 - 180.0);
+    state.tiltDegrees = (float)(-pos.m_y * 360.0 + 180.0);
+
+    if (MHPanel_ColorWheel != nullptr) {
+        state.rgbColor = _mhWheelColor;
+    } else if (Slider_MH_R != nullptr) {
+        state.rgbColor = xlColor((uint8_t)Slider_MH_R->GetValue(), (uint8_t)Slider_MH_G->GetValue(), (uint8_t)Slider_MH_B->GetValue());
+    } else if (Slider_MH_White != nullptr) {
+        uint8_t w = (uint8_t)Slider_MH_White->GetValue();
+        state.rgbColor = xlColor(w, w, w);
+    }
+
+    state.dimmer = Slider_MH_Dimmer->GetValue();
+    state.shutterValue = Slider_MH_Shutter->GetValue();
+
+    for (auto const& ctrl : _mhFeatureControls) {
+        xltest::MHTestFeatureValue fv;
+        fv.featureIdx = ctrl.featureIdx;
+        fv.channelIdx = ctrl.channelIdx;
+        if (ctrl.isChoice && ctrl.choice != nullptr) {
+            int sel = ctrl.choice->GetSelection();
+            if (sel >= 0 && sel < (int)ctrl.choiceValues.size()) {
+                fv.rawValue = (uint8_t)std::clamp(ctrl.choiceValues[sel], 0, 255);
+            }
+        } else if (ctrl.slider != nullptr) {
+            fv.rawValue = (uint8_t)ctrl.slider->GetValue();
+        }
+        state.featureValues.push_back(fv);
+    }
+
+    return state;
+}
+
+void PixelTestDialog::NotifyPositionUpdated()
+{
+    // The actual position value is polled directly from
+    // MHCanvas_Position->GetPosition() each frame in BuildMHTestState(); this
+    // just keeps the degrees textboxes showing what the pad was dragged to.
+    UpdateMHPositionText();
+}
+
+void PixelTestDialog::UpdateMHPositionText()
+{
+    wxPoint2DDouble pos = MHCanvas_Position->GetPosition();
+    float pan = (float)(pos.m_x * 360.0 - 180.0);
+    float tilt = (float)(-pos.m_y * 360.0 + 180.0);
+    // ChangeValue (not SetValue) so this doesn't itself fire wxEVT_TEXT.
+    TextCtrl_MH_Pan->ChangeValue(wxString::Format("%.1f", pan));
+    TextCtrl_MH_Tilt->ChangeValue(wxString::Format("%.1f", tilt));
+
+    // Actual DMX byte (0-255 - a DMX channel is never wider than that) that
+    // would really be sent on the motor's coarse channel for this position:
+    // DmxMotor::ConvertPostoCmd's 0-65535 return is an internal command
+    // value, not itself a DMX value, so it's split via MovingHeadTestEngine::
+    // SplitMotorCommand - the exact same call Frame() makes - and only the
+    // coarse byte is shown (the fine/sub-256 byte a 16-bit motor also sends
+    // is more precision than this panel exposes, though Frame() still sends
+    // it for real output). DmxMotor::GetPosition (the reverse, used when the
+    // box below is edited) isn't a precise inverse of ConvertPostoCmd for
+    // every motor calibration, so typing a byte and reading it back here
+    // isn't guaranteed bit-for-bit - what's shown here always wins as "what
+    // will actually be sent."
+    if (_mhPrimaryFixture != nullptr) {
+        DmxMotor* panMotor = _mhPrimaryFixture->GetPanMotor();
+        DmxMotor* tiltMotor = _mhPrimaryFixture->GetTiltMotor();
+
+        uint8_t panCoarse, panFine, tiltCoarse, tiltFine;
+        xltest::MovingHeadTestEngine::SplitMotorCommand(panMotor->ConvertPostoCmd(pan), panCoarse, panFine);
+        xltest::MovingHeadTestEngine::SplitMotorCommand(tiltMotor->ConvertPostoCmd(tilt), tiltCoarse, tiltFine);
+
+        TextCtrl_MH_PanCoarse->ChangeValue(wxString::Format("%d", (int)panCoarse));
+        TextCtrl_MH_TiltCoarse->ChangeValue(wxString::Format("%d", (int)tiltCoarse));
+    } else {
+        TextCtrl_MH_PanCoarse->ChangeValue("0");
+        TextCtrl_MH_TiltCoarse->ChangeValue("0");
+    }
+}
+
+void PixelTestDialog::CommitMHPositionText()
+{
+    double pan = std::clamp(wxAtof(TextCtrl_MH_Pan->GetValue()), -180.0, 180.0);
+    double tilt = std::clamp(wxAtof(TextCtrl_MH_Tilt->GetValue()), -180.0, 180.0);
+    MHCanvas_Position->SetPosition(wxPoint2DDouble((pan + 180.0) / 360.0, (180.0 - tilt) / 360.0));
+    UpdateMHPositionText(); // reflect the clamp back if the typed value was out of range
+}
+
+void PixelTestDialog::CommitMHPositionDMX()
+{
+    if (_mhPrimaryFixture == nullptr) {
+        UpdateMHPositionText();
+        return;
+    }
+
+    DmxMotor* panMotor = _mhPrimaryFixture->GetPanMotor();
+    DmxMotor* tiltMotor = _mhPrimaryFixture->GetTiltMotor();
+
+    int panCoarse = (int)std::clamp(wxAtof(TextCtrl_MH_PanCoarse->GetValue()), 0.0, 255.0);
+    int tiltCoarse = (int)std::clamp(wxAtof(TextCtrl_MH_TiltCoarse->GetValue()), 0.0, 255.0);
+
+    // Fine isn't exposed here, so it's treated as 0 when converting a typed
+    // DMX byte back to degrees.
+    float pan = std::clamp(panMotor->GetPosition(panCoarse << 8), -180.0f, 180.0f);
+    float tilt = std::clamp(tiltMotor->GetPosition(tiltCoarse << 8), -180.0f, 180.0f);
+    MHCanvas_Position->SetPosition(wxPoint2DDouble((pan + 180.0) / 360.0, (180.0 - tilt) / 360.0));
+    UpdateMHPositionText(); // re-derives the DMX byte box from ConvertPostoCmd - see note there
+}
+
+void PixelTestDialog::NotifyColorUpdated()
+{
+    if (MHPanel_ColorWheel == nullptr || !MHPanel_ColorWheel->HasColour()) {
+        return;
+    }
+
+    // MHColorWheelPanel::GetColour() (a pre-existing British-spelled name in
+    // this shared widget) returns "Wheel: h,s,v[,h,s,v...]" - an
+    // effect-settings format built for its multi-handle animation model.
+    // This tab only ever shows one handle, so take the first triple. The
+    // resulting xlColor is used as-is (see MHTestState::rgbColor) - each
+    // driven fixture's own DmxColorAbility::SetColorPixels() resolves it
+    // against that fixture's own wheel slots, so no per-fixture index
+    // lookup is needed here.
+    wxString text(MHPanel_ColorWheel->GetColour());
+    text.Replace("Wheel: ", "");
+    wxStringTokenizer tokenizer(text, ",");
+    if (tokenizer.CountTokens() < 3) {
+        return;
+    }
+    float h = (float)wxAtof(tokenizer.GetNextToken());
+    float s = (float)wxAtof(tokenizer.GetNextToken());
+    float v = (float)wxAtof(tokenizer.GetNextToken());
+    _mhWheelColor = xlColor(HSVValue(h, s, v));
+}
+
+#pragma endregion MovingHeadTab
 
 void PixelTestDialog::OnPreviewLeftUp(wxMouseEvent& event)
 {
@@ -3140,6 +3609,36 @@ xltest::TestParameters PixelTestDialog::BuildTestParameters(int notebookSelectio
 void PixelTestDialog::OnTimer(long curtime)
 {
     const int notebookSelection = Notebook2->GetSelection();
+
+    if (notebookSelection >= 0 && Notebook2->GetPage(notebookSelection) == PanelMovingHead) {
+        // Continuous multi-channel fixture control doesn't fit
+        // xltest::TestPatternEngine's chase/twinkle TestMode/TestFunction
+        // model, so this tab bypasses it entirely. The fixture is whatever's
+        // selected on the "Model" tab (see UpdateMHPrimaryFixture) - nothing
+        // to drive if that's not a moving head.
+        if (_mhPrimaryFixture != nullptr) {
+            xltest::MHTestState state = BuildMHTestState();
+            _mhTestEngine.Frame(_outputManager, _mhPrimaryFixture, state);
+            StatusBar1->SetLabelText(_mhTestEngine.GetStatus());
+
+            // Also write the same values into the fixture's own node colors
+            // and re-render the "Model" tab's preview, so dragging a slider
+            // here is visible there even with output-to-lights off or no
+            // controller attached. Color/dimmer/shutter draw straight from
+            // node colors every call, but DmxMovingHead(Adv)::DrawModel
+            // holds pan/tilt steady between calls that share the same
+            // preview->getCurrentFrameTime() (meant to avoid rejittering a
+            // paused sequence) - _modelPreview's frame time never advances
+            // outside the sequencer's own panel, so without this it would
+            // read as "still the same frame" forever and the freshly written
+            // motor channels would never reach the drawn angle.
+            _modelPreview->setCurrentFrameTime((uint32_t)curtime);
+            _mhTestEngine.ApplyToPreview(_mhPrimaryFixture, state);
+            RenderModel();
+        }
+        return;
+    }
+
     const xltest::TestParameters params = BuildTestParameters(notebookSelection);
 
     if (notebookSelection != _lastNotebookSelection || params.function != _lastTestFunction) {
@@ -3193,6 +3692,9 @@ void PixelTestDialog::OnCheckBox_OutputToLightsClick(wxCommandEvent& event)
         }
 
         _uploadedControllers.clear();
+        if (_mhPrimaryFixture != nullptr) {
+            EnsureControllerUploaded(_mhPrimaryFixture->GetFirstChannel() + 1);
+        }
         Timer1.Start(TEST_TIMER_INTERVAL_MS, wxTIMER_CONTINUOUS);
     } else {
         Timer1.Stop();
@@ -3512,7 +4014,8 @@ void PixelTestDialog::SetSuspend(bool suspend)
 void PixelTestDialog::OnNotebook1PageChanged(wxNotebookEvent& event)
 {
     // need to go through all items in the tree on the selected page and update them based on channels
-    wxTreeListCtrl* tree = (event.GetSelection() == 0 ? TreeListCtrl_Outputs : (event.GetSelection() == 1 ? TreeListCtrl_ModelGroups : (event.GetSelection() == 2 ? TreeListCtrl_Models : (event.GetSelection() == 4 ? TreeListCtrl_Controllers : nullptr))));
+    const int sel = event.GetSelection();
+    wxTreeListCtrl* tree = (sel == 0 ? TreeListCtrl_Outputs : (sel == 1 ? TreeListCtrl_ModelGroups : (sel == 2 ? TreeListCtrl_Models : (sel == 4 ? TreeListCtrl_Controllers : nullptr))));
     if (tree != nullptr) {
         SetCheckBoxItemFromTracker(tree, tree->GetRootItem(), wxCheckBoxState::wxCHK_UNCHECKED);
     }
