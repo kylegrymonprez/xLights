@@ -147,6 +147,23 @@ class PixelTestDialog: public wxDialog, public IMHColorWheelPanelParent, public 
         wxPanel* Panel_MH_Features = nullptr;
         wxFlexGridSizer* FlexGridSizer_MH_Features = nullptr;
 
+        // "Timed DMX Command": send a fixed value to any absolute channel
+        // for N seconds, then stop - some moving heads need a channel held
+        // at a specific value for a set duration to trigger a lamp on/off
+        // (or other) macro, rather than being driven continuously like
+        // pan/tilt/color/dimmer above. Independent of _mhPrimaryFixture -
+        // the channel is whatever the user types, not tied to the selected
+        // model.
+        wxTextCtrl* TextCtrl_MH_TimedChannel = nullptr;
+        wxTextCtrl* TextCtrl_MH_TimedValue = nullptr;
+        wxTextCtrl* TextCtrl_MH_TimedSeconds = nullptr;
+        wxButton* Button_MH_TimedSend = nullptr;
+        wxStaticText* StaticText_MH_TimedStatus = nullptr;
+        bool _mhTimedCmdActive = false;
+        int32_t _mhTimedCmdChannel = 0; // 0-based, as OutputManager::SetOneChannel expects
+        unsigned char _mhTimedCmdValue = 0;
+        long _mhTimedCmdEndMS = 0; // deadline, same clock as OnTimer's curtime
+
         int _twinkleRatio = 0;
 		int _chaseGrouping = 0;
 		bool _chaseWholeSelection = false;
