@@ -2060,57 +2060,6 @@ void PixelTestDialog::BuildMovingHeadTab()
     Panel_MH_Features->SetSizer(FlexGridSizer_MH_Features);
     mainSizer->Add(Panel_MH_Features, 0, wxALL | wxEXPAND, 5);
 
-    // Raw one-shot channel write, held for a fixed duration then stopped -
-    // e.g. some moving heads turn their lamp on/off via a command value that
-    // must sit on a channel for N seconds. Not tied to _mhPrimaryFixture's
-    // channel map like everything else on this tab; the channel is whatever
-    // absolute channel# the user types.
-    wxStaticBoxSizer* timedCmdBox = new wxStaticBoxSizer(wxHORIZONTAL, scroller, _("Timed DMX Command"));
-    wxWindow* timedCmdParent = timedCmdBox->GetStaticBox();
-    timedCmdBox->Add(new wxStaticText(timedCmdParent, wxID_ANY, _("Channel#:")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
-    TextCtrl_MH_TimedChannel = new wxTextCtrl(timedCmdParent, wxID_ANY, "1", wxDefaultPosition, wxSize(70, -1));
-    timedCmdBox->Add(TextCtrl_MH_TimedChannel, 0, wxALL, 5);
-    timedCmdBox->Add(new wxStaticText(timedCmdParent, wxID_ANY, _("Value:")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
-    TextCtrl_MH_TimedValue = new wxTextCtrl(timedCmdParent, wxID_ANY, "255", wxDefaultPosition, wxSize(50, -1));
-    timedCmdBox->Add(TextCtrl_MH_TimedValue, 0, wxALL, 5);
-    timedCmdBox->Add(new wxStaticText(timedCmdParent, wxID_ANY, _("Seconds:")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
-    TextCtrl_MH_TimedSeconds = new wxTextCtrl(timedCmdParent, wxID_ANY, "1", wxDefaultPosition, wxSize(50, -1));
-    timedCmdBox->Add(TextCtrl_MH_TimedSeconds, 0, wxALL, 5);
-    Button_MH_TimedSend = new wxButton(timedCmdParent, wxID_ANY, _("Send"));
-    timedCmdBox->Add(Button_MH_TimedSend, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
-    StaticText_MH_TimedStatus = new wxStaticText(timedCmdParent, wxID_ANY, wxEmptyString);
-    timedCmdBox->Add(StaticText_MH_TimedStatus, 1, wxALL | wxALIGN_CENTER_VERTICAL | wxEXPAND, 5);
-    mainSizer->Add(timedCmdBox, 0, wxALL | wxEXPAND, 5);
-
-    Button_MH_TimedSend->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
-        long channel = 0;
-        long value = 0;
-        double seconds = 0.0;
-        if (!TextCtrl_MH_TimedChannel->GetValue().ToLong(&channel) || channel < 1) {
-            DisplayError("Channel# must be a positive whole number.", this);
-            return;
-        }
-        if (!TextCtrl_MH_TimedValue->GetValue().ToLong(&value) || value < 0 || value > 255) {
-            DisplayError("Value must be a whole number between 0 and 255.", this);
-            return;
-        }
-        if (!TextCtrl_MH_TimedSeconds->GetValue().ToDouble(&seconds) || seconds <= 0) {
-            DisplayError("Seconds must be greater than 0.", this);
-            return;
-        }
-        if (!CheckBox_OutputToLights->GetValue()) {
-            DisplayWarning("Check 'Output to Lights' for this command to actually reach the fixture.", this);
-        }
-
-        wxTimeSpan ts = wxDateTime::UNow() - _starttime;
-        long curtime = ts.GetMilliseconds().ToLong();
-        _mhTimedCmdChannel = (int32_t)(channel - 1); // OutputManager::SetOneChannel is 0-based
-        _mhTimedCmdValue = (unsigned char)value;
-        _mhTimedCmdEndMS = curtime + (long)(seconds * 1000.0 + 0.5);
-        _mhTimedCmdActive = true;
-        StaticText_MH_TimedStatus->SetLabelText(wxString::Format(_("Sending %ld to channel %ld..."), value, channel));
-    });
-
     scroller->SetSizer(mainSizer);
     scroller->FitInside();
 
@@ -3662,20 +3611,6 @@ void PixelTestDialog::OnTimer(long curtime)
     const int notebookSelection = Notebook2->GetSelection();
 
     if (notebookSelection >= 0 && Notebook2->GetPage(notebookSelection) == PanelMovingHead) {
-        // Timed DMX Command: keep re-sending the armed value every frame
-        // until curtime passes the deadline set when Send was clicked, then
-        // stop (leaving the channel wherever the last real output cycle put
-        // it - there's no "previous value" to restore to here).
-        if (_mhTimedCmdActive) {
-            if (curtime < _mhTimedCmdEndMS) {
-                EnsureControllerUploaded(_mhTimedCmdChannel + 1);
-                _outputManager->SetOneChannel(_mhTimedCmdChannel, _mhTimedCmdValue);
-            } else {
-                _mhTimedCmdActive = false;
-                StaticText_MH_TimedStatus->SetLabelText(_("Done."));
-            }
-        }
-
         // Continuous multi-channel fixture control doesn't fit
         // xltest::TestPatternEngine's chase/twinkle TestMode/TestFunction
         // model, so this tab bypasses it entirely. The fixture is whatever's
