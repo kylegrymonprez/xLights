@@ -1388,6 +1388,22 @@ PixelTestDialog::PixelTestDialog(xLightsFrame* parent, OutputManager* outputMana
 
     SplitterWindow1->SetMinimumPaneSize(100);
 
+    // Widen the test-controls pane (Panel2 - Standard/RGB/RGB Cycle/
+    // Controller/Moving Head) ~15% versus the default 50/50 split
+    // SplitVertically() + SetSashGravity(0.5) above would otherwise give
+    // it, without changing the dialog's overall size - Panel1 (Outputs/
+    // Model Groups/Models/Model/Controllers) gives up the difference. Both
+    // this dialog's overall size (just above) and the splitter's default
+    // initial split are computed from the screen size at runtime, not
+    // fixed pixel values, so this is done as a fraction of the splitter's
+    // actual live width rather than a hardcoded pixel offset. Layout()
+    // forces the sizer to apply the new dialog size to the splitter first -
+    // SetSashPosition() called before that would just get overwritten by
+    // the splitter's own default 50/50 calculation once it resizes.
+    Layout();
+    int splitterWidth = SplitterWindow1->GetSize().GetWidth();
+    SplitterWindow1->SetSashPosition((int)(splitterWidth * 0.425), true);
+
     TreeListCtrl_Outputs = new wxTreeListCtrl(Panel_Outputs, ID_TREELISTCTRL_Outputs, wxPoint(0, 0), Panel_Outputs->GetSize(), wxTR_FULL_ROW_HIGHLIGHT | wxTR_DEFAULT_STYLE | wxTL_CHECKBOX | wxTL_USER_3STATE, _T("ID_TREELISTCTRL_Outputs"));
     FlexGridSizer_Outputs->Add(TreeListCtrl_Outputs, 1, wxALL | wxEXPAND, 5);
     FlexGridSizer_Outputs->AddGrowableRow(1);
@@ -1443,6 +1459,12 @@ PixelTestDialog::PixelTestDialog(xLightsFrame* parent, OutputManager* outputMana
     // itself is whatever's selected on the "Model" tab (see
     // UpdateMHPrimaryFixture, called from SelectVisualModel).
     BuildMovingHeadTab();
+
+    // Give the test-controls notebook (Notebook2 - Standard/RGB/RGB Cycle/
+    // Controller/Moving Head) a bit more size
+    wxSize notebook2Best = Notebook2->GetBestSize();
+    Notebook2->SetMinSize(wxSize((int)(notebook2Best.GetWidth() * 1.25), notebook2Best.GetHeight()));
+    Layout();
 
     // add checkbox events
     Connect(ID_TREELISTCTRL_Outputs, wxEVT_COMMAND_CHECKLISTBOX_TOGGLED, (wxObjectEventFunction)&PixelTestDialog::OnTreeListCtrlCheckboxtoggled);
