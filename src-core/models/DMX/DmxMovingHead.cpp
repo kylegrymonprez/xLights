@@ -234,10 +234,10 @@ void DmxMovingHead::DisplayEffectOnWindow(IModelPreview* preview, double pointSi
     if (ctx) {
         int w, h;
         w = preview->getWidth(); h = preview->getHeight();
-        float scaleX = float(w) * 0.95f / float(GetModelScreenLocation().RenderWi);
-        float scaleY = float(h) * 0.95f / float(GetModelScreenLocation().RenderHt);
+        float scaleX = float(w) * preview->GetMovingHeadFillFraction() / float(GetModelScreenLocation().RenderWi);
+        float scaleY = float(h) * preview->GetMovingHeadFillFraction() / float(GetModelScreenLocation().RenderHt);
         if (GetModelScreenLocation().RenderDp > 1) {
-            float scaleZ = float(w) * 0.95f / float(GetModelScreenLocation().RenderDp);
+            float scaleZ = float(w) * preview->GetMovingHeadFillFraction() / float(GetModelScreenLocation().RenderDp);
             scaleX = std::min(scaleX, scaleZ);
         }
 

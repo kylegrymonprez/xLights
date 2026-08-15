@@ -147,6 +147,40 @@ class PixelTestDialog: public wxDialog, public IMHColorWheelPanelParent, public 
         wxPanel* Panel_MH_Features = nullptr;
         wxFlexGridSizer* FlexGridSizer_MH_Features = nullptr;
 
+        // "Raw DMX" section (bottom of the tab): one slider per channel the
+        // fixture actually uses, kept in sync both ways with the controls
+        // above - see RebuildMHRawDMXGroup()/ApplyRawDMXChannelToControls().
+        // Every channel is editable, even ones with no natural higher-level
+        // control (fine bytes, non-invertible CMY components, fixed/reserved
+        // channels) - those pin a manual override (_mhRawDmxOverride) instead
+        // of writing back into some other slider.
+        enum class MHRawDmxRole {
+            PanCoarse, PanFine, TiltCoarse, TiltFine,
+            ColorR, ColorG, ColorB, ColorWhite, ColorCyan, ColorMagenta, ColorYellow, ColorWheel,
+            Dimmer, Shutter,
+            Feature, FeatureFine,
+            Other // unmapped/fixed/preset channel - no natural higher-level control
+        };
+        struct MHRawDmxChannel {
+            MHRawDmxRole role = MHRawDmxRole::Other;
+            std::string label;
+            size_t featureIdx = 0;
+            size_t channelIdx = 0;
+            wxSlider* slider = nullptr;
+            wxTextCtrl* text = nullptr;
+        };
+        wxStaticBoxSizer* StaticBoxSizer_MHRawDMX = nullptr;
+        std::vector<MHRawDmxChannel> _mhRawDmxChannels; // index = channel - 1 within the fixture
+        // Parallel to _mhRawDmxChannels; -1 = no override, else a value
+        // pinned onto that channel every frame (applied on top of whatever
+        // BuildFrameBytes() would otherwise compute, and pushed onto real
+        // output directly since the engine has no notion of these).
+        std::vector<int> _mhRawDmxOverride;
+        // Guards the per-frame SetValue() refresh from re-entering the
+        // sliders' own wxEVT_SLIDER handlers (wx doesn't fire that event from
+        // SetValue(), but this costs nothing and removes any doubt).
+        bool _mhRawDmxUpdating = false;
+
         int _twinkleRatio = 0;
 		int _chaseGrouping = 0;
 		bool _chaseWholeSelection = false;
@@ -436,6 +470,13 @@ class PixelTestDialog: public wxDialog, public IMHColorWheelPanelParent, public 
         void UpdateMHPositionText();
         void CommitMHPositionText();
         void CommitMHPositionDMX();
+        void RebuildMHRawDMXGroup();
+        void ApplyRawDMXChannelToControls(int channelIdx0, uint8_t value);
+        // Forwards mouse-wheel events on a control living inside MHScroller
+        // to MHScroller itself, so scrolling the tab while the cursor is
+        // over e.g. a slider still scrolls the panel instead of the slider
+        // consuming the wheel to change its own value.
+        void BindMHScrollForward(wxWindow* ctrl);
 
 		DECLARE_EVENT_TABLE()
 };

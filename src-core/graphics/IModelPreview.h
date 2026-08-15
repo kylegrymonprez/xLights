@@ -79,4 +79,12 @@ public:
     virtual bool IsNoCurrentModel() = 0;
     virtual bool GetShowZoneIndicator() const { return false; }
     virtual float GetPencilCatchRadiusMultiplier() const { return 8.0f; }
+
+    // Fraction of the preview's width/height that DmxMovingHead(Adv)::
+    // DisplayEffectOnWindow scales a fixture's authored bounding box to
+    // fill when self-drawing (a single-model preview with no camera/zoom
+    // controls of its own). Default matches the historical fixed 95% fill
+    // used by every other model's DisplayEffectOnWindow; override lower on
+    // a specific preview instance to show more surrounding headroom.
+    virtual float GetMovingHeadFillFraction() const { return 0.95f; }
 };

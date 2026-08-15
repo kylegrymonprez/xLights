@@ -112,9 +112,13 @@ public:
     // from what Frame() really transmits.
     static void SplitMotorCommand(int cmd, uint8_t& coarseByte, uint8_t& fineByte);
 
-private:
+    // Computes the exact per-channel byte array Frame()/ApplyToPreview()
+    // send for `state`, without sending it anywhere - the single source of
+    // truth for a UI wanting a live raw-DMX readout that can't drift from
+    // what real output actually transmits.
     std::vector<uint8_t> BuildFrameBytes(const DmxMovingHeadComm* fixture, const MHTestState& state) const;
 
+private:
     std::string _status;
 };
 

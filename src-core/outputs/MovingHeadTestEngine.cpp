@@ -59,9 +59,9 @@ void MovingHeadTestEngine::SplitMotorCommand(int cmd, uint8_t& coarseByte, uint8
 MHTestState MovingHeadTestEngine::HomeState(const DmxMovingHeadComm* fixture)
 {
     MHTestState state;
-    state.panDegrees = 0.0f;
-    state.tiltDegrees = 0.0f;
     state.dimmer = 255;
+    state.panDegrees = 90.0f;
+    state.tiltDegrees = 180.0f;
     state.shutterValue = (fixture != nullptr && fixture->HasShutterAbility())
         ? fixture->GetShutterAbility()->GetShutterOnValue()
         : 255;

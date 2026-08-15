@@ -180,6 +180,13 @@ public:
     bool IsNoCurrentModel() override { return currentModel == "&---none---&"; }
     bool GetShowZoneIndicator() const override;
 
+    // See IModelPreview::GetMovingHeadFillFraction() - defaults to the
+    // historical 95% fill; callers that want more headroom around a moving
+    // head fixture (e.g. the Tools > Test dialog's Model tab) can lower it
+    // on their own preview instance without affecting any other preview.
+    void SetMovingHeadFillFraction(float f) { _movingHeadFillFraction = f; }
+    float GetMovingHeadFillFraction() const override { return _movingHeadFillFraction; }
+
     void AddBoundingBoxToAccumulator(int x1, int y1, int x2, int y2);
     void AddPathToAccumulator(const std::vector<xlPoint>& path);
     void AddScreenSpaceBoundingBoxToAccumulator(int x1, int y1, int x2, int y2);
@@ -255,6 +262,7 @@ private:
     bool _center2D0 = false;
     bool scaleImage = false;
     bool _supportsPencil = false;
+    float _movingHeadFillFraction = 0.95f;
     bool allowSelected;
     bool allowPreviewChange;
     ControllerObjectContext _controllerObjectContext = ControllerObjectContext::None;

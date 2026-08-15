@@ -34,6 +34,7 @@
 #include "models/DMX/DmxMovingHeadAdv.h"
 #include "models/DMX/DmxColorAbility.h"
 #include "models/DMX/DmxShutterAbility.h"
+#include "models/DMX/DmxDimmerAbility.h"
 #include "models/DMX/DmxColorAbilityWheel.h"
 #include "models/DMX/DmxColorAbilityRGB.h"
 #include "models/DMX/DmxColorAbilityCMY.h"
@@ -1792,6 +1793,12 @@ void PixelTestDialog::PopulateVisualModelTree(ModelManager* modelManager)
 {
     _modelPreview = new ModelPreview(Panel_VisualModel);
     _modelPreview->SetMinSize(wxSize(150, 150));
+    // A moving head fixture's authored Layout bounding box otherwise fills
+    // ~95% of this preview (DmxMovingHead(Adv)::DisplayEffectOnWindow's
+    // default) - way too tight a crop for a test tool where you want to see
+    // the whole base+yoke with headroom. ~0.32 linear fill (~sqrt(0.10))
+    // keeps the fixture's footprint to roughly 10% of the preview's area.
+    _modelPreview->SetMovingHeadFillFraction(0.32f);
     FlexGridSizer_VisualModelSizer->Add(_modelPreview, 1, wxALL | wxEXPAND, 0);
     FlexGridSizer_VisualModelSizer->Fit(Panel_VisualModel);
     FlexGridSizer_VisualModelSizer->SetSizeHints(Panel_VisualModel);
@@ -1932,6 +1939,7 @@ void PixelTestDialog::UpdateMHPrimaryFixture(Model* m)
     // The fixture's abilities decide which color/feature widgets are shown.
     RebuildMHColorGroup();
     RebuildMHFeatureControls();
+    RebuildMHRawDMXGroup();
 
     xltest::MHTestState home = xltest::MovingHeadTestEngine::HomeState(_mhPrimaryFixture);
     MHCanvas_Position->SetPosition(wxPoint2DDouble((home.panDegrees + 180.0) / 360.0, (180.0 - home.tiltDegrees) / 360.0));
@@ -2025,6 +2033,7 @@ void PixelTestDialog::BuildMovingHeadTab()
     wxStaticBoxSizer* dimmerBox = new wxStaticBoxSizer(wxHORIZONTAL, scroller, _("Dimmer"));
     Slider_MH_Dimmer = new wxSlider(dimmerBox->GetStaticBox(), wxID_ANY, 255, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL | wxSL_LABELS);
     dimmerBox->Add(Slider_MH_Dimmer, 1, wxALL | wxEXPAND, 5);
+    BindMHScrollForward(Slider_MH_Dimmer);
     mainSizer->Add(dimmerBox, 0, wxALL | wxEXPAND, 5);
 
     // On/Off are shortcuts (jump the slider to the ability's configured open
@@ -2039,6 +2048,7 @@ void PixelTestDialog::BuildMovingHeadTab()
     shutterBox->Add(Button_MH_ShutterOff, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
     Slider_MH_Shutter = new wxSlider(shutterParent, wxID_ANY, 255, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL | wxSL_LABELS);
     shutterBox->Add(Slider_MH_Shutter, 1, wxALL | wxEXPAND, 5);
+    BindMHScrollForward(Slider_MH_Shutter);
     mainSizer->Add(shutterBox, 0, wxALL | wxEXPAND, 5);
 
     Button_MH_ShutterOn->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
@@ -2059,6 +2069,12 @@ void PixelTestDialog::BuildMovingHeadTab()
     FlexGridSizer_MH_Features->AddGrowableCol(1);
     Panel_MH_Features->SetSizer(FlexGridSizer_MH_Features);
     mainSizer->Add(Panel_MH_Features, 0, wxALL | wxEXPAND, 5);
+
+    // Rebuilt per-fixture by RebuildMHRawDMXGroup() - one labeled slider per
+    // DMX channel the fixture uses, synced both ways with the controls
+    // above.
+    StaticBoxSizer_MHRawDMX = new wxStaticBoxSizer(wxVERTICAL, scroller, _("Raw DMX"));
+    mainSizer->Add(StaticBoxSizer_MHRawDMX, 0, wxALL | wxEXPAND, 5);
 
     scroller->SetSizer(mainSizer);
     scroller->FitInside();
@@ -2132,16 +2148,20 @@ void PixelTestDialog::RebuildMHColorGroup()
                 Slider_MH_R = new wxSlider(colorParent, wxID_ANY, 255, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL | wxSL_LABELS);
                 grid->Add(new wxStaticText(colorParent, wxID_ANY, _("Red")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
                 grid->Add(Slider_MH_R, 1, wxALL | wxEXPAND, 5);
+                BindMHScrollForward(Slider_MH_R);
                 Slider_MH_G = new wxSlider(colorParent, wxID_ANY, 255, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL | wxSL_LABELS);
                 grid->Add(new wxStaticText(colorParent, wxID_ANY, _("Green")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
                 grid->Add(Slider_MH_G, 1, wxALL | wxEXPAND, 5);
+                BindMHScrollForward(Slider_MH_G);
                 Slider_MH_B = new wxSlider(colorParent, wxID_ANY, 255, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL | wxSL_LABELS);
                 grid->Add(new wxStaticText(colorParent, wxID_ANY, _("Blue")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
                 grid->Add(Slider_MH_B, 1, wxALL | wxEXPAND, 5);
+                BindMHScrollForward(Slider_MH_B);
             } else {
                 Slider_MH_White = new wxSlider(colorParent, wxID_ANY, 255, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL | wxSL_LABELS);
                 grid->Add(new wxStaticText(colorParent, wxID_ANY, _("White")), 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
                 grid->Add(Slider_MH_White, 1, wxALL | wxEXPAND, 5);
+                BindMHScrollForward(Slider_MH_White);
             }
             StaticBoxSizer_MHColor->Add(grid, 1, wxALL | wxEXPAND, 5);
         }
@@ -2190,6 +2210,7 @@ void PixelTestDialog::RebuildMHFeatureControls()
                 } else {
                     wxSlider* slider = new wxSlider(Panel_MH_Features, wxID_ANY, 0, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL | wxSL_LABELS);
                     FlexGridSizer_MH_Features->Add(slider, 1, wxALL | wxEXPAND, 5);
+                    BindMHScrollForward(slider);
                     ctrl.isChoice = false;
                     ctrl.slider = slider;
                 }
@@ -2203,6 +2224,306 @@ void PixelTestDialog::RebuildMHFeatureControls()
     Panel_MH_Features->Layout();
     PanelMovingHead->Layout();
     MHScroller->FitInside();
+}
+
+namespace {
+// Properly inverts DmxMotor::ConvertPostoCmd() - unlike DmxMotor::GetPosition(),
+// which ignores orient_home/upside_down and so isn't actually that function's
+// inverse. Using GetPosition() here would mean a manually-dragged Raw DMX
+// coarse byte gets converted to the wrong degree value on any fixture with a
+// nonzero home-orientation calibration (or upside_down set), which then
+// re-encodes to a *different* byte on the very next frame - visible as the
+// slider snapping back to something other than what was just dragged to.
+// Ignores ConvertPostoCmd's wraparound branch (only reachable for a cmd
+// outside [0, GetMaxValue()], which can't happen for a real 0-255 byte here).
+float InvertMotorCmdToDegrees(DmxMotor* motor, int cmd)
+{
+    float rangeOfMotion = motor->GetRangeOfMotion();
+    float gotoHome = (float)motor->GetMaxValue() * (float)motor->GetOrientHome() / rangeOfMotion;
+    int rev = motor->GetReverse() ? -1 : 1;
+    float limitedPos = ((float)cmd - gotoHome) * rangeOfMotion / ((float)motor->GetMaxValue() * rev);
+    return motor->GetUpsideDown() ? -limitedPos : limitedPos;
+}
+} // namespace
+
+void PixelTestDialog::RebuildMHRawDMXGroup()
+{
+    StaticBoxSizer_MHRawDMX->Clear(true);
+    _mhRawDmxChannels.clear();
+    _mhRawDmxOverride.clear();
+
+    wxWindow* rawParent = StaticBoxSizer_MHRawDMX->GetStaticBox();
+
+    if (_mhPrimaryFixture == nullptr) {
+        StaticBoxSizer_MHRawDMX->Add(new wxStaticText(rawParent, wxID_ANY, _("Check a fixture on the left to show its raw channels.")), 0, wxALL, 5);
+        StaticBoxSizer_MHRawDMX->Layout();
+        return;
+    }
+
+    int chanCount = std::max(0, _mhPrimaryFixture->GetDmxChannelCount());
+    _mhRawDmxChannels.resize(chanCount);
+    _mhRawDmxOverride.assign(chanCount, -1);
+
+    // Classify each channel by whichever ability writes it, mirroring
+    // MovingHeadTestEngine::BuildFrameBytes's own write order - a channel two
+    // abilities both claim (shouldn't happen on a correctly configured
+    // fixture) ends up labeled by whichever wrote last, matching what
+    // actually wins on the wire.
+    auto claim = [this, chanCount](int channel1based, MHRawDmxRole role, const std::string& label, size_t featureIdx = 0, size_t channelIdx = 0) {
+        if (channel1based > 0 && channel1based <= chanCount) {
+            MHRawDmxChannel& c = _mhRawDmxChannels[channel1based - 1];
+            c.role = role;
+            c.label = label;
+            c.featureIdx = featureIdx;
+            c.channelIdx = channelIdx;
+        }
+    };
+
+    DmxMotor* panMotor = _mhPrimaryFixture->GetPanMotor();
+    if (panMotor != nullptr) {
+        claim(panMotor->GetChannelCoarse(), MHRawDmxRole::PanCoarse, "Pan (coarse)");
+        claim(panMotor->GetChannelFine(), MHRawDmxRole::PanFine, "Pan (fine)");
+    }
+    DmxMotor* tiltMotor = _mhPrimaryFixture->GetTiltMotor();
+    if (tiltMotor != nullptr) {
+        claim(tiltMotor->GetChannelCoarse(), MHRawDmxRole::TiltCoarse, "Tilt (coarse)");
+        claim(tiltMotor->GetChannelFine(), MHRawDmxRole::TiltFine, "Tilt (fine)");
+    }
+
+    if (_mhPrimaryFixture->HasColorAbility()) {
+        DmxColorAbility* ability = _mhPrimaryFixture->GetColorAbility();
+        switch (ability->GetColorType()) {
+        case DmxColorAbility::DMX_COLOR_TYPE::DMX_COLOR_RGBW: {
+            auto* rgb = dynamic_cast<DmxColorAbilityRGB*>(ability);
+            if (rgb != nullptr) {
+                claim(rgb->GetRedChannel(), MHRawDmxRole::ColorR, "Color: Red");
+                claim(rgb->GetGreenChannel(), MHRawDmxRole::ColorG, "Color: Green");
+                claim(rgb->GetBlueChannel(), MHRawDmxRole::ColorB, "Color: Blue");
+                claim(rgb->GetWhiteChannel(), MHRawDmxRole::ColorWhite, "Color: White");
+            }
+            break;
+        }
+        case DmxColorAbility::DMX_COLOR_TYPE::DMX_COLOR_CMYW: {
+            auto* cmy = dynamic_cast<DmxColorAbilityCMY*>(ability);
+            if (cmy != nullptr) {
+                // Cyan/Magenta/Yellow are each a function of all three RGB
+                // sliders at once (black-key subtraction, DmxColorAbilityCMY::
+                // GetC/GetM/GetY) - not invertible per-channel, so these stay
+                // read-only. White (the "no mixing channels" case) is a
+                // simple passthrough and is reverse-mapped like RGBW's.
+                claim(cmy->GetCyanChannel(), MHRawDmxRole::ColorCyan, "Color: Cyan");
+                claim(cmy->GetMagentaChannel(), MHRawDmxRole::ColorMagenta, "Color: Magenta");
+                claim(cmy->GetYellowChannel(), MHRawDmxRole::ColorYellow, "Color: Yellow");
+                claim(cmy->GetWhiteChannel(), MHRawDmxRole::ColorWhite, "Color: White");
+            }
+            break;
+        }
+        case DmxColorAbility::DMX_COLOR_TYPE::DMX_COLOR_WHEEL: {
+            auto* wheel = dynamic_cast<DmxColorAbilityWheel*>(ability);
+            if (wheel != nullptr) {
+                claim(wheel->GetWheelChannel(), MHRawDmxRole::ColorWheel, "Color Wheel");
+                // The wheel's own dimmer channel is derived from the picked
+                // slot's HSV value (DmxColorAbilityWheel::SetColorPixels),
+                // not independently driven by any control here.
+                claim(wheel->GetDimmerChannel(), MHRawDmxRole::Other, "Color Wheel Dimmer (auto)");
+            }
+            break;
+        }
+        default:
+            break;
+        }
+    }
+
+    if (_mhPrimaryFixture->HasDimmerAbility()) {
+        claim(_mhPrimaryFixture->GetDimmerAbility()->GetDimmerChannel(), MHRawDmxRole::Dimmer, "Dimmer");
+    }
+    if (_mhPrimaryFixture->HasShutterAbility()) {
+        claim(_mhPrimaryFixture->GetShutterAbility()->GetShutterChannel(), MHRawDmxRole::Shutter, "Shutter");
+    }
+
+    auto* adv = dynamic_cast<DmxMovingHeadAdv*>(_mhPrimaryFixture);
+    if (adv != nullptr) {
+        auto const& features = adv->GetFeatures();
+        for (size_t fi = 0; fi < features.size(); ++fi) {
+            auto const& channels = features[fi]->GetChannels();
+            for (size_t ci = 0; ci < channels.size(); ++ci) {
+                MhChannel* ch = channels[ci].get();
+                std::string label = features[fi]->GetName();
+                if (channels.size() > 1) {
+                    label += " - " + ch->GetName();
+                }
+                claim(ch->GetChannelCoarse(), MHRawDmxRole::Feature, label, fi, ci);
+                claim(ch->GetChannelFine(), MHRawDmxRole::FeatureFine, label + " (fine)", fi, ci);
+            }
+        }
+    }
+
+    wxFlexGridSizer* grid = new wxFlexGridSizer(0, 3, 0, 0);
+    grid->AddGrowableCol(1);
+    uint32_t firstChannel = _mhPrimaryFixture->GetFirstChannel();
+    for (int i = 0; i < chanCount; ++i) {
+        MHRawDmxChannel& info = _mhRawDmxChannels[i];
+        wxString rowLabel = wxString::Format("Ch %d - %s", i + 1, info.label.empty() ? "Other / fixed" : wxString(info.label));
+        wxStaticText* label = new wxStaticText(rawParent, wxID_ANY, rowLabel);
+        label->SetToolTip(wxString::Format(_("Absolute channel %u"), (unsigned)(firstChannel + i + 1)));
+        grid->Add(label, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+
+        wxSlider* slider = new wxSlider(rawParent, wxID_ANY, 0, 0, 255, wxDefaultPosition, wxDefaultSize, wxSL_HORIZONTAL);
+        grid->Add(slider, 1, wxALL | wxEXPAND, 5);
+        info.slider = slider;
+        BindMHScrollForward(slider);
+
+        wxTextCtrl* text = new wxTextCtrl(rawParent, wxID_ANY, "0", wxDefaultPosition, wxSize(40, -1), wxTE_PROCESS_ENTER);
+        grid->Add(text, 0, wxALL | wxALIGN_CENTER_VERTICAL, 5);
+        info.text = text;
+
+        int channelIdx0 = i;
+        slider->Bind(wxEVT_SLIDER, [this, channelIdx0](wxCommandEvent&) {
+            if (_mhRawDmxUpdating) return;
+            uint8_t value = (uint8_t)_mhRawDmxChannels[channelIdx0].slider->GetValue();
+            _mhRawDmxChannels[channelIdx0].text->ChangeValue(wxString::Format("%d", value));
+            ApplyRawDMXChannelToControls(channelIdx0, value);
+        });
+        auto commitText = [this, channelIdx0](auto& event) {
+            if (_mhRawDmxUpdating) return;
+            MHRawDmxChannel& c = _mhRawDmxChannels[channelIdx0];
+            long v = 0;
+            if (c.text->GetValue().ToLong(&v)) {
+                uint8_t value = (uint8_t)std::clamp(v, 0L, 255L);
+                c.slider->SetValue(value);
+                c.text->ChangeValue(wxString::Format("%d", value));
+                ApplyRawDMXChannelToControls(channelIdx0, value);
+            }
+            event.Skip();
+        };
+        text->Bind(wxEVT_TEXT_ENTER, commitText);
+        text->Bind(wxEVT_KILL_FOCUS, commitText);
+    }
+    StaticBoxSizer_MHRawDMX->Add(grid, 1, wxALL | wxEXPAND, 5);
+    StaticBoxSizer_MHRawDMX->Layout();
+    PanelMovingHead->Layout();
+    MHScroller->FitInside();
+}
+
+// Reverse direction of the Raw DMX section: the user dragged the raw slider
+// for `channelIdx0` to `value` - push that into whichever higher-level
+// control actually governs this channel (rather than an override
+// mechanism), so BuildMHTestState()/BuildFrameBytes() naturally keep
+// everything else in sync on the very next frame.
+void PixelTestDialog::ApplyRawDMXChannelToControls(int channelIdx0, uint8_t value)
+{
+    if (_mhPrimaryFixture == nullptr || channelIdx0 < 0 || channelIdx0 >= (int)_mhRawDmxChannels.size()) {
+        return;
+    }
+    const MHRawDmxChannel& info = _mhRawDmxChannels[channelIdx0];
+
+    // Roles below that map onto a real higher-level control clear any stale
+    // override (that control is now this channel's source of truth again);
+    // the default case (no such control exists) pins one instead.
+    if (channelIdx0 < (int)_mhRawDmxOverride.size()) {
+        _mhRawDmxOverride[channelIdx0] = -1;
+    }
+
+    switch (info.role) {
+    case MHRawDmxRole::PanCoarse: {
+        DmxMotor* panMotor = _mhPrimaryFixture->GetPanMotor();
+        if (panMotor != nullptr) {
+            float pan = std::clamp(InvertMotorCmdToDegrees(panMotor, ((int)value) << 8), -180.0f, 180.0f);
+            wxPoint2DDouble cur = MHCanvas_Position->GetPosition();
+            MHCanvas_Position->SetPosition(wxPoint2DDouble((pan + 180.0) / 360.0, cur.m_y));
+            UpdateMHPositionText();
+        }
+        break;
+    }
+    case MHRawDmxRole::TiltCoarse: {
+        DmxMotor* tiltMotor = _mhPrimaryFixture->GetTiltMotor();
+        if (tiltMotor != nullptr) {
+            float tilt = std::clamp(InvertMotorCmdToDegrees(tiltMotor, ((int)value) << 8), -180.0f, 180.0f);
+            wxPoint2DDouble cur = MHCanvas_Position->GetPosition();
+            MHCanvas_Position->SetPosition(wxPoint2DDouble(cur.m_x, (180.0 - tilt) / 360.0));
+            UpdateMHPositionText();
+        }
+        break;
+    }
+    case MHRawDmxRole::ColorR:
+        if (Slider_MH_R != nullptr) Slider_MH_R->SetValue(value);
+        break;
+    case MHRawDmxRole::ColorG:
+        if (Slider_MH_G != nullptr) Slider_MH_G->SetValue(value);
+        break;
+    case MHRawDmxRole::ColorB:
+        if (Slider_MH_B != nullptr) Slider_MH_B->SetValue(value);
+        break;
+    case MHRawDmxRole::ColorWhite:
+        if (Slider_MH_White != nullptr) Slider_MH_White->SetValue(value);
+        break;
+    case MHRawDmxRole::ColorWheel: {
+        // A manually dragged raw byte generally won't land exactly on one
+        // of the fixture's defined wheel slots, so rather than force a
+        // possibly-wrong "nearest match" selection onto the wheel widget
+        // (which also risks disturbing its own click-handling state -
+        // m_handles/active_handle/selected_point - from a code path other
+        // than an actual click), clear its selection outright and pin this
+        // channel directly. NotifyColorUpdated() is the reverse: an actual
+        // click on the wheel reclaims the channel from this override.
+        if (MHPanel_ColorWheel != nullptr) {
+            MHPanel_ColorWheel->ResetColours();
+        }
+        if (channelIdx0 < (int)_mhRawDmxOverride.size()) {
+            _mhRawDmxOverride[channelIdx0] = value;
+        }
+        break;
+    }
+    case MHRawDmxRole::Dimmer:
+        Slider_MH_Dimmer->SetValue(value);
+        break;
+    case MHRawDmxRole::Shutter:
+        Slider_MH_Shutter->SetValue(value);
+        break;
+    case MHRawDmxRole::Feature: {
+        for (auto& ctrl : _mhFeatureControls) {
+            if (ctrl.featureIdx == info.featureIdx && ctrl.channelIdx == info.channelIdx) {
+                if (ctrl.isChoice && ctrl.choice != nullptr && !ctrl.choiceValues.empty()) {
+                    size_t best = 0;
+                    int bestDiff = 256;
+                    for (size_t i = 0; i < ctrl.choiceValues.size(); ++i) {
+                        int diff = std::abs(ctrl.choiceValues[i] - (int)value);
+                        if (diff < bestDiff) {
+                            bestDiff = diff;
+                            best = i;
+                        }
+                    }
+                    ctrl.choice->SetSelection((int)best);
+                } else if (ctrl.slider != nullptr) {
+                    ctrl.slider->SetValue(value);
+                }
+                break;
+            }
+        }
+        break;
+    }
+    default:
+        // No higher-level control owns this channel (a fine byte, a
+        // non-invertible CMY component, or a fixed/reserved channel) - pin
+        // it directly so it still sticks at whatever the user set, applied
+        // on top of BuildFrameBytes()'s own computation every frame (see
+        // OnTimer's Moving Head branch).
+        if (channelIdx0 < (int)_mhRawDmxOverride.size()) {
+            _mhRawDmxOverride[channelIdx0] = value;
+        }
+        break;
+    }
+}
+
+void PixelTestDialog::BindMHScrollForward(wxWindow* ctrl)
+{
+    ctrl->Bind(wxEVT_MOUSEWHEEL, [this](wxMouseEvent& event) {
+        // Forward to the scrolled panel so it scrolls; don't Skip(), so the
+        // control itself never consumes the wheel to change its own value.
+        wxMouseEvent fwd(event);
+        fwd.SetEventObject(MHScroller);
+        MHScroller->ProcessWindowEvent(fwd);
+    });
 }
 
 xltest::MHTestState PixelTestDialog::BuildMHTestState()
@@ -2341,6 +2662,17 @@ void PixelTestDialog::NotifyColorUpdated()
     float s = (float)wxAtof(tokenizer.GetNextToken());
     float v = (float)wxAtof(tokenizer.GetNextToken());
     _mhWheelColor = xlColor(HSVValue(h, s, v));
+
+    // A real click reclaims the wheel channel from any manual Raw DMX
+    // override pinned by ApplyRawDMXChannelToControls's ColorWheel case -
+    // _mhWheelColor drives it again, and the Raw DMX slider will pick up
+    // the freshly selected slot's byte on the very next frame.
+    for (size_t i = 0; i < _mhRawDmxChannels.size() && i < _mhRawDmxOverride.size(); ++i) {
+        if (_mhRawDmxChannels[i].role == MHRawDmxRole::ColorWheel) {
+            _mhRawDmxOverride[i] = -1;
+            break;
+        }
+    }
 }
 
 #pragma endregion MovingHeadTab
@@ -3620,6 +3952,34 @@ void PixelTestDialog::OnTimer(long curtime)
             xltest::MHTestState state = BuildMHTestState();
             _mhTestEngine.Frame(_outputManager, _mhPrimaryFixture, state);
             StatusBar1->SetLabelText(_mhTestEngine.GetStatus());
+
+            // Refresh the Raw DMX section from the same bytes Frame() just
+            // sent, so it always reflects what every other control on this
+            // tab is currently driving. Channels with a pinned manual
+            // override (raw-only channels with no higher-level control -
+            // see ApplyRawDMXChannelToControls) get forced to that value
+            // here too, and pushed onto the real output directly, since
+            // Frame()/BuildFrameBytes() have no notion of them.
+            std::vector<uint8_t> rawBytes = _mhTestEngine.BuildFrameBytes(_mhPrimaryFixture, state);
+            uint32_t rawFirstChannel = _mhPrimaryFixture->GetFirstChannel();
+            for (size_t i = 0; i < rawBytes.size() && i < _mhRawDmxOverride.size(); ++i) {
+                if (_mhRawDmxOverride[i] >= 0) {
+                    rawBytes[i] = (uint8_t)_mhRawDmxOverride[i];
+                    _outputManager->SetOneChannel((int32_t)(rawFirstChannel + i), rawBytes[i]);
+                }
+            }
+            _mhRawDmxUpdating = true;
+            for (size_t i = 0; i < _mhRawDmxChannels.size() && i < rawBytes.size(); ++i) {
+                wxSlider* slider = _mhRawDmxChannels[i].slider;
+                wxTextCtrl* text = _mhRawDmxChannels[i].text;
+                if (slider != nullptr && slider->GetValue() != rawBytes[i]) {
+                    slider->SetValue(rawBytes[i]);
+                    if (text != nullptr) {
+                        text->ChangeValue(wxString::Format("%d", rawBytes[i]));
+                    }
+                }
+            }
+            _mhRawDmxUpdating = false;
 
             // Also write the same values into the fixture's own node colors
             // and re-render the "Model" tab's preview, so dragging a slider
