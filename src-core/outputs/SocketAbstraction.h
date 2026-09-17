@@ -346,6 +346,28 @@ public:
             }
         }
 
+        // A blocking UDP send can stall the calling thread for reasons
+        // SO_SNDTIMEO does NOT bound: on BSD-derived kernels (macOS
+        // included), sendto() to a destination whose ARP entry hasn't
+        // resolved (host powered off/unplugged, wrong subnet, dead route)
+        // blocks in the routing/ARP layer below the socket send-buffer wait
+        // that SO_SNDTIMEO guards, so that timeout never fires. Every caller
+        // of SendTo() runs on the main UI thread from the show's own output
+        // timer, so any unbounded block here freezes the whole application.
+        // Only a genuinely non-blocking socket guarantees sendto() can never
+        // suspend this thread: it fails immediately with EWOULDBLOCK/EAGAIN
+        // instead (SendTo() already treats any send failure as "drop this
+        // packet, try again next frame" - see e.g. KinetOutput::EndFrame).
+#ifdef _WIN32
+        u_long nonBlocking = 1;
+        ioctlsocket(_socket, FIONBIO, &nonBlocking);
+#else
+        int flags = fcntl(_socket, F_GETFL, 0);
+        if (flags != -1) {
+            fcntl(_socket, F_SETFL, flags | O_NONBLOCK);
+        }
+#endif
+
         _lastError.clear();
         return true;
     }

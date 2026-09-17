@@ -3363,7 +3363,7 @@ bool xLightsFrame::CopyFiles(const wxString& wildcard, wxDir& srcDir, wxString& 
             wxULongLong fsize = srcFile.GetSize();
             if (!forceallfiles && fsize > MAXBACKUPFILE_MB * 1024 * 1024) // skip any xml files > MAXBACKUPFILE_MB mbytes, they are something other than xml files
             {
-                spdlog::warn("    Skipping file as it is too large.");
+                spdlog::warn("    Skipping file as it is too large: {}",(const char*)(srcFile.GetFullPath()).c_str());
                 continue;
             }
 

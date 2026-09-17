@@ -1942,20 +1942,30 @@ void PixelTestDialog::UpdateMHPrimaryFixture(Model* m)
     if (newPrimary == _mhPrimaryFixture) {
         return;
     }
+
+    // Track the fixture's channels in _channelTracker exactly like the
+    // Outputs/ModelGroups/Models/Controllers trees do when a checkbox is
+    // toggled - deselect the outgoing fixture, select the incoming one - so
+    // "Don't send data to unused outputs" (ApplySuspend(), driven by this
+    // tracker) doesn't suspend the very fixture this tab is driving, and so
+    // whichever tab is visited after this one sees an accurate tracker
+    // instead of one that still thinks a since-abandoned fixture is selected.
+    if (_mhPrimaryFixture != nullptr) {
+        _channelTracker.RemoveRange(_mhPrimaryFixture->GetFirstChannel() + 1, _mhPrimaryFixture->GetLastChannel() + 1);
+    }
+    if (newPrimary != nullptr) {
+        _channelTracker.AddRange(newPrimary->GetFirstChannel() + 1, newPrimary->GetLastChannel() + 1);
+    }
+    _checkChannelList = true;
+
     _mhPrimaryFixture = newPrimary;
 
     if (PanelMovingHead != nullptr) {
+        // The tab itself is always open/selectable (see BuildMovingHeadTab) -
+        // this is what actually greys the page out while nothing moving-
+        // head-shaped is selected on "Model", by disabling every control on
+        // it rather than kicking the user out of the tab.
         PanelMovingHead->Enable(_mhPrimaryFixture != nullptr);
-        if (_mhPrimaryFixture == nullptr) {
-            // The Moving Head tab is only selectable while a moving head is
-            // selected on "Model" (see the wxEVT_NOTEBOOK_PAGE_CHANGING veto
-            // in BuildMovingHeadTab) - if the selection there just changed
-            // out from under an already-open Moving Head tab, back out of it.
-            int mhPage = Notebook2->FindPage(PanelMovingHead);
-            if (mhPage != wxNOT_FOUND && Notebook2->GetSelection() == mhPage) {
-                Notebook2->SetSelection(0);
-            }
-        }
     }
 
     // The fixture's abilities decide which color/feature widgets are shown.
@@ -2102,17 +2112,6 @@ void PixelTestDialog::BuildMovingHeadTab()
     scroller->FitInside();
 
     Notebook2->AddPage(PanelMovingHead, _("Moving Head"), false);
-
-    // wxNotebook has no cross-platform "disable this one tab" API, so
-    // "greyed out and not selectable" is done by vetoing the switch and
-    // disabling the page's own content (below, in UpdateMHPrimaryFixture) -
-    // clicking the tab while nothing moving-head-shaped is selected on the
-    // "Model" tab just does nothing, rather than showing an unusable page.
-    Notebook2->Bind(wxEVT_NOTEBOOK_PAGE_CHANGING, [this](wxNotebookEvent& event) {
-        if (Notebook2->GetPage(event.GetSelection()) == PanelMovingHead && _mhPrimaryFixture == nullptr) {
-            event.Veto();
-        }
-    });
 
     // Show the at-rest defaults immediately, even before the "Model" tab has
     // ever selected anything (e.g. a show with zero models).
@@ -3970,9 +3969,36 @@ void PixelTestDialog::OnTimer(long curtime)
         // model, so this tab bypasses it entirely. The fixture is whatever's
         // selected on the "Model" tab (see UpdateMHPrimaryFixture) - nothing
         // to drive if that's not a moving head.
+
+        // Keep _lastNotebookSelection current even on this early-return path,
+        // so that leaving this tab for any other one is seen as a genuine
+        // change below (rather than comparing against a notebookSelection
+        // value that's been stale since before this tab was ever visited),
+        // and reapply suspend/selection state (_channelTracker was just
+        // updated for this fixture by UpdateMHPrimaryFixture) the same way
+        // every other tab does when its selection changes.
+        if (notebookSelection != _lastNotebookSelection) {
+            _lastNotebookSelection = notebookSelection;
+            _checkChannelList = true;
+        }
+        if (_checkChannelList) {
+            xltest::TestPatternEngine::ApplySuspend(_outputManager, _channelTracker,
+                                                    CheckBox_SuppressUnusedOutputs->GetValue());
+            _checkChannelList = false;
+        }
+
         if (_mhPrimaryFixture != nullptr) {
             xltest::MHTestState state = BuildMHTestState();
-            _mhTestEngine.Frame(_outputManager, _mhPrimaryFixture, state);
+            // Computed once per frame and reused below (network send, Raw
+            // DMX readout, preview) - BuildFrameBytes() walks every ability/
+            // feature on the fixture, so recomputing it 2-3x a frame here
+            // was pure waste.
+            std::vector<uint8_t> bytes = _mhTestEngine.BuildFrameBytes(_mhPrimaryFixture, state);
+            // Gate transmission by _channelTracker (the Outputs/Models/etc.
+            // trees' checked state) exactly like every other test tab does
+            // via GetCheckedItems() - unchecking a channel here should stop
+            // driving it, not just stop showing it as selected.
+            _mhTestEngine.SendFrameBytes(_outputManager, _mhPrimaryFixture, bytes, &_channelTracker);
             StatusBar1->SetLabelText(_mhTestEngine.GetStatus());
 
             // Refresh the Raw DMX section from the same bytes Frame() just
@@ -3980,12 +4006,22 @@ void PixelTestDialog::OnTimer(long curtime)
             // tab is currently driving. Channels with a pinned manual
             // override (raw-only channels with no higher-level control -
             // see ApplyRawDMXChannelToControls) get forced to that value
-            // here too, and pushed onto the real output directly, since
-            // Frame()/BuildFrameBytes() have no notion of them.
-            std::vector<uint8_t> rawBytes = _mhTestEngine.BuildFrameBytes(_mhPrimaryFixture, state);
+            // here too, and pushed onto the real output directly (same
+            // checked-channel gate as above), since Frame()/BuildFrameBytes()
+            // have no notion of them.
+            std::vector<uint8_t> rawBytes = bytes;
             uint32_t rawFirstChannel = _mhPrimaryFixture->GetFirstChannel();
+            // Mirror SendFrameBytes()'s own checked-channel gate here so the
+            // readout never claims a channel is still at its computed value
+            // when what's actually on the wire (or would be, if this
+            // channel had no pinned override below) is 0.
+            for (size_t i = 0; i < rawBytes.size(); ++i) {
+                if (!_channelTracker.IsChannelOn((long)(rawFirstChannel + i + 1))) {
+                    rawBytes[i] = 0;
+                }
+            }
             for (size_t i = 0; i < rawBytes.size() && i < _mhRawDmxOverride.size(); ++i) {
-                if (_mhRawDmxOverride[i] >= 0) {
+                if (_mhRawDmxOverride[i] >= 0 && _channelTracker.IsChannelOn((long)(rawFirstChannel + i + 1))) {
                     rawBytes[i] = (uint8_t)_mhRawDmxOverride[i];
                     _outputManager->SetOneChannel((int32_t)(rawFirstChannel + i), rawBytes[i]);
                 }
@@ -4015,7 +4051,7 @@ void PixelTestDialog::OnTimer(long curtime)
             // read as "still the same frame" forever and the freshly written
             // motor channels would never reach the drawn angle.
             _modelPreview->setCurrentFrameTime((uint32_t)curtime);
-            _mhTestEngine.ApplyToPreview(_mhPrimaryFixture, state);
+            _mhTestEngine.ApplyBytesToPreview(_mhPrimaryFixture, bytes);
             RenderModel();
         }
         return;
@@ -4082,6 +4118,14 @@ void PixelTestDialog::OnCheckBox_OutputToLightsClick(wxCommandEvent& event)
         Timer1.Stop();
         wxTimerEvent ev(Timer1);
         OnTimer1Trigger(ev);
+        // Undo whatever ApplySuspend()/SetSuspend() left behind (e.g. from
+        // "Don't send data to unused outputs") before releasing the
+        // outputs - these Output objects are the same ones real playback
+        // uses, so a suspend flag left set here would silently blackhole
+        // those channels the next time something outside this dialog tries
+        // to output, with no further code path in this session left to
+        // clear it.
+        SetSuspend(false);
         _outputManager->StopOutput();
         SetConfigBool("OutputActive", false);
         _uploadedControllers.clear();
@@ -4356,6 +4400,14 @@ void PixelTestDialog::OnClose(wxCloseEvent& event)
         _outputManager->StopOutput();
         SetConfigBool("OutputActive", false);
     }
+
+    // Guarantee no Output is left suspended when this dialog goes away -
+    // these are the same Output objects real playback uses, and nothing
+    // outside this dialog ever un-suspends them, so a stale suspend flag
+    // here (e.g. left by "Don't send data to unused outputs", or by the
+    // Moving Head tab's own tracked selection) would silently blackhole
+    // those channels the next time anything else tries to output.
+    SetSuspend(false);
 
     auto* config = GetXLightsConfig();
     config->Write("xLightsTestSettings", wxString(SerialiseSettings()));

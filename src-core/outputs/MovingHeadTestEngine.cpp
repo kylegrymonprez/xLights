@@ -11,6 +11,7 @@
 #include "MovingHeadTestEngine.h"
 
 #include "OutputManager.h"
+#include "ChannelTracker.h"
 #include "../models/DMX/DmxMovingHeadComm.h"
 #include "../models/DMX/DmxMovingHeadAdv.h"
 #include "../models/DMX/DmxMotor.h"
@@ -60,8 +61,8 @@ MHTestState MovingHeadTestEngine::HomeState(const DmxMovingHeadComm* fixture)
 {
     MHTestState state;
     state.dimmer = 255;
-    state.panDegrees = 90.0f;
-    state.tiltDegrees = 180.0f;
+    state.panDegrees = 0.0f;
+    state.tiltDegrees = 0.0f;
     state.shutterValue = (fixture != nullptr && fixture->HasShutterAbility())
         ? fixture->GetShutterAbility()->GetShutterOnValue()
         : 255;
@@ -148,19 +149,43 @@ std::vector<uint8_t> MovingHeadTestEngine::BuildFrameBytes(const DmxMovingHeadCo
     return bytes;
 }
 
-void MovingHeadTestEngine::Frame(OutputManager* outputManager, const DmxMovingHeadComm* fixture, const MHTestState& state)
+void MovingHeadTestEngine::Frame(OutputManager* outputManager, const DmxMovingHeadComm* fixture, const MHTestState& state, const ChannelTracker* enabledChannels)
 {
     if (outputManager == nullptr || fixture == nullptr) {
         return;
     }
 
     std::vector<uint8_t> bytes = BuildFrameBytes(fixture, state);
-    if (bytes.empty()) {
+    SendFrameBytes(outputManager, fixture, bytes, enabledChannels);
+}
+
+void MovingHeadTestEngine::SendFrameBytes(OutputManager* outputManager, const DmxMovingHeadComm* fixture, std::vector<uint8_t>& bytes, const ChannelTracker* enabledChannels)
+{
+    if (outputManager == nullptr || fixture == nullptr || bytes.empty()) {
         return;
     }
 
     uint32_t firstChannel = fixture->GetFirstChannel();
-    outputManager->SetManyChannels((int32_t)firstChannel, bytes.data(), bytes.size());
+    if (enabledChannels == nullptr) {
+        outputManager->SetManyChannels((int32_t)firstChannel, bytes.data(), bytes.size());
+    } else {
+        // Channel numbers in the tracker are absolute and 1-based; bytes[i]
+        // is relative channel i+1 within this fixture (BuildFrameBytes'
+        // convention).
+        //
+        // A channel unchecked on e.g. the Outputs tab is driven to 0, not
+        // just left unwritten - Output::EndFrame() re-transmits its last
+        // buffered byte on its own periodic cadence regardless of whether a
+        // new SetOneChannel() call happened this frame (Output::
+        // NeedToOutput() - a keep-alive so real fixtures don't time out),
+        // so merely skipping the write here would leave that channel replaying
+        // whatever non-zero value it last held from before it was unchecked,
+        // which looks indistinguishable from "still being driven."
+        for (size_t i = 0; i < bytes.size(); ++i) {
+            uint8_t v = enabledChannels->IsChannelOn((long)(firstChannel + i + 1)) ? bytes[i] : 0;
+            outputManager->SetOneChannel((int32_t)(firstChannel + i), v);
+        }
+    }
 
     _status = fmt::format("{} : channels {}-{}", fixture->GetName(), firstChannel + 1, firstChannel + bytes.size());
 }
@@ -171,7 +196,15 @@ void MovingHeadTestEngine::ApplyToPreview(DmxMovingHeadComm* fixture, const MHTe
         return;
     }
 
-    std::vector<uint8_t> bytes = BuildFrameBytes(fixture, state);
+    ApplyBytesToPreview(fixture, BuildFrameBytes(fixture, state));
+}
+
+void MovingHeadTestEngine::ApplyBytesToPreview(DmxMovingHeadComm* fixture, const std::vector<uint8_t>& bytes) const
+{
+    if (fixture == nullptr) {
+        return;
+    }
+
     for (size_t i = 0; i < bytes.size(); ++i) {
         uint8_t v = bytes[i];
         fixture->SetNodeColor(i, xlColor(v, v, v));

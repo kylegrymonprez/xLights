@@ -19,6 +19,7 @@
 
 class OutputManager;
 class DmxMovingHeadComm;
+class ChannelTracker;
 
 namespace xltest {
 
@@ -88,8 +89,22 @@ public:
     static MHTestState HomeState(const DmxMovingHeadComm* fixture);
 
     // Emits one frame for `fixture` at `state`. Caller brackets this with
-    // OutputManager::StartFrame/EndFrame as usual.
-    void Frame(OutputManager* outputManager, const DmxMovingHeadComm* fixture, const MHTestState& state);
+    // OutputManager::StartFrame/EndFrame as usual. `enabledChannels`, if
+    // given, gates transmission the same way the other Tools > Test tabs
+    // gate theirs via GetCheckedItems() - a channel absent/off in the
+    // tracker (e.g. unchecked on the Outputs tab) is driven to 0 rather
+    // than its computed value. Driven, not just left unwritten: Output::
+    // EndFrame() re-transmits its last buffered byte on its own periodic
+    // cadence regardless of new writes (a keep-alive so real fixtures don't
+    // time out), so merely skipping the write would leave a deselected
+    // channel replaying whatever non-zero value it last held. Pass nullptr
+    // (the default) to send every channel unconditionally.
+    void Frame(OutputManager* outputManager, const DmxMovingHeadComm* fixture, const MHTestState& state, const ChannelTracker* enabledChannels = nullptr);
+
+    // Same as Frame(), but for a caller that already called BuildFrameBytes()
+    // itself this frame (e.g. to also drive a raw-DMX readout) and wants to
+    // send those same bytes without paying for a second BuildFrameBytes().
+    void SendFrameBytes(OutputManager* outputManager, const DmxMovingHeadComm* fixture, std::vector<uint8_t>& bytes, const ChannelTracker* enabledChannels = nullptr);
 
     // Writes state's per-channel bytes directly into fixture's own node
     // colors (Model::SetNodeColor) instead of sending them out over DMX, so
@@ -99,6 +114,10 @@ public:
     // (DmxModel::InitModel creates exactly one node per channel), the same
     // convention Frame()'s byte buffer uses.
     void ApplyToPreview(DmxMovingHeadComm* fixture, const MHTestState& state) const;
+
+    // Same as ApplyToPreview(), but for already-computed bytes - see
+    // SendFrameBytes().
+    void ApplyBytesToPreview(DmxMovingHeadComm* fixture, const std::vector<uint8_t>& bytes) const;
 
     // Human-readable one-liner for the status bar.
     const std::string& GetStatus() const { return _status; }
